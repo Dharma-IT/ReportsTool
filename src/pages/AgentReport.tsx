@@ -40,7 +40,7 @@ type AgentReportResponse = {
 }
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
-const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/$/, '')
+const configuredSupabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/$/, '')
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
 const agentReportCachePrefix = 'dharma-agent-report:'
 
@@ -119,16 +119,20 @@ function cacheReport(report: AgentReportResponse) {
 }
 
 async function loadSavedReportFromSupabase(reportDate: string) {
-  if (!supabaseUrl || !supabaseAnonKey) {
+  if (!configuredSupabaseUrl || !supabaseAnonKey) {
     throw new Error('Online report storage is not configured.')
   }
+
+  const supabaseRestUrl = configuredSupabaseUrl.endsWith('/rest/v1')
+    ? configuredSupabaseUrl
+    : `${configuredSupabaseUrl}/rest/v1`
 
   const params = new URLSearchParams({
     report_date: `eq.${reportDate}`,
     select: 'report_data',
     limit: '1',
   })
-  const response = await fetch(`${supabaseUrl}/rest/v1/agent_reports?${params}`, {
+  const response = await fetch(`${supabaseRestUrl}/agent_reports?${params}`, {
     headers: {
       apikey: supabaseAnonKey,
       Authorization: `Bearer ${supabaseAnonKey}`,
