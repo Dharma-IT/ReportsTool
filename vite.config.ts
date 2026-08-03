@@ -27,14 +27,14 @@ const AGENT_REPORT_AGENTS = [
   { name: 'Kevin Tinjaca', aliases: ['Kevin Tinjaca'] },
 ]
 const STAFF_PERFORMANCE_REPORT = [
-  { name: 'Carol Fernandes', respondAliases: ['Carolina Lopez'], hasCalls: false },
-  { name: 'Ailene Nuevas', respondAliases: ['Ailene Nuevas'], hasCalls: true },
-  { name: 'Laura Sanchez', respondAliases: ['Laura Sanchez'], hasCalls: true },
-  { name: 'Natasha Lopez', respondAliases: ['Natasha Lopez'], hasCalls: true },
-  { name: 'Natasha Lorente', respondAliases: ['Jose Lorente'], hasCalls: false },
-  { name: 'William Carcamo', respondAliases: ['William Carcamo'], hasCalls: true },
-  { name: 'Kathering Silva', respondAliases: ['Kathering Silva'], hasCalls: true },
-  { name: 'Kevin Tinjaca', respondAliases: ['Kevin Tinjaca'], hasCalls: true },
+  { name: 'Carol Fernandes', respondAliases: ['Carolina Lopez'], hubSpotAliases: ['Carol Fernandes'], hasCalls: false },
+  { name: 'Ailene Nuevas', respondAliases: ['Ailene Nuevas'], hubSpotAliases: ['Ailene Nuevas', 'Aline Strelow'], hasCalls: true },
+  { name: 'Laura Sanchez', respondAliases: ['Laura Sanchez'], hubSpotAliases: ['Laura Sanchez'], hasCalls: true },
+  { name: 'Natasha Lopez', respondAliases: ['Natasha Lopez'], hubSpotAliases: ['Natasha Lopez'], hasCalls: true },
+  { name: 'Natasha Lorente', respondAliases: ['Jose Lorente'], hubSpotAliases: ['Natasha Lorente'], hasCalls: false },
+  { name: 'William Carcamo', respondAliases: ['William Carcamo'], hubSpotAliases: ['William Carcamo'], hasCalls: true },
+  { name: 'Kathering Silva', respondAliases: ['Kathering Silva'], hubSpotAliases: ['Kathering Silva'], hasCalls: true },
+  { name: 'Kevin Tinjaca', respondAliases: ['Kevin Tinjaca'], hubSpotAliases: ['Kevin Tinjaca'], hasCalls: true },
 ]
 // The Public Calls API marks these as missed, but dashboard review confirmed that
 // an agent attempted to answer after the caller had already disconnected.
@@ -929,9 +929,21 @@ function agentReportApi(
                 call.answered_at !== null &&
                 call.ended_at - call.answered_at > 30,
             ).length
-            const bookingsByMessages =
-              hubSpotBookings?.get(`${name.toLowerCase()}|message`) ?? null
-            const bookingsByCall = hubSpotBookings?.get(`${name.toLowerCase()}|call`) ?? null
+            const hubSpotAliases =
+              STAFF_PERFORMANCE_REPORT.find((candidate) => candidate.name === name)
+                ?.hubSpotAliases ?? [name]
+            const bookingsByMessages = hubSpotBookings === null
+              ? null
+              : hubSpotAliases.reduce(
+                  (sum, alias) => sum + (hubSpotBookings.get(`${alias.toLowerCase()}|message`) ?? 0),
+                  0,
+                )
+            const bookingsByCall = hubSpotBookings === null
+              ? null
+              : hubSpotAliases.reduce(
+                  (sum, alias) => sum + (hubSpotBookings.get(`${alias.toLowerCase()}|call`) ?? 0),
+                  0,
+                )
 
             return {
               name,
@@ -1298,60 +1310,95 @@ async function fetchHubSpotStaffBookings(reportDate: string, token: string) {
   if (!token) throw new Error('HubSpot reporting is not configured.')
   const { from, to } = getNewYorkUnixDayRange(reportDate)
   const bookings = new Map<string, number>()
+  const meetingIds: string[] = []
   let after: string | undefined
 
   do {
     const response = await hubSpotPost<{
-      results?: Array<{
-        properties: {
-          agent_lead_management?: string | null
-          chanel?: string | null
-        }
-      }>
+      results?: Array<{ id: string }>
       paging?: { next?: { after?: string } }
     }>(
-      '/crm/v3/objects/contacts/search',
+      '/crm/v3/objects/meetings/search',
       {
         filterGroups: [
           {
             filters: [
               {
-                propertyName: 'engagements_last_meeting_booked',
+                propertyName: 'hs_createdate',
                 operator: 'GTE',
                 value: String(from * 1000),
               },
               {
-                propertyName: 'engagements_last_meeting_booked',
+                propertyName: 'hs_createdate',
                 operator: 'LTE',
                 value: String(to * 1000),
               },
             ],
           },
         ],
-        properties: ['agent_lead_management', 'chanel'],
+        properties: ['hs_createdate'],
         limit: 200,
         ...(after ? { after } : {}),
       },
       token,
     )
-
-    for (const contact of response.results ?? []) {
-      const staffName = contact.properties.agent_lead_management?.trim().toLowerCase()
-      const channel = contact.properties.chanel?.trim().toLowerCase()
-      if (!staffName || (channel !== 'call' && channel !== 'message')) continue
-      const key = `${staffName}|${channel}`
-      bookings.set(key, (bookings.get(key) ?? 0) + 1)
-    }
+    meetingIds.push(...(response.results ?? []).map((meeting) => meeting.id))
     after = response.paging?.next?.after
   } while (after)
 
-  for (const { name } of STAFF_PERFORMANCE_REPORT) {
-    bookings.set(`${name.toLowerCase()}|call`, bookings.get(`${name.toLowerCase()}|call`) ?? 0)
-    bookings.set(
-      `${name.toLowerCase()}|message`,
-      bookings.get(`${name.toLowerCase()}|message`) ?? 0,
-    )
+  const meetingToContact = new Map<string, string>()
+  for (let index = 0; index < meetingIds.length; index += 100) {
+    const ids = meetingIds.slice(index, index + 100)
+    const associations = await hubSpotPost<{
+      results?: Array<{
+        from: { id: string }
+        to: Array<{ toObjectId: number }>
+      }>
+    }>('/crm/v4/associations/meetings/contacts/batch/read', {
+      inputs: ids.map((id) => ({ id })),
+    }, token)
+
+    for (const association of associations.results ?? []) {
+      const contactId = association.to[0]?.toObjectId
+      if (contactId) meetingToContact.set(String(association.from.id), String(contactId))
+    }
   }
+
+  const contactIds = [...new Set(meetingToContact.values())]
+  const contacts = new Map<string, { agent?: string | null; channel?: string | null }>()
+  for (let index = 0; index < contactIds.length; index += 100) {
+    const ids = contactIds.slice(index, index + 100)
+    const batch = await hubSpotPost<{
+      results?: Array<{
+        id: string
+        properties: {
+          agent_lead_management?: string | null
+          chanel?: string | null
+        }
+      }>
+    }>('/crm/v3/objects/contacts/batch/read', {
+      properties: ['agent_lead_management', 'chanel'],
+      inputs: ids.map((id) => ({ id })),
+    }, token)
+
+    for (const contact of batch.results ?? []) {
+      contacts.set(String(contact.id), {
+        agent: contact.properties.agent_lead_management,
+        channel: contact.properties.chanel,
+      })
+    }
+  }
+
+  for (const meetingId of meetingIds) {
+    const contactId = meetingToContact.get(meetingId)
+    const contact = contactId ? contacts.get(contactId) : undefined
+    const staffName = contact?.agent?.trim().toLowerCase()
+    const channel = contact?.channel?.trim().toLowerCase()
+    if (!staffName || (channel !== 'call' && channel !== 'message')) continue
+    const key = `${staffName}|${channel}`
+    bookings.set(key, (bookings.get(key) ?? 0) + 1)
+  }
+
   return bookings
 }
 
