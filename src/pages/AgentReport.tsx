@@ -40,6 +40,8 @@ type AgentReportResponse = {
 }
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/\/$/, '')
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
 const agentReportCachePrefix = 'dharma-agent-report:'
 
 function getApiUrl(path: string) {
@@ -116,6 +118,34 @@ function cacheReport(report: AgentReportResponse) {
   }
 }
 
+async function loadSavedReportFromSupabase(reportDate: string) {
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error('Online report storage is not configured.')
+  }
+
+  const params = new URLSearchParams({
+    report_date: `eq.${reportDate}`,
+    select: 'report_data',
+    limit: '1',
+  })
+  const response = await fetch(`${supabaseUrl}/rest/v1/agent_reports?${params}`, {
+    headers: {
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${supabaseAnonKey}`,
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error('Unable to read the saved online report.')
+  }
+
+  const rows = (await response.json()) as Array<{ report_data: AgentReportResponse }>
+  if (!rows.length) {
+    throw new Error('No saved report exists for this date. Use Fetch Live to create it.')
+  }
+  return rows[0].report_data
+}
+
 function AgentReport() {
   const [draftDate, setDraftDate] = useState(getNewYorkDate)
   const [report, setReport] = useState<AgentReportResponse | null>(null)
@@ -142,10 +172,33 @@ function AgentReport() {
     setLoadingMode(mode)
     setError('')
     try {
-      const params = new URLSearchParams({ date: draftDate, mode })
-      const response = await fetch(getApiUrl(`/api/agent-report?${params}`))
-      const payload = (await response.json()) as AgentReportResponse
-      if (!response.ok) throw new Error(payload.message ?? 'Unable to load agent report.')
+      let payload: AgentReportResponse
+
+      if (mode === 'saved') {
+        try {
+          const params = new URLSearchParams({ date: draftDate, mode })
+          const response = await fetch(getApiUrl(`/api/agent-report?${params}`))
+          if (!response.ok) throw new Error('Saved-report API unavailable.')
+          payload = (await response.json()) as AgentReportResponse
+        } catch {
+          payload = await loadSavedReportFromSupabase(draftDate)
+        }
+      } else {
+        const params = new URLSearchParams({ date: draftDate, mode })
+        const response = await fetch(getApiUrl(`/api/agent-report?${params}`))
+        const responseText = await response.text()
+        let livePayload: AgentReportResponse | null = null
+        try {
+          livePayload = responseText ? (JSON.parse(responseText) as AgentReportResponse) : null
+        } catch {
+          // A stale deployment may return an HTML 404 instead of an API response.
+        }
+        if (!response.ok || !livePayload) {
+          throw new Error(livePayload?.message ?? 'Unable to fetch the live agent report.')
+        }
+        payload = livePayload
+      }
+
       cacheReport(payload)
       setReport(withoutRemovedAgents(payload))
     } catch (loadError) {

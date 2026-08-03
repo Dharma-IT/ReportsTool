@@ -100,7 +100,15 @@ alter table public.agent_reports enable row level security;
 -- No anon policies are intentionally created for aircall_call_events. Only the
 -- server-side service role may read or write raw webhook payloads.
 -- Agent reports are also server-only: the public dashboard reads them through
--- /api/agent-report so the service-role key never reaches the browser.
+-- /api/agent-report when available. Saved report snapshots may also be read by
+-- the public dashboard; raw Aircall event payloads remain server-only.
+
+drop policy if exists "Allow anon read agent reports" on public.agent_reports;
+create policy "Allow anon read agent reports"
+on public.agent_reports
+for select
+to anon
+using (true);
 
 drop policy if exists "Allow anon read respond io conversations" on public.respond_io_conversations;
 create policy "Allow anon read respond io conversations"
