@@ -3,6 +3,7 @@ import AgentReport from './pages/AgentReport'
 import CampaignDashboard from './pages/CampaignDashboard'
 import MissedCalls from './pages/MissedCalls'
 import HomeDashboard from './pages/HomeDashboard'
+import CampaignPinLock from './components/CampaignPinLock'
 
 type AppRoute = {
   path: string
@@ -59,7 +60,9 @@ function App() {
       ) : activeRoute === '/agent-report' ? (
         <AgentReport />
       ) : (
-        <CampaignDashboard />
+        <CampaignPinLock>
+          <CampaignDashboard />
+        </CampaignPinLock>
       )}
     </>
   )

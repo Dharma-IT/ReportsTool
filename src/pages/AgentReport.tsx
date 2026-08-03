@@ -40,6 +40,7 @@ type AgentReportResponse = {
 }
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+const agentReportCachePrefix = 'dharma-agent-report:'
 
 function getApiUrl(path: string) {
   const base = ['localhost', '127.0.0.1'].includes(window.location.hostname) ? '' : apiBaseUrl
@@ -94,6 +95,27 @@ function withoutRemovedAgents(report: AgentReportResponse): AgentReportResponse 
   }
 }
 
+function readCachedReport(reportDate: string) {
+  try {
+    const cached = localStorage.getItem(`${agentReportCachePrefix}${reportDate}`)
+    if (!cached) return null
+    const report = JSON.parse(cached) as AgentReportResponse
+    return report.reportDate === reportDate && Array.isArray(report.agents) && Array.isArray(report.staff)
+      ? report
+      : null
+  } catch {
+    return null
+  }
+}
+
+function cacheReport(report: AgentReportResponse) {
+  try {
+    localStorage.setItem(`${agentReportCachePrefix}${report.reportDate}`, JSON.stringify(report))
+  } catch {
+    // Storage may be unavailable in private browsing; the server copy still remains available.
+  }
+}
+
 function AgentReport() {
   const [draftDate, setDraftDate] = useState(getNewYorkDate)
   const [report, setReport] = useState<AgentReportResponse | null>(null)
@@ -105,6 +127,17 @@ function AgentReport() {
 
   async function loadReport(mode: 'saved' | 'live') {
     if (!draftDate) return
+
+    if (mode === 'saved') {
+      const cachedReport = readCachedReport(draftDate)
+      if (cachedReport) {
+        setReport(withoutRemovedAgents(cachedReport))
+        setError('')
+        setRespondLoginMessage('')
+        return
+      }
+    }
+
     setIsLoading(true)
     setLoadingMode(mode)
     setError('')
@@ -113,6 +146,7 @@ function AgentReport() {
       const response = await fetch(getApiUrl(`/api/agent-report?${params}`))
       const payload = (await response.json()) as AgentReportResponse
       if (!response.ok) throw new Error(payload.message ?? 'Unable to load agent report.')
+      cacheReport(payload)
       setReport(withoutRemovedAgents(payload))
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load agent report.')
