@@ -146,7 +146,10 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
 })
 
 const numberFormatter = new Intl.NumberFormat('en-US')
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+const apiBaseUrl = configuredApiBaseUrl === 'https://dharma-campaignreport-1.onrender.com'
+  ? 'https://dharma-campaignreport-503z.onrender.com'
+  : configuredApiBaseUrl
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
 const respondIoReportsUrl = 'https://app.respond.io/space/238284/reports/conversations'

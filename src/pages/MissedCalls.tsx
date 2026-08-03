@@ -54,7 +54,10 @@ type CallConfirmationResponse = {
   message?: string
 }
 
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+const apiBaseUrl = configuredApiBaseUrl === 'https://dharma-campaignreport-1.onrender.com'
+  ? 'https://dharma-campaignreport-503z.onrender.com'
+  : configuredApiBaseUrl
 
 function getActiveApiBaseUrl() {
   if (typeof window === 'undefined') {
