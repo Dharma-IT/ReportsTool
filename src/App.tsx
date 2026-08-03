@@ -2,6 +2,7 @@ import './App.css'
 import AgentReport from './pages/AgentReport'
 import CampaignDashboard from './pages/CampaignDashboard'
 import MissedCalls from './pages/MissedCalls'
+import HomeDashboard from './pages/HomeDashboard'
 
 type AppRoute = {
   path: string
@@ -9,6 +10,7 @@ type AppRoute = {
 }
 
 const routes: AppRoute[] = [
+  { path: '/', label: 'Home' },
   { path: '/campaign', label: 'Campaign' },
   { path: '/missed-calls', label: 'Missed Calls' },
   { path: '/agent-report', label: 'Agent Report' },
@@ -17,15 +19,11 @@ const routes: AppRoute[] = [
 function getActiveRoute() {
   const pathname = window.location.pathname.replace(/\/$/, '') || '/'
 
-  if (pathname === '/' || pathname === '/campaign') {
-    return '/campaign'
-  }
-
   if (routes.some((route) => route.path === pathname)) {
     return pathname
   }
 
-  return '/campaign'
+  return '/'
 }
 
 function App() {
@@ -35,8 +33,9 @@ function App() {
     <>
       <nav className="dashboard-nav" aria-label="Dashboard sections">
         <div className="dashboard-nav-inner">
-          <a className="dashboard-nav-brand" href="/campaign">
-            Dharma Dashboard
+          <a className="dashboard-nav-brand" href="/">
+            <img src="/logo1.png" alt="" />
+            <span>Dharma Dashboard</span>
           </a>
           <div className="dashboard-nav-links">
             {routes.map((route) => (
@@ -53,7 +52,9 @@ function App() {
         </div>
       </nav>
 
-      {activeRoute === '/missed-calls' ? (
+      {activeRoute === '/' ? (
+        <HomeDashboard />
+      ) : activeRoute === '/missed-calls' ? (
         <MissedCalls />
       ) : activeRoute === '/agent-report' ? (
         <AgentReport />
