@@ -237,6 +237,19 @@ function AgentReport() {
   const secondaryAgentNames = new Set(['Kathering Silva', 'Kevin Tinjaca'])
   const primaryAgents = report?.agents.filter((agent) => !secondaryAgentNames.has(agent.name)) ?? []
   const secondaryAgents = report?.agents.filter((agent) => secondaryAgentNames.has(agent.name)) ?? []
+  const primaryStaff = report?.staff.filter((row) => !secondaryAgentNames.has(row.name)) ?? []
+  const savedSecondaryStaff = report?.staff.filter((row) => secondaryAgentNames.has(row.name)) ?? []
+  const secondaryStaff = secondaryAgents.map((agent) =>
+    savedSecondaryStaff.find((row) => row.name === agent.name) ?? {
+      name: agent.name,
+      messages: null,
+      calls: agent.outbound,
+      connectedOver30Seconds: null,
+      bookingsByMessages: null,
+      bookingsByCall: null,
+      totalBookings: null,
+    },
+  )
 
   const renderAgentTable = (agents: AgentReportResponse['agents'], label: string) => (
     <div className="agent-report-table-card" aria-label={label}>
@@ -258,6 +271,45 @@ function AgentReport() {
   )
 
   const renderMetric = (value: number | null) => value ?? '—'
+
+  const renderStaffTable = (rows: AgentReportResponse['staff'], label: string) => {
+    const sumNullable = (values: Array<number | null>) =>
+      values.some((value) => value === null)
+        ? null
+        : values.reduce<number>((sum, value) => sum + (value ?? 0), 0)
+    const totals = {
+      messages: rows.reduce((sum, row) => sum + (row.messages ?? 0), 0),
+      calls: rows.reduce((sum, row) => sum + (row.calls ?? 0), 0),
+      connected: rows.reduce((sum, row) => sum + (row.connectedOver30Seconds ?? 0), 0),
+      messageBookings: sumNullable(rows.map((row) => row.bookingsByMessages)),
+      callBookings: sumNullable(rows.map((row) => row.bookingsByCall)),
+      bookings: sumNullable(rows.map((row) => row.totalBookings)),
+    }
+
+    return (
+      <div className="agent-report-table-wrap" aria-label={label}>
+        <table className="agent-report-table staff-performance-table">
+          <thead><tr><th>Staff</th><th>Message</th><th>Calls</th><th>Call connected for more than 30 seconds</th><th>Bookings by messages</th><th>Bookings by call</th><th>Total booking</th></tr></thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.name}>
+                <th scope="row">{row.name}</th>
+                <td>{renderMetric(row.messages)}</td><td>{renderMetric(row.calls)}</td>
+                <td>{renderMetric(row.connectedOver30Seconds)}</td>
+                <td>{renderMetric(row.bookingsByMessages)}</td>
+                <td>{renderMetric(row.bookingsByCall)}</td><td>{renderMetric(row.totalBookings)}</td>
+              </tr>
+            ))}
+            <tr className="staff-performance-total">
+              <th scope="row">Total</th><td>{totals.messages}</td><td>{totals.calls}</td>
+              <td>{totals.connected}</td><td>{renderMetric(totals.messageBookings)}</td>
+              <td>{renderMetric(totals.callBookings)}</td><td>{renderMetric(totals.bookings)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    )
+  }
 
   return (
     <main className="dashboard-shell agent-report-page">
@@ -329,38 +381,20 @@ function AgentReport() {
                   </span>
                 ) : null}
               </div>
-              <div className="agent-report-table-wrap">
-                <table className="agent-report-table staff-performance-table">
-                  <thead>
-                    <tr>
-                      <th>Staff</th><th>Message</th><th>Calls</th>
-                      <th>Call connected for more than 30 seconds</th>
-                      <th>Bookings by messages</th><th>Bookings by call</th><th>Total booking</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {report.staff.map((row) => (
-                      <tr key={row.name}>
-                        <th scope="row">{row.name}</th>
-                        <td>{renderMetric(row.messages)}</td><td>{renderMetric(row.calls)}</td>
-                        <td>{renderMetric(row.connectedOver30Seconds)}</td>
-                        <td>{renderMetric(row.bookingsByMessages)}</td>
-                        <td>{renderMetric(row.bookingsByCall)}</td>
-                        <td>{renderMetric(row.totalBookings)}</td>
-                      </tr>
-                    ))}
-                    <tr className="staff-performance-total">
-                      <th scope="row">Total</th>
-                      <td>{report.staffTotals.messages}</td><td>{report.staffTotals.calls}</td>
-                      <td>{report.staffTotals.connectedOver30Seconds}</td>
-                      <td>{renderMetric(report.staffTotals.bookingsByMessages)}</td>
-                      <td>{renderMetric(report.staffTotals.bookingsByCall)}</td>
-                      <td>{renderMetric(report.staffTotals.totalBookings)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              {renderStaffTable(primaryStaff, 'Primary staff performance')}
               <p className="agent-report-note">Messages are outgoing respond.io messages. Bookings use HubSpot’s meeting-booked date, channel, and Agent Lead Management fields.</p>
+            </section>
+
+            <section className="staff-performance-section secondary-staff-performance" aria-labelledby="secondary-staff-performance-title">
+              <div className="staff-performance-heading">
+                <div>
+                  <p className="eyebrow">Dedicated team report</p>
+                  <h2 id="secondary-staff-performance-title">Kathering &amp; Kevin Performance</h2>
+                  <p>Messages, calls, connected conversations and bookings for the selected date.</p>
+                </div>
+              </div>
+              {renderStaffTable(secondaryStaff, 'Kathering Silva and Kevin Tinjaca performance')}
+              <p className="agent-report-note">Older saved reports may show unavailable message and booking fields until Fetch Live refreshes that date.</p>
             </section>
           </>
         ) : null}

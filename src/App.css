@@ -1675,6 +1675,21 @@ tbody tr:last-child td {
   font-weight: 900;
 }
 
+.secondary-staff-performance {
+  margin-top: 28px;
+  padding: 24px;
+  border: 1px solid rgba(52, 88, 65, 0.2);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 100% 0, rgba(243, 205, 101, 0.13), transparent 34%),
+    rgba(248, 251, 242, 0.9);
+  box-shadow: 0 18px 42px rgba(38, 64, 42, 0.08);
+}
+
+.secondary-staff-performance .eyebrow {
+  background: rgba(255, 250, 235, 0.9);
+}
+
 .agent-report-controls {
   display: flex;
   align-items: flex-end;

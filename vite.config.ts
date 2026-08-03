@@ -33,6 +33,8 @@ const STAFF_PERFORMANCE_REPORT = [
   { name: 'Natasha Lopez', respondAliases: ['Natasha Lopez'], hasCalls: true },
   { name: 'Natasha Lorente', respondAliases: ['Jose Lorente'], hasCalls: false },
   { name: 'William Carcamo', respondAliases: ['William Carcamo'], hasCalls: true },
+  { name: 'Kathering Silva', respondAliases: ['Kathering Silva'], hasCalls: true },
+  { name: 'Kevin Tinjaca', respondAliases: ['Kevin Tinjaca'], hasCalls: true },
 ]
 // The Public Calls API marks these as missed, but dashboard review confirmed that
 // an agent attempted to answer after the caller had already disconnected.
