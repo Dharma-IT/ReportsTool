@@ -198,6 +198,23 @@ type HubSpotOwner = {
   lastName?: string
 }
 
+type HubSpotDeal = {
+  id: string
+  properties: Record<string, string | null | undefined>
+}
+
+type HubSpotLineItem = {
+  id: string
+  properties: Record<string, string | null | undefined>
+}
+
+type HubSpotSearchResponse<T> = {
+  results?: T[]
+  paging?: { next?: { after?: string } }
+  total?: number
+  message?: string
+}
+
 function facebookBudgetApi(token: string): Plugin {
   return {
     name: 'facebook-budget-api',
@@ -782,6 +799,104 @@ function callConfirmationApi(hubSpotToken: string, apiId: string, apiToken: stri
           sendJson(response, 500, {
             message: error instanceof Error ? error.message : 'Unable to build call confirmation.',
           })
+        }
+      })
+    },
+  }
+}
+
+function financeReportApi(hubSpotToken: string): Plugin {
+  return {
+    name: 'hubspot-finance-report-api',
+    configureServer(server) {
+      server.middlewares.use('/api/finance-report', async (request, response) => {
+        try {
+          if (!hubSpotToken) throw new Error('HubSpot reporting is not configured.')
+          const requestUrl = new URL(request.url ?? '', 'http://localhost')
+          const reportDate = requestUrl.searchParams.get('date') || getTodayInNewYork()
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) {
+            sendJson(response, 400, { message: 'Date must use YYYY-MM-DD.' })
+            return
+          }
+
+          const { start, end } = getNewYorkMillisecondDayRange(reportDate)
+          const deals = await searchAllHubSpotObjects<HubSpotDeal>('deals', {
+            // This portal's revenue reports treat entry into either pipeline's PAID
+            // stage as the sale date. Those stages are not flagged hs_is_closed_won.
+            filterGroups: [
+              { filters: [
+                { propertyName: 'hs_v2_date_entered_1013987702', operator: 'GTE', value: start },
+                { propertyName: 'hs_v2_date_entered_1013987702', operator: 'LT', value: end },
+              ] },
+              { filters: [
+                { propertyName: 'hs_v2_date_entered_1036251695', operator: 'GTE', value: start },
+                { propertyName: 'hs_v2_date_entered_1036251695', operator: 'LT', value: end },
+              ] },
+            ],
+            properties: ['dealname', 'amount', 'net_revenue', 'value_refund'],
+          }, hubSpotToken)
+
+          const dealIds = deals.map((deal) => deal.id)
+          const associations = dealIds.length
+            ? await hubSpotPost<{ results?: Array<{ from: { id: string }; to: Array<{ toObjectId: string }> }> }>(
+                '/crm/v4/associations/deals/line_items/batch/read',
+                { inputs: dealIds.map((id) => ({ id })) },
+                hubSpotToken,
+              )
+            : { results: [] }
+          const lineItemIds = Array.from(new Set(
+            (associations.results ?? []).flatMap((row) => row.to.map((item) => item.toObjectId)),
+          ))
+          const lineItems = lineItemIds.length
+            ? await hubSpotPost<{ results?: HubSpotLineItem[] }>(
+                '/crm/v3/objects/line_items/batch/read',
+                {
+                  inputs: lineItemIds.map((id) => ({ id })),
+                  properties: ['name', 'quantity', 'price', 'amount', 'hs_cost_of_goods_sold'],
+                },
+                hubSpotToken,
+              )
+            : { results: [] }
+
+          const productRows = new Map<string, { category: string; product: string; quantity: number; revenue: number; cogs: number }>()
+          for (const item of lineItems.results ?? []) {
+            const product = item.properties.name?.trim() || 'Other'
+            const quantity = finiteNumber(item.properties.quantity, 1)
+            const revenue = finiteNumber(item.properties.amount, finiteNumber(item.properties.price) * quantity)
+            const cogs = finiteNumber(item.properties.hs_cost_of_goods_sold) * quantity
+            const key = product.toLowerCase()
+            const current = productRows.get(key) ?? {
+              category: classifyFinanceProduct(product), product, quantity: 0, revenue: 0, cogs: 0,
+            }
+            current.quantity += quantity
+            current.revenue += revenue
+            current.cogs += cogs
+            productRows.set(key, current)
+          }
+
+          const totalRevenue = deals.reduce(
+            (sum, deal) => sum + finiteNumber(deal.properties.net_revenue, finiteNumber(deal.properties.amount)), 0,
+          )
+          const itemRevenue = Array.from(productRows.values()).reduce((sum, row) => sum + row.revenue, 0)
+          if (Math.abs(totalRevenue - itemRevenue) > 0.005) {
+            productRows.set('__unallocated__', {
+              category: 'Others', product: 'Unallocated deal revenue', quantity: 0,
+              revenue: totalRevenue - itemRevenue, cogs: 0,
+            })
+          }
+
+          sendJson(response, 200, {
+            reportDate,
+            timezone: 'America/New_York',
+            fetchedAt: new Date().toISOString(),
+            dealCount: deals.length,
+            rows: Array.from(productRows.values()).sort((a, b) => b.revenue - a.revenue),
+            totalRevenue,
+            cogs: Array.from(productRows.values()).reduce((sum, row) => sum + row.cogs, 0),
+            revenueLoss: { cancelled: 0, dispute: 0, refund: deals.reduce((sum, deal) => sum + finiteNumber(deal.properties.value_refund), 0) },
+          })
+        } catch (error) {
+          sendJson(response, 500, { message: error instanceof Error ? error.message : 'Unable to build finance report.' })
         }
       })
     },
@@ -1450,6 +1565,39 @@ async function hubSpotPost<T>(path: string, body: unknown, token: string): Promi
   return payload
 }
 
+async function searchAllHubSpotObjects<T>(
+  objectType: string,
+  query: Record<string, unknown>,
+  token: string,
+) {
+  const results: T[] = []
+  let after: string | undefined
+  do {
+    const payload = await hubSpotPost<HubSpotSearchResponse<T>>(
+      `/crm/v3/objects/${objectType}/search`,
+      { ...query, limit: 100, ...(after ? { after } : {}) },
+      token,
+    )
+    results.push(...(payload.results ?? []))
+    after = payload.paging?.next?.after
+  } while (after)
+  return results
+}
+
+function finiteNumber(value: string | null | undefined, fallback = 0) {
+  if (value === null || value === undefined || value.trim() === '') return fallback
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function classifyFinanceProduct(product: string) {
+  const name = product.toLowerCase()
+  if (name.includes('subscription') || name.includes('membership')) return 'Subscription'
+  if (name.includes('supplement') || name.includes('vitamin') || name.includes('nutrition pack')) return 'Supplements'
+  if (name === 'other' || name.includes('shipping') || name.includes('fee')) return 'Others'
+  return 'Medication/Treatment'
+}
+
 function normalizePhoneNumber(value?: string | null) {
   return value?.replace(/\D/g, '') ?? ''
 }
@@ -1826,6 +1974,13 @@ function getNewYorkUnixDayRange(reportDate: string) {
   }
 }
 
+function getNewYorkMillisecondDayRange(reportDate: string) {
+  const start = zonedTimeToUtc(reportDate, 0, 0, 0, 'America/New_York')
+  const followingDate = shiftIsoDate(reportDate, 1)
+  const end = zonedTimeToUtc(followingDate, 0, 0, 0, 'America/New_York')
+  return { start: String(start.getTime()), end: String(end.getTime()) }
+}
+
 function zonedTimeToUtc(
   date: string,
   hour: number,
@@ -1966,6 +2121,7 @@ export default defineConfig(({ mode }) => {
         env.AIRCALL_API_ID ?? '',
         env.AIRCALL_API_TOKEN ?? '',
       ),
+      financeReportApi(env.HUBSPOT_ACCESS_TOKEN ?? ''),
     ],
   }
 })
