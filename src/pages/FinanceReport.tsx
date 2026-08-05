@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import ReportHeroVisual from '../components/ReportHeroVisual'
 
 type FinanceRow = { category: string; product: string; quantity: number; revenue: number; cogs: number }
 type FinanceResponse = {
@@ -97,6 +98,7 @@ function FinanceReport() {
             <p className="eyebrow">Financial overview</p>
             <h1 id="finance-report-title">Finance Report</h1>
             <p>Daily paid revenue, product performance, costs, and profitability from HubSpot.</p>
+            <ReportHeroVisual variant="finance" />
           </div>
           <div className="finance-date-row">
             <label htmlFor="finance-report-date">Report date</label>

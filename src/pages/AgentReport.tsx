@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import ReportHeroVisual from '../components/ReportHeroVisual'
 
 type AgentReportResponse = {
   reportDate: string
@@ -322,6 +323,7 @@ function AgentReport() {
             <p className="eyebrow">Aircall analytics</p>
             <h1 id="agent-report-title">Agent Report</h1>
             <p>Total answered call time and call volume by agent.</p>
+            <ReportHeroVisual variant="agents" />
           </div>
           <div className="agent-report-controls">
             <label>

@@ -1906,6 +1906,266 @@ tbody tr:last-child td {
   }
 }
 
+/* Shared motion and depth for the reporting dashboards. */
+.dashboard-shell::after {
+  position: fixed;
+  z-index: -1;
+  top: 12%;
+  right: -120px;
+  width: 360px;
+  height: 360px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(243, 205, 101, 0.16), rgba(188, 208, 136, 0.06) 48%, transparent 72%);
+  content: '';
+  pointer-events: none;
+  animation: report-ambient-drift 12s ease-in-out infinite alternate;
+}
+
+.dashboard-header,
+.missed-calls-panel,
+.agent-report-panel {
+  animation: report-panel-arrive 0.65s cubic-bezier(.2, .75, .25, 1) both;
+}
+
+.dashboard-header,
+.missed-calls-panel {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.dashboard-header::before,
+.missed-calls-panel::before {
+  position: absolute;
+  z-index: -1;
+  top: -85px;
+  right: -55px;
+  width: 230px;
+  height: 230px;
+  border: 1px solid rgba(243, 205, 101, 0.22);
+  border-radius: 44% 56% 61% 39%;
+  background: rgba(255, 255, 255, 0.12);
+  content: '';
+  animation: report-orbit-shape 14s linear infinite;
+}
+
+.metric,
+.report-chart-card,
+.agent-summary-grid > div,
+.agent-report-table-card,
+.missed-call-item,
+.call-confirmation-report {
+  transition: transform 0.24s ease, box-shadow 0.24s ease, border-color 0.24s ease;
+}
+
+.metric:hover,
+.agent-summary-grid > div:hover {
+  z-index: 1;
+  border-color: rgba(62, 111, 69, 0.38);
+  box-shadow: 0 18px 34px rgba(30, 62, 42, 0.12);
+  transform: translateY(-4px);
+}
+
+.report-chart-card:hover,
+.agent-report-table-card:hover,
+.call-confirmation-report:hover {
+  border-color: rgba(62, 111, 69, 0.28);
+  box-shadow: 0 24px 48px rgba(30, 62, 42, 0.12);
+  transform: translateY(-2px);
+}
+
+.summary-grid > .metric,
+.respond-metric-grid > .metric,
+.agent-summary-grid > div,
+.agent-report-table-card,
+.missed-call-item {
+  animation: report-item-rise 0.55s cubic-bezier(.2, .75, .25, 1) both;
+}
+
+.summary-grid > :nth-child(2),
+.respond-metric-grid > :nth-child(2),
+.agent-summary-grid > :nth-child(2),
+.agent-report-table-card:nth-child(2),
+.missed-call-item:nth-child(2) { animation-delay: 70ms; }
+.summary-grid > :nth-child(3),
+.respond-metric-grid > :nth-child(3),
+.agent-summary-grid > :nth-child(3),
+.missed-call-item:nth-child(3) { animation-delay: 140ms; }
+.summary-grid > :nth-child(4),
+.respond-metric-grid > :nth-child(4),
+.agent-summary-grid > :nth-child(4),
+.missed-call-item:nth-child(4) { animation-delay: 210ms; }
+.missed-call-item:nth-child(n + 5) { animation-delay: 260ms; }
+
+.missed-call-item:hover {
+  transform: translateX(4px);
+}
+
+.missed-call-item:hover .missed-call-strip {
+  border-color: rgba(243, 205, 101, 0.55);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.18);
+}
+
+.missed-call-strip,
+.missed-call-details div,
+.agent-report-table tbody tr,
+.call-confirmation-table tbody tr,
+.meta-budget-table tbody tr {
+  transition: background-color 0.2s ease, filter 0.2s ease, transform 0.2s ease;
+}
+
+.agent-report-table tbody tr:hover > *,
+.call-confirmation-table tbody tr:hover > *,
+.meta-budget-table tbody tr:hover > * {
+  filter: saturate(1.1) brightness(0.98);
+}
+
+.fetch-button,
+.call-confirmation-apply,
+.agent-report-controls button {
+  box-shadow: 0 10px 22px rgba(25, 92, 67, 0.14);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.fetch-button:hover:not(:disabled),
+.call-confirmation-apply:hover:not(:disabled),
+.agent-report-controls button:hover:not(:disabled) {
+  box-shadow: 0 14px 28px rgba(25, 92, 67, 0.22);
+  filter: saturate(1.08);
+  transform: translateY(-2px);
+}
+
+.live-chip::before {
+  animation: report-status-pulse 2s ease-out infinite;
+}
+
+@keyframes report-panel-arrive {
+  from { opacity: 0; transform: translateY(14px) scale(.992); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes report-item-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes report-ambient-drift {
+  from { transform: translate3d(0, -18px, 0) scale(.95); }
+  to { transform: translate3d(-70px, 80px, 0) scale(1.12); }
+}
+
+@keyframes report-orbit-shape {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes report-status-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(55, 143, 88, .36); }
+  70%, 100% { box-shadow: 0 0 0 8px rgba(55, 143, 88, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-shell::after,
+  .dashboard-header::before,
+  .missed-calls-panel::before,
+  .dashboard-header,
+  .missed-calls-panel,
+  .agent-report-panel,
+  .summary-grid > .metric,
+  .respond-metric-grid > .metric,
+  .agent-summary-grid > div,
+  .agent-report-table-card,
+  .missed-call-item,
+  .live-chip::before {
+    animation: none !important;
+  }
+
+  .metric,
+  .report-chart-card,
+  .agent-summary-grid > div,
+  .agent-report-table-card,
+  .missed-call-item,
+  .call-confirmation-report,
+  .fetch-button,
+  .call-confirmation-apply,
+  .agent-report-controls button {
+    transition: none !important;
+  }
+}
+
+/* Purpose-built hero illustrations for each report. */
+.report-hero-visual {
+  position: relative;
+  width: min(100%, 360px);
+  height: 118px;
+  margin-top: 20px;
+  overflow: hidden;
+  border: 1px solid rgba(188, 208, 136, .3);
+  border-radius: 12px;
+  background:
+    linear-gradient(rgba(188, 208, 136, .09) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(188, 208, 136, .09) 1px, transparent 1px),
+    linear-gradient(145deg, #153f30, #244d39 62%, #625428);
+  background-size: 22px 22px, 22px 22px, auto;
+  box-shadow: 0 18px 36px rgba(22, 62, 43, .16);
+}
+
+.report-hero-visual .visual-caption {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  color: rgba(255, 255, 255, .66);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+.finance-hero-visual svg,
+.agents-hero-visual svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.finance-hero-visual .visual-grid-line { fill: none; stroke: rgba(225, 239, 208, .13); stroke-width: 1; }
+.finance-hero-visual .finance-area { fill: rgba(243, 205, 101, .12); }
+.finance-hero-visual .finance-trend { fill: none; stroke: #f3cd65; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 420; animation: report-line-draw 2.4s ease both; }
+.finance-hero-visual circle { fill: #173f30; stroke: #f3cd65; stroke-width: 4; animation: report-point-pop .45s ease both 1.2s; transform-box: fill-box; transform-origin: center; }
+.finance-coin { position: absolute; z-index: 2; display: grid; width: 25px; height: 25px; place-items: center; border: 2px solid #f4d676; border-radius: 50%; background: #9c7227; color: #fff4c7; font-size: 11px; font-weight: 950; box-shadow: 0 8px 16px rgba(0, 0, 0, .2); }
+.coin-one { top: 15px; left: 18px; animation: finance-coin-float 3.4s ease-in-out infinite; }
+.coin-two { top: 17px; left: 53px; animation: finance-coin-float 3.4s ease-in-out infinite .45s; }
+.coin-three { top: 49px; left: 25px; animation: finance-coin-float 3.4s ease-in-out infinite .9s; }
+
+.calls-hero-visual { background: radial-gradient(circle at 18% 50%, rgba(243, 205, 101, .2), transparent 27%), linear-gradient(145deg, #252824, #153e30); }
+.phone-orbit { position: absolute; top: 27px; left: 28px; display: grid; width: 62px; height: 62px; place-items: center; border: 1px solid rgba(243, 205, 101, .42); border-radius: 50%; color: #f3cd65; animation: phone-orbit-pulse 2.6s ease-out infinite; }
+.phone-orbit span { font-size: 28px; transform: rotate(-18deg); }
+.signal-ring { position: absolute; top: 38px; left: 39px; width: 40px; height: 40px; border: 1px solid rgba(243, 205, 101, .36); border-radius: 50%; animation: call-signal 2.4s ease-out infinite; }
+.signal-ring.ring-two { animation-delay: 1.2s; }
+.call-wave { position: absolute; top: 31px; right: 26px; display: flex; height: 48px; align-items: center; gap: 7px; }
+.call-wave i { width: 5px; height: 14px; border-radius: 99px; background: linear-gradient(#f3cd65, #9fc478); animation: call-wave-bars 1.1s ease-in-out infinite alternate; }
+.call-wave i:nth-child(2) { height: 30px; animation-delay: -.8s; }.call-wave i:nth-child(3) { height: 43px; animation-delay: -.4s; }.call-wave i:nth-child(4) { height: 24px; animation-delay: -.65s; }.call-wave i:nth-child(5) { height: 38px; animation-delay: -.2s; }.call-wave i:nth-child(6) { height: 20px; animation-delay: -.9s; }.call-wave i:nth-child(7) { height: 32px; animation-delay: -.5s; }
+.call-status { position: absolute; right: 25px; bottom: 15px; display: flex; align-items: center; gap: 6px; color: #dcefc9; font-size: 9px; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }
+.call-status b { width: 6px; height: 6px; border-radius: 50%; background: #9bd471; box-shadow: 0 0 0 4px rgba(155, 212, 113, .12); }
+
+.agents-hero-visual { background: radial-gradient(circle at 18% 30%, rgba(188, 208, 136, .18), transparent 32%), linear-gradient(145deg, #173f30, #254f3a 60%, #4c4b2b); }
+.agent-avatar { position: absolute; z-index: 2; top: 21px; display: grid; width: 38px; height: 38px; place-items: center; border: 2px solid rgba(255, 255, 255, .8); border-radius: 50%; background: #94b86c; color: #163c2d; font-weight: 950; box-shadow: 0 8px 18px rgba(0, 0, 0, .2); animation: agent-avatar-float 3.2s ease-in-out infinite; }
+.avatar-one { left: 22px; }.avatar-two { left: 51px; background: #f1cd66; animation-delay: -.8s; }.avatar-three { left: 80px; background: #dce8ca; animation-delay: -1.6s; }
+.agents-hero-visual svg path { fill: none; stroke: #f3cd65; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 380; animation: report-line-draw 2.4s ease both; }
+.agent-performance-bars { position: absolute; z-index: 2; right: 24px; bottom: 22px; display: flex; height: 55px; align-items: flex-end; gap: 6px; }
+.agent-performance-bars i { width: 10px; height: 22%; border-radius: 3px 3px 0 0; background: rgba(207, 230, 157, .78); animation: agent-bar-grow 1s cubic-bezier(.2, .75, .25, 1) both; transform-origin: bottom; }
+.agent-performance-bars i:nth-child(2) { height: 48%; animation-delay: .1s; }.agent-performance-bars i:nth-child(3) { height: 68%; animation-delay: .2s; }.agent-performance-bars i:nth-child(4) { height: 54%; animation-delay: .3s; }.agent-performance-bars i:nth-child(5) { height: 92%; background: #f3cd65; animation-delay: .4s; }
+
+@keyframes report-line-draw { from { stroke-dashoffset: 420; } to { stroke-dashoffset: 0; } }
+@keyframes report-point-pop { from { opacity: 0; transform: scale(0); } to { opacity: 1; transform: scale(1); } }
+@keyframes finance-coin-float { 0%, 100% { transform: translateY(0) rotate(-5deg); } 50% { transform: translateY(-7px) rotate(5deg); } }
+@keyframes phone-orbit-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(243, 205, 101, .08); } 50% { box-shadow: 0 0 0 12px rgba(243, 205, 101, .08); } }
+@keyframes call-signal { from { opacity: .7; transform: scale(.8); } to { opacity: 0; transform: scale(2.4); } }
+@keyframes call-wave-bars { from { transform: scaleY(.55); } to { transform: scaleY(1.05); } }
+@keyframes agent-avatar-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes agent-bar-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .report-hero-visual *,
+  .report-hero-visual *::before,
+  .report-hero-visual *::after { animation: none !important; }
+}
+
 .missed-calls-panel {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);

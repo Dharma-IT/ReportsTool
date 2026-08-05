@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import ReportHeroVisual from '../components/ReportHeroVisual'
 
 type MissedCall = {
   id: number
@@ -231,6 +232,7 @@ function MissedCalls() {
           <p className="eyebrow">Call intelligence</p>
           <h1 id="missed-calls-title">Missed Calls</h1>
           <p>Review inbound calls that rang and were not answered by the user.</p>
+          <ReportHeroVisual variant="calls" />
         </div>
 
         <div className="missed-calls-controls">
