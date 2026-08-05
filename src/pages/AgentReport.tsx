@@ -237,7 +237,7 @@ function AgentReport() {
     }
   }
 
-  const secondaryAgentNames = new Set(['Kathering Silva', 'Kevin Tinjaca'])
+  const secondaryAgentNames = new Set(['Kathering Silva', 'Kevin Tinjaca', 'Zara Meza'])
   const primaryAgents = report?.agents.filter((agent) => !secondaryAgentNames.has(agent.name)) ?? []
   const secondaryAgents = report?.agents.filter((agent) => secondaryAgentNames.has(agent.name)) ?? []
   const primaryStaff = report?.staff.filter((row) => !secondaryAgentNames.has(row.name)) ?? []
@@ -366,7 +366,7 @@ function AgentReport() {
             </div>
             <div className="agent-report-tables">
               {renderAgentTable(primaryAgents, 'Primary agents')}
-              {renderAgentTable(secondaryAgents, 'Kathering Silva and Kevin Tinjaca')}
+              {renderAgentTable(secondaryAgents, 'Kathering Silva, Kevin Tinjaca, and Zara Meza')}
             </div>
             <p className="agent-report-note">Answered talk time only. Dates are interpreted in {report.timezone.replace('_', ' ')}.</p>
 
@@ -392,11 +392,11 @@ function AgentReport() {
               <div className="staff-performance-heading">
                 <div>
                   <p className="eyebrow">Dedicated team report</p>
-                  <h2 id="secondary-staff-performance-title">Kathering &amp; Kevin Performance</h2>
+                  <h2 id="secondary-staff-performance-title">Kathering, Kevin &amp; Zara Performance</h2>
                   <p>Messages, calls, connected conversations and bookings for the selected date.</p>
                 </div>
               </div>
-              {renderStaffTable(secondaryStaff, 'Kathering Silva and Kevin Tinjaca performance')}
+              {renderStaffTable(secondaryStaff, 'Kathering Silva, Kevin Tinjaca, and Zara Meza performance')}
               <p className="agent-report-note">Older saved reports may show unavailable message and booking fields until Fetch Live refreshes that date.</p>
             </section>
           </>

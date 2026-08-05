@@ -25,6 +25,7 @@ const AGENT_REPORT_AGENTS = [
   { name: 'William Carcamo', aliases: ['William Carcamo'] },
   { name: 'Kathering Silva', aliases: ['Kathering Silva'] },
   { name: 'Kevin Tinjaca', aliases: ['Kevin Tinjaca'] },
+  { name: 'Zara Meza', aliases: ['Zara Meza'] },
 ]
 const STAFF_PERFORMANCE_REPORT = [
   { name: 'Carol Fernandes', respondAliases: ['Carolina Lopez'], hubSpotAliases: ['Carol Fernandes'], hasCalls: false },
@@ -35,6 +36,7 @@ const STAFF_PERFORMANCE_REPORT = [
   { name: 'William Carcamo', respondAliases: ['William Carcamo'], hubSpotAliases: ['William Carcamo'], hasCalls: true },
   { name: 'Kathering Silva', respondAliases: ['Kathering Silva'], hubSpotAliases: ['Kathering Silva'], hasCalls: true },
   { name: 'Kevin Tinjaca', respondAliases: ['Kevin Tinjaca'], hubSpotAliases: ['Kevin Tinjaca'], hasCalls: true },
+  { name: 'Zara Meza', respondAliases: ['Zara Meza'], hubSpotAliases: ['Zara Meza'], hasCalls: true },
 ]
 // The Public Calls API marks these as missed, but dashboard review confirmed that
 // an agent attempted to answer after the caller had already disconnected.
