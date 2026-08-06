@@ -8,6 +8,8 @@ type FinanceResponse = {
   rows: FinanceRow[]
   totalRevenue: number
   cogs: number
+  adsCostMeta: number
+  adsCostTiktok: number
   revenueLoss: { cancelled: number; dispute: number; refund: number }
   message?: string
 }
@@ -38,7 +40,8 @@ function FinanceReport() {
   const [reportDate, setReportDate] = useState(getNewYorkDate)
   const [report, setReport] = useState<FinanceResponse | null>(null)
   const [operationCost, setOperationCost] = useState(0)
-  const [adsCost, setAdsCost] = useState(0)
+  const [adsCostMeta, setAdsCostMeta] = useState(0)
+  const [adsCostTiktok, setAdsCostTiktok] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -46,8 +49,8 @@ function FinanceReport() {
     const revenue = report?.totalRevenue ?? 0
     const cogs = report?.cogs ?? 0
     const grossProfit = revenue - cogs
-    return { revenue, cogs, grossProfit, netProfit: grossProfit - operationCost - adsCost }
-  }, [report, operationCost, adsCost])
+    return { revenue, cogs, grossProfit, netProfit: grossProfit - operationCost - adsCostMeta - adsCostTiktok }
+  }, [report, operationCost, adsCostMeta, adsCostTiktok])
 
   async function fetchReport() {
     setIsLoading(true)
@@ -61,6 +64,8 @@ function FinanceReport() {
       const payload = await response.json() as FinanceResponse
       if (!response.ok) throw new Error(payload.message || 'Unable to load the finance report.')
       setReport(payload)
+      setAdsCostMeta(payload.adsCostMeta ?? 0)
+      setAdsCostTiktok(payload.adsCostTiktok ?? 0)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to load the finance report.')
     } finally {
@@ -123,7 +128,8 @@ function FinanceReport() {
               <tr><td /><td>COGS</td><td /><td className="money-cell">{displayMoney(-totals.cogs)}</td><td>{percent(totals.cogs, totals.revenue)}</td></tr>
               <tr className="finance-total"><td /><th>Gross Profit</th><td>-</td><th className="money-cell">{displayMoney(totals.grossProfit)}</th><th>{percent(totals.grossProfit, totals.revenue)}</th></tr>
               <tr><td>Expenses</td><td>Operation Cost</td><td /><td className="money-cell input-cell"><span className="currency-symbol">$</span><input className="finance-money-input" aria-label="Operation cost" type="number" min="0" step="0.01" value={operationCost || ''} placeholder="0.00" onChange={(event) => setOperationCost(Number(event.target.value))} /></td><td>{percent(operationCost, totals.grossProfit)}</td></tr>
-              <tr><td>Expenses</td><td>Ads Cost</td><td /><td className="money-cell input-cell"><span className="currency-symbol">$</span><input className="finance-money-input" aria-label="Ads cost" type="number" min="0" step="0.01" value={adsCost || ''} placeholder="0.00" onChange={(event) => setAdsCost(Number(event.target.value))} /></td><td>{percent(adsCost, totals.grossProfit)}</td></tr>
+              <tr><td>Expenses</td><td>Ads Cost Meta</td><td /><td className="money-cell input-cell"><span className="currency-symbol">$</span><input className="finance-money-input" aria-label="Meta ads cost" type="number" min="0" step="0.01" value={adsCostMeta || ''} placeholder="0.00" onChange={(event) => setAdsCostMeta(Number(event.target.value))} /></td><td>{percent(adsCostMeta, totals.grossProfit)}</td></tr>
+              <tr><td>Expenses</td><td>Ads Cost TikTok</td><td /><td className="money-cell input-cell"><span className="currency-symbol">$</span><input className="finance-money-input" aria-label="TikTok ads cost" type="number" min="0" step="0.01" value={adsCostTiktok || ''} placeholder="0.00" onChange={(event) => setAdsCostTiktok(Number(event.target.value))} /></td><td>{percent(adsCostTiktok, totals.grossProfit)}</td></tr>
               <tr className="finance-spacer"><td colSpan={5} /></tr>
               <tr className="finance-net"><td /><th>NET Profit</th><td /><th className="money-cell">{displayMoney(totals.netProfit)}</th><th>{percent(totals.netProfit, totals.revenue)}</th></tr>
             </tbody>
