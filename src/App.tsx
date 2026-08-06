@@ -14,9 +14,9 @@ type AppRoute = {
 const routes: AppRoute[] = [
   { path: '/', label: 'Home' },
   { path: '/campaign', label: 'Campaign' },
+  { path: '/finance-report', label: 'Finance Report' },
   { path: '/missed-calls', label: 'Missed Calls' },
   { path: '/agent-report', label: 'Agent Report' },
-  { path: '/finance-report', label: 'Finance Report' },
 ]
 
 function getActiveRoute() {
@@ -62,7 +62,9 @@ function App() {
       ) : activeRoute === '/agent-report' ? (
         <AgentReport />
       ) : activeRoute === '/finance-report' ? (
-        <FinanceReport />
+        <CampaignPinLock>
+          <FinanceReport />
+        </CampaignPinLock>
       ) : (
         <CampaignPinLock>
           <CampaignDashboard />

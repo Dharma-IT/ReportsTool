@@ -8,8 +8,16 @@ const reportLinks = [
     icon: 'trend',
   },
   {
-    path: '/missed-calls',
+    path: '/finance-report',
     number: '02',
+    title: 'Finance report',
+    copy: 'Review daily revenue, product performance, expenses and profitability.',
+    action: 'Open finance report',
+    icon: 'finance',
+  },
+  {
+    path: '/missed-calls',
+    number: '03',
     title: 'Missed calls',
     copy: 'Review unanswered opportunities and follow-up activity by reporting date.',
     action: 'Review missed calls',
@@ -17,7 +25,7 @@ const reportLinks = [
   },
   {
     path: '/agent-report',
-    number: '03',
+    number: '04',
     title: 'Agent activity',
     copy: 'See calls, messages, connection quality and bookings across the team.',
     action: 'View agent report',
@@ -26,6 +34,9 @@ const reportLinks = [
 ]
 
 function ReportIcon({ name }: { name: string }) {
+  if (name === 'finance') {
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5h-5a2 2 0 0 0 0 4h3a2 2 0 0 1 0 4h-5M12 6.5v11"/></svg>
+  }
   if (name === 'phone') {
     return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.2 3.5 9.7 7 8.1 9.4a14 14 0 0 0 6.5 6.5l2.4-1.6 3.5 2.5-.8 3.1c-.3 1-1.3 1.7-2.4 1.6C9.5 20.7 3.3 14.5 2.5 6.7c-.1-1.1.6-2.1 1.6-2.4l3.1-.8Z" /></svg>
   }
