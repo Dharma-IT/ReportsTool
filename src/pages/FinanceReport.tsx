@@ -99,12 +99,16 @@ function FinanceReport() {
     <main className="dashboard-shell finance-report-page">
       <section className="finance-sheet finance-report-panel" aria-labelledby="finance-report-title">
         <div className="finance-report-heading">
-          <div>
-            <p className="eyebrow">Financial overview</p>
-            <h1 id="finance-report-title">Finance Report</h1>
-            <p>Daily paid revenue, product performance, costs, and profitability from HubSpot.</p>
-            <ReportHeroVisual variant="finance" />
+          <div className="finance-heading-copy">
+            <p className="eyebrow"><span /> Financial intelligence</p>
+            <h1 id="finance-report-title">Daily finance<br /><em>report.</em></h1>
+            <p>Paid revenue, product performance, costs, and profitability—brought together from HubSpot and your campaign reports.</p>
+            <div className="finance-source-row"><span><i /> HubSpot revenue</span><span><i /> Meta spend</span><span><i /> TikTok spend</span></div>
           </div>
+          <ReportHeroVisual variant="finance" />
+        </div>
+        <div className="finance-toolbar">
+          <div className="finance-toolbar-copy"><span>Report controls</span><strong>Select a business date</strong></div>
           <div className="finance-date-row">
             <label htmlFor="finance-report-date">Report date</label>
             <input id="finance-report-date" type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)} />
@@ -115,6 +119,12 @@ function FinanceReport() {
           </div>
         </div>
         {error && <p className="finance-error" role="alert">{error}</p>}
+        <div className="finance-summary-grid" aria-label="Finance summary">
+          <article><span className="finance-metric-icon revenue">↗</span><div><small>Total revenue</small><strong>{displayMoney(totals.revenue)}</strong><p>Paid product revenue</p></div></article>
+          <article><span className="finance-metric-icon gross">◆</span><div><small>Gross profit</small><strong>{displayMoney(totals.grossProfit)}</strong><p>{percent(totals.grossProfit, totals.revenue)} of revenue</p></div></article>
+          <article><span className="finance-metric-icon spend">$</span><div><small>Advertising spend</small><strong>{displayMoney(adsCostMeta + adsCostTiktok)}</strong><p>Meta + TikTok</p></div></article>
+          <article className="net"><span className="finance-metric-icon net">●</span><div><small>Net profit</small><strong>{displayMoney(totals.netProfit)}</strong><p>{percent(totals.netProfit, totals.revenue)} net margin</p></div></article>
+        </div>
         <div className="finance-table-wrap">
           <table className="finance-table">
             <caption>Daily Finance Report</caption>
