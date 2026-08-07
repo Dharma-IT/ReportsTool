@@ -13,6 +13,7 @@ const TARGET_CAMPAIGN_PATTERNS = [
   '{sp} smg campaign - 0123 v3 - secondary',
   '{sp} smg campaign - 0123 v2 - secondary',
   '{sp} smg campaign - new ppl - 0123 v3',
+  '{sp} dm bot training cmg campaign',
 ]
 const CALL_CONFIRMATION_AGENTS = ['William Carcamo', 'Kathering Silva']
 const BUSINESS_HOURS_END = 19
