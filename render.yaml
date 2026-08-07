@@ -26,3 +26,5 @@ services:
         sync: false
       - key: AIRCALL_WEBHOOK_TOKEN
         sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false

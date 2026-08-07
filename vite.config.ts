@@ -208,6 +208,23 @@ type HubSpotLineItem = {
   properties: Record<string, string | null | undefined>
 }
 
+type HubSpotContact = {
+  id: string
+  properties: Record<string, string | null | undefined>
+}
+
+type StripeCharge = {
+  id: string
+  amount: number
+  created: number
+  currency: string
+  paid: boolean
+  refunded: boolean
+  billing_details?: { name?: string | null; email?: string | null; phone?: string | null }
+  receipt_email?: string | null
+  customer?: string | { name?: string | null; email?: string | null; phone?: string | null } | null
+}
+
 type HubSpotSearchResponse<T> = {
   results?: T[]
   paging?: { next?: { after?: string } }
@@ -809,6 +826,7 @@ function financeReportApi(
   hubSpotToken: string,
   supabaseUrl: string,
   supabaseServiceRoleKey: string,
+  stripeSecretKey: string,
 ): Plugin {
   return {
     name: 'hubspot-finance-report-api',
@@ -824,7 +842,8 @@ function financeReportApi(
           }
 
           const { start, end } = getNewYorkMillisecondDayRange(reportDate)
-          const [deals, savedAdSpend] = await Promise.all([
+          const stripeDate = shiftIsoDate(reportDate, -1)
+          const [deals, savedAdSpend, stripeCharges] = await Promise.all([
             searchAllHubSpotObjects<HubSpotDeal>('deals', {
             // This portal's revenue reports treat entry into either pipeline's PAID
             // stage as the sale date. Those stages are not flagged hs_is_closed_won.
@@ -841,6 +860,7 @@ function financeReportApi(
             properties: ['dealname', 'amount', 'net_revenue', 'value_refund'],
             }, hubSpotToken),
             fetchSavedAdSpend(reportDate, supabaseUrl, supabaseServiceRoleKey),
+            stripeSecretKey ? fetchStripeChargesForNewYorkDate(stripeDate, stripeSecretKey) : [],
           ])
 
           // A zero Net Revenue marks a paid-stage deal whose sale should not be
@@ -849,7 +869,10 @@ function financeReportApi(
             const netRevenue = deal.properties.net_revenue
             return netRevenue === null || netRevenue === undefined || netRevenue.trim() === '' || finiteNumber(netRevenue) !== 0
           })
-          const dealIds = reportDeals.map((deal) => deal.id)
+          const { includedDeals, excludedDealIds } = stripeSecretKey
+            ? await excludeStripeMatchedDeals(reportDeals, stripeCharges, hubSpotToken)
+            : { includedDeals: reportDeals, excludedDealIds: new Set<string>() }
+          const dealIds = includedDeals.map((deal) => deal.id)
           const associations = dealIds.length
             ? await hubSpotPost<{ results?: Array<{ from: { id: string }; to: Array<{ toObjectId: string }> }> }>(
                 '/crm/v4/associations/deals/line_items/batch/read',
@@ -899,13 +922,15 @@ function financeReportApi(
             reportDate,
             timezone: 'America/New_York',
             fetchedAt: new Date().toISOString(),
-            dealCount: reportDeals.length,
+            dealCount: includedDeals.length,
+            stripeCheckedDate: stripeDate,
+            stripeExcludedCount: excludedDealIds.size,
             rows: Array.from(productRows.values()).sort((a, b) => b.revenue - a.revenue),
             totalRevenue,
             cogs,
             adsCostMeta: savedAdSpend.meta,
             adsCostTiktok: savedAdSpend.tiktok,
-            revenueLoss: { cancelled: 0, dispute: 0, refund: deals.reduce((sum, deal) => sum + finiteNumber(deal.properties.value_refund), 0) },
+            revenueLoss: { cancelled: 0, dispute: 0, refund: includedDeals.reduce((sum, deal) => sum + finiteNumber(deal.properties.value_refund), 0) },
           })
         } catch (error) {
           sendJson(response, 500, { message: error instanceof Error ? error.message : 'Unable to build finance report.' })
@@ -1617,6 +1642,106 @@ async function searchAllHubSpotObjects<T>(
   return results
 }
 
+async function fetchStripeChargesForNewYorkDate(reportDate: string, secretKey: string) {
+  const { start, end } = getNewYorkMillisecondDayRange(reportDate)
+  const charges: StripeCharge[] = []
+  let startingAfter = ''
+
+  do {
+    const url = new URL('https://api.stripe.com/v1/charges')
+    url.searchParams.set('limit', '100')
+    url.searchParams.set('created[gte]', String(Math.floor(Number(start) / 1000)))
+    url.searchParams.set('created[lt]', String(Math.floor(Number(end) / 1000)))
+    url.searchParams.append('expand[]', 'data.customer')
+    if (startingAfter) url.searchParams.set('starting_after', startingAfter)
+
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${secretKey}` } })
+    const payload = await response.json().catch(() => ({})) as {
+      data?: StripeCharge[]
+      has_more?: boolean
+      error?: { message?: string }
+    }
+    if (!response.ok) throw new Error(payload.error?.message ?? `Stripe API failed with ${response.status}.`)
+
+    const page = payload.data ?? []
+    charges.push(...page.filter((charge) => charge.paid && !charge.refunded && charge.currency.toLowerCase() === 'usd'))
+    startingAfter = payload.has_more && page.length ? page[page.length - 1].id : ''
+  } while (startingAfter)
+
+  return charges
+}
+
+async function excludeStripeMatchedDeals(
+  deals: HubSpotDeal[],
+  charges: StripeCharge[],
+  hubSpotToken: string,
+) {
+  if (!deals.length || !charges.length) return { includedDeals: deals, excludedDealIds: new Set<string>() }
+
+  const associations = await hubSpotPost<{
+    results?: Array<{ from: { id: string }; to?: Array<{ toObjectId: string }> }>
+  }>('/crm/v4/associations/deals/contacts/batch/read', {
+    inputs: deals.map((deal) => ({ id: deal.id })),
+  }, hubSpotToken)
+  const contactIdsByDeal = new Map((associations.results ?? []).map((row) => [
+    row.from.id,
+    (row.to ?? []).map((contact) => contact.toObjectId),
+  ]))
+  const contactIds = Array.from(new Set(Array.from(contactIdsByDeal.values()).flat()))
+  if (!contactIds.length) return { includedDeals: deals, excludedDealIds: new Set<string>() }
+
+  const contactBatch = await hubSpotPost<{ results?: HubSpotContact[] }>(
+    '/crm/v3/objects/contacts/batch/read',
+    {
+      inputs: contactIds.map((id) => ({ id })),
+      properties: ['firstname', 'lastname', 'email', 'phone', 'mobilephone'],
+    },
+    hubSpotToken,
+  )
+  const contactsById = new Map((contactBatch.results ?? []).map((contact) => [contact.id, contact]))
+  const unmatchedChargeIds = new Set(charges.map((charge) => charge.id))
+  const excludedDealIds = new Set<string>()
+
+  for (const deal of deals) {
+    const amountCents = Math.round(finiteNumber(deal.properties.net_revenue, finiteNumber(deal.properties.amount)) * 100)
+    if (amountCents <= 0) continue
+    const contacts = (contactIdsByDeal.get(deal.id) ?? []).map((id) => contactsById.get(id)).filter(Boolean) as HubSpotContact[]
+    const matchedCharge = charges.find((charge) => unmatchedChargeIds.has(charge.id)
+      && charge.amount === amountCents
+      && contacts.some((contact) => stripeChargeMatchesContact(charge, contact)))
+    if (matchedCharge) {
+      excludedDealIds.add(deal.id)
+      unmatchedChargeIds.delete(matchedCharge.id)
+    }
+  }
+
+  return { includedDeals: deals.filter((deal) => !excludedDealIds.has(deal.id)), excludedDealIds }
+}
+
+function stripeChargeMatchesContact(charge: StripeCharge, contact: HubSpotContact) {
+  const customer = typeof charge.customer === 'object' && charge.customer ? charge.customer : undefined
+  const stripeName = charge.billing_details?.name || customer?.name || ''
+  const stripeEmail = charge.billing_details?.email || charge.receipt_email || customer?.email || ''
+  const stripePhone = charge.billing_details?.phone || customer?.phone || ''
+  const hubSpotName = `${contact.properties.firstname ?? ''} ${contact.properties.lastname ?? ''}`
+  const hubSpotEmail = contact.properties.email ?? ''
+  const hubSpotPhones = [contact.properties.phone, contact.properties.mobilephone]
+
+  return Boolean(
+    (normalizePersonName(stripeName) && normalizePersonName(stripeName) === normalizePersonName(hubSpotName))
+    || (normalizeEmail(stripeEmail) && normalizeEmail(stripeEmail) === normalizeEmail(hubSpotEmail))
+    || (normalizePhoneNumber(stripePhone) && hubSpotPhones.some((phone) => phoneNumbersMatch(normalizePhoneNumber(stripePhone), normalizePhoneNumber(phone)))),
+  )
+}
+
+function normalizePersonName(value: string) {
+  return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase()
+}
+
 function finiteNumber(value: string | null | undefined, fallback = 0) {
   if (value === null || value === undefined || value.trim() === '') return fallback
   const parsed = Number(value)
@@ -2165,6 +2290,7 @@ export default defineConfig(({ mode }) => {
         env.HUBSPOT_ACCESS_TOKEN ?? '',
         env.VITE_SUPABASE_URL ?? '',
         env.SUPABASE_SERVICE_ROLE_KEY ?? '',
+        env.STRIPE_SECRET_KEY ?? '',
       ),
     ],
   }

@@ -5,6 +5,8 @@ type FinanceRow = { category: string; product: string; quantity: number; revenue
 type FinanceResponse = {
   reportDate: string
   dealCount: number
+  stripeCheckedDate?: string
+  stripeExcludedCount?: number
   rows: FinanceRow[]
   totalRevenue: number
   cogs: number
@@ -115,7 +117,9 @@ function FinanceReport() {
             <button type="button" onClick={fetchReport} disabled={isLoading || !reportDate}>
               {isLoading ? 'Applying…' : 'Apply'}
             </button>
-            <span>{isLoading ? 'Loading HubSpot…' : report ? `${report.dealCount} paid deals` : ''}</span>
+            <span>{isLoading ? 'Loading HubSpot and Stripe…' : report
+              ? `${report.dealCount} paid deals · ${report.stripeExcludedCount ?? 0} excluded by Stripe${report.stripeCheckedDate ? ` (${report.stripeCheckedDate})` : ''}`
+              : ''}</span>
           </div>
         </div>
         {error && <p className="finance-error" role="alert">{error}</p>}
