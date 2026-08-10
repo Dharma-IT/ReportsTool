@@ -912,12 +912,23 @@ function financeReportApi(
             productRows.set(key, current)
           }
 
-          // The approved daily sheet is line-item based. Deal Amount/Net Revenue
-          // can contain discounts or stale rollups and must not create an
-          // "Unallocated deal revenue" row.
-          const totalRevenue = Array.from(productRows.values()).reduce((sum, row) => sum + row.revenue, 0)
+          // Deal-level revenue is authoritative because it includes charges such
+          // as tax or fees that do not always have their own line item. Keep the
+          // product allocation line-item based and expose any difference so the
+          // report always reconciles instead of silently dropping revenue.
+          const allocatedRevenue = roundMoney(Array.from(productRows.values()).reduce((sum, row) => sum + row.revenue, 0))
+          const totalRevenue = roundMoney(includedDeals.reduce(
+            (sum, deal) => sum + finiteNumber(deal.properties.net_revenue, finiteNumber(deal.properties.amount)), 0,
+          ))
+          const reconciliationDifference = roundMoney(totalRevenue - allocatedRevenue)
+          if (Math.abs(reconciliationDifference) > 0.005) {
+            productRows.set('__reconciliation__', {
+              category: 'Others', product: 'Taxes / Fees / Unallocated Revenue', quantity: 0,
+              revenue: reconciliationDifference, cogs: 0,
+            })
+          }
           const lineItemCogs = Array.from(productRows.values()).reduce((sum, row) => sum + row.cogs, 0)
-          const cogs = lineItemCogs || totalRevenue * 0.32
+          const cogs = roundMoney(lineItemCogs || totalRevenue * 0.32)
 
           sendJson(response, 200, {
             reportDate,
@@ -928,6 +939,8 @@ function financeReportApi(
             stripeExcludedCount: excludedDealIds.size,
             rows: Array.from(productRows.values()).sort((a, b) => b.revenue - a.revenue),
             totalRevenue,
+            allocatedRevenue,
+            reconciliationDifference,
             cogs,
             adsCostMeta: savedAdSpend.meta,
             adsCostTiktok: savedAdSpend.tiktok,
@@ -1749,8 +1762,17 @@ function finiteNumber(value: string | null | undefined, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100
+}
+
 function normalizeFinanceProduct(product: string) {
   const name = product.toLowerCase()
+  // Subscription products often also contain a medication name. Classify the
+  // commercial product type first so they do not inflate medication quantity.
+  if (name.includes('subscription') || name.includes('membership')) {
+    return { category: 'Subscription', product }
+  }
   if (name.includes('lipo mino')) return { category: 'Medication/Treatment', product: 'Lipo Mino' }
   if (name.includes('metformin')) return { category: 'Medication/Treatment', product: 'Metformin' }
   if (name.includes('nad+')) return { category: 'Medication/Treatment', product: 'NAD+' }
@@ -1759,8 +1781,7 @@ function normalizeFinanceProduct(product: string) {
   if (name.includes('tirzepatide')) return { category: 'Medication/Treatment', product: 'Tirzepatide' }
 
   // Finance's approved medication list is intentionally closed. Everything
-  // not matched above belongs in Supplements, including subscriptions and any
-  // newly-created HubSpot product names.
+  // not matched above belongs in Supplements, including newly-created names.
   return { category: 'Supplements', product }
 }
 

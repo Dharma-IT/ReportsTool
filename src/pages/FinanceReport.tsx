@@ -9,6 +9,8 @@ type FinanceResponse = {
   stripeExcludedCount?: number
   rows: FinanceRow[]
   totalRevenue: number
+  allocatedRevenue?: number
+  reconciliationDifference?: number
   cogs: number
   adsCostMeta: number
   adsCostTiktok: number
@@ -88,7 +90,7 @@ function FinanceReport() {
         ? !['Subscription', 'Supplements'].includes(row.category)
         : row.category === category)
       return {
-        category, product: category === 'Others' ? '' : '-',
+        category, product: category === 'Others' ? 'Taxes / Fees / Unallocated Revenue' : '-',
         quantity: matches.reduce((sum, row) => sum + row.quantity, 0),
         revenue: matches.reduce((sum, row) => sum + row.revenue, 0),
         cogs: matches.reduce((sum, row) => sum + row.cogs, 0),
