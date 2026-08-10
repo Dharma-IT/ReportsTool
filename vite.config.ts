@@ -842,20 +842,16 @@ function financeReportApi(
             return
           }
 
-          const { start, end } = getNewYorkMillisecondDayRange(reportDate)
+          const paidDate = String(new Date(`${reportDate}T00:00:00Z`).getTime())
           const stripeDate = shiftIsoDate(reportDate, -1)
           const [deals, savedAdSpend, stripeCharges] = await Promise.all([
             searchAllHubSpotObjects<HubSpotDeal>('deals', {
-            // This portal's revenue reports treat entry into either pipeline's PAID
-            // stage as the sale date. Those stages are not flagged hs_is_closed_won.
+            // Match the HubSpot Finance dashboard's business-date filter. Deals
+            // can enter the PAID stage on a later calendar day, so stage-entry
+            // timestamps do not reliably identify the date of the sale.
             filterGroups: [
               { filters: [
-                { propertyName: 'hs_v2_date_entered_1013987702', operator: 'GTE', value: start },
-                { propertyName: 'hs_v2_date_entered_1013987702', operator: 'LT', value: end },
-              ] },
-              { filters: [
-                { propertyName: 'hs_v2_date_entered_1036251695', operator: 'GTE', value: start },
-                { propertyName: 'hs_v2_date_entered_1036251695', operator: 'LT', value: end },
+                { propertyName: 'paid_date_all_pipelines', operator: 'EQ', value: paidDate },
               ] },
             ],
             properties: ['dealname', 'amount', 'net_revenue', 'value_refund'],
