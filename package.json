@@ -6,6 +6,7 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
+    "prestart:render": "node scripts/clear-vite-config-cache.mjs",
     "start:render": "vite --host 0.0.0.0 --port $PORT",
     "build": "tsc -b && vite build",
     "desktop": "electron .",
