@@ -20,6 +20,7 @@ const BUSINESS_HOURS_END = 19
 const RESPOND_IO_ORGANIZATION_ID = '236383'
 const RESPOND_IO_SPACE_ID = '238284'
 const AGENT_REPORT_AGENTS = [
+  { name: 'Belizabett Gonzalez', aliases: ['Belizabett Gonzalez'] },
   { name: 'Ailene Nuevas', aliases: ['Ailene Nuevas'] },
   { name: 'Laura Sanchez', aliases: ['Laura Sanchez', 'Laura Alejandra Sanchez Pinto'] },
   { name: 'Natasha Lopez', aliases: ['Natasha Lopez'] },
@@ -29,6 +30,7 @@ const AGENT_REPORT_AGENTS = [
   { name: 'Zara Meza', aliases: ['Zara Meza'] },
 ]
 const STAFF_PERFORMANCE_REPORT = [
+  { name: 'Belizabett Gonzalez', respondAliases: ['Belizabett Gonzalez'], hubSpotAliases: ['Belizabett Gonzalez'], hasCalls: true },
   { name: 'Carol Fernandes', respondAliases: ['Carolina Lopez'], hubSpotAliases: ['Carol Fernandes'], hasCalls: false },
   { name: 'Ailene Nuevas', respondAliases: ['Ailene Nuevas'], hubSpotAliases: ['Ailene Nuevas', 'Aline Strelow'], hasCalls: true },
   { name: 'Laura Sanchez', respondAliases: ['Laura Sanchez'], hubSpotAliases: ['Laura Sanchez'], hasCalls: true },
