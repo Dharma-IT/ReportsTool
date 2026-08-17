@@ -13,7 +13,11 @@ const TARGET_CAMPAIGN_PATTERNS = [
   '{sp} smg campaign - 0123 v3 - secondary',
   '{sp} smg campaign - 0123 v2 - secondary',
   '{sp} smg campaign - new ppl - 0123 v3',
+  // These campaigns also contribute to the Meta account spend shown in Ads
+  // Manager. Keep the fragments broad enough to survive date/suffix renames.
+  '{sp} bot training cmg campaign',
   '{sp} dm bot training cmg campaign',
+  '{sp} followers @dharma.clinic',
 ]
 const CALL_CONFIRMATION_AGENTS = ['William Carcamo', 'Kathering Silva']
 const BUSINESS_HOURS_END = 19
@@ -275,6 +279,7 @@ function facebookBudgetApi(token: string): Plugin {
             fields: 'campaign_id,spend,impressions,clicks,actions',
             level: 'campaign',
             time_range: JSON.stringify({ since: reportDate, until: reportDate }),
+            limit: '200',
             access_token: token,
           })
 
