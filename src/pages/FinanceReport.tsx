@@ -26,6 +26,41 @@ function getApiUrl(path: string) {
   return `${base}${path}`
 }
 
+const retryableStatuses = new Set([429, 502, 503, 504])
+
+async function fetchFinanceReport(date: string) {
+  const url = getApiUrl(`/api/finance-report?date=${encodeURIComponent(date)}`)
+  let lastError: unknown
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(url)
+      const contentType = response.headers.get('content-type') ?? ''
+      if (!contentType.includes('application/json')) {
+        throw new Error('The Finance API is not available on the deployed server yet. Redeploy the latest server version, then click Apply again.')
+      }
+      const payload = await response.json() as FinanceResponse
+      if (!response.ok) {
+        const error = new Error(payload.message || `Unable to load the finance report for ${date}.`)
+        if (!retryableStatuses.has(response.status)) throw error
+        lastError = error
+      } else {
+        return payload
+      }
+    } catch (error) {
+      lastError = error
+      if (error instanceof Error && error.message.startsWith('The Finance API')) throw error
+    }
+
+    if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 600 * (attempt + 1)))
+  }
+
+  if (lastError instanceof TypeError) {
+    throw new Error(`The Finance API could not be reached while loading ${date}. Check your connection and click Apply again.`)
+  }
+  throw lastError instanceof Error ? lastError : new Error(`Unable to load the finance report for ${date}.`)
+}
+
 function getNewYorkDate() {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -120,12 +155,7 @@ function FinanceReport() {
       const entries: Array<readonly [string, FinanceResponse]> = []
       for (let index = 0; index < allDates.length; index += 3) {
         const batch = await Promise.all(allDates.slice(index, index + 3).map(async (date) => {
-          const response = await fetch(getApiUrl(`/api/finance-report?date=${encodeURIComponent(date)}`))
-          const contentType = response.headers.get('content-type') ?? ''
-          if (!contentType.includes('application/json')) throw new Error('The Finance API is not available on the deployed server yet. Redeploy the latest server version, then click Apply again.')
-          const payload = await response.json() as FinanceResponse
-          if (!response.ok) throw new Error(payload.message || `Unable to load the finance report for ${date}.`)
-          return [date, payload] as const
+          return [date, await fetchFinanceReport(date)] as const
         }))
         entries.push(...batch)
       }
