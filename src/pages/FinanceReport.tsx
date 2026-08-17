@@ -128,10 +128,11 @@ function FinanceReport() {
   const [report, setReport] = useState<FinanceResponse | null>(null)
   const [monthToDateReport, setMonthToDateReport] = useState<FinanceResponse | null>(null)
   const [rangeStart, setRangeStart] = useState('')
-  const [adsCostMeta, setAdsCostMeta] = useState(0)
-  const [adsCostTiktok, setAdsCostTiktok] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+
+  const adsCostMeta = report?.adsCostMeta ?? 0
+  const adsCostTiktok = report?.adsCostTiktok ?? 0
 
   const totals = useMemo(() => {
     const revenue = report?.totalRevenue ?? 0
@@ -162,8 +163,6 @@ function FinanceReport() {
       setReport(selectedReport)
       setMonthToDateReport(mtdReport)
       setRangeStart(selectedDates[0])
-      setAdsCostMeta(selectedReport.adsCostMeta ?? 0)
-      setAdsCostTiktok(selectedReport.adsCostTiktok ?? 0)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to load the finance report.')
     } finally {
@@ -261,8 +260,8 @@ function FinanceReport() {
               <tr><td /><td>COGS</td><td /><td className="money-cell">{displayMoney(-totals.cogs)}</td><td>{percent(totals.cogs, totals.revenue)}</td></tr>
               <tr className="finance-total"><td /><th>Gross Profit</th><td>-</td><th className="money-cell">{displayMoney(totals.grossProfit)}</th><th>{percent(totals.grossProfit, totals.revenue)}</th></tr>
               <tr><td>Expenses</td><td>Operation Cost</td><td /><td className="money-cell">{displayMoney(totals.grossProfit * 0.55)}</td><td>{percent(totals.grossProfit * 0.55, totals.grossProfit)}</td></tr>
-              <tr><td>Expenses</td><td>Ads Cost Meta</td><td /><td className="money-cell input-cell"><span className="currency-symbol">$</span><input className="finance-money-input" aria-label="Meta ads cost" type="number" min="0" step="0.01" value={adsCostMeta || ''} placeholder="0.00" onChange={(event) => setAdsCostMeta(Number(event.target.value))} /></td><td>{percent(adsCostMeta, totals.grossProfit)}</td></tr>
-              <tr><td>Expenses</td><td>Ads Cost TikTok</td><td /><td className="money-cell input-cell"><span className="currency-symbol">$</span><input className="finance-money-input" aria-label="TikTok ads cost" type="number" min="0" step="0.01" value={adsCostTiktok || ''} placeholder="0.00" onChange={(event) => setAdsCostTiktok(Number(event.target.value))} /></td><td>{percent(adsCostTiktok, totals.grossProfit)}</td></tr>
+              <tr><td>Expenses</td><td>Ads Cost Meta</td><td /><td className="money-cell">{displayMoney(adsCostMeta)}</td><td>{percent(adsCostMeta, totals.grossProfit)}</td></tr>
+              <tr><td>Expenses</td><td>Ads Cost TikTok</td><td /><td className="money-cell">{displayMoney(adsCostTiktok)}</td><td>{percent(adsCostTiktok, totals.grossProfit)}</td></tr>
               <tr className="finance-spacer"><td colSpan={5} /></tr>
               <tr className="finance-net"><td /><th>NET Profit</th><td /><th className="money-cell">{displayMoney(totals.netProfit)}</th><th>{percent(totals.netProfit, totals.revenue)}</th></tr>
             </tbody>
