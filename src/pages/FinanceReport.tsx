@@ -5,8 +5,6 @@ type FinanceRow = { category: string; product: string; quantity: number; revenue
 type FinanceResponse = {
   reportDate: string
   dealCount: number
-  stripeCheckedDate?: string
-  stripeExcludedCount?: number
   rows: FinanceRow[]
   totalRevenue: number
   allocatedRevenue?: number
@@ -97,7 +95,6 @@ function mergeReports(reports: FinanceResponse[], reportDate: string): FinanceRe
   return {
     reportDate,
     dealCount: reports.reduce((sum, report) => sum + report.dealCount, 0),
-    stripeExcludedCount: reports.reduce((sum, report) => sum + (report.stripeExcludedCount ?? 0), 0),
     rows: [...rows.values()],
     totalRevenue: reports.reduce((sum, report) => sum + report.totalRevenue, 0),
     cogs: reports.reduce((sum, report) => sum + report.cogs, 0),
@@ -238,8 +235,8 @@ function FinanceReport() {
             <button type="button" onClick={fetchReport} disabled={isLoading || !activeEndDate || (range === 'range' && (!rangeStartDate || rangeStartDate > reportDate))}>
               {isLoading ? 'Applying…' : 'Apply'}
             </button>
-            <span>{isLoading ? 'Loading HubSpot and Stripe…' : report
-              ? `${rangeStart}${rangeStart !== activeEndDate ? ` – ${activeEndDate}` : ''} · ${report.dealCount} paid deals · ${report.stripeExcludedCount ?? 0} excluded by Stripe`
+            <span>{isLoading ? 'Loading HubSpot and ad spend…' : report
+              ? `${rangeStart}${rangeStart !== activeEndDate ? ` – ${activeEndDate}` : ''} · ${report.dealCount} paid deals`
               : ''}</span>
           </div>
         </div>

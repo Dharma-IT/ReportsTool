@@ -23,6 +23,7 @@ type BudgetResponse = {
   accountId: string
   currency: string
   campaigns: CampaignBudget[]
+  metaTotalDailyBudget?: number | null
   metaTotalSpending?: number | null
   metaLeadsTotal?: number | null
   tiktokTotalSpending?: number | null
@@ -406,7 +407,7 @@ function buildBudgetResponseFromRow(row: MetaBudgetReportRow): BudgetResponse {
 function getBudgetTotals(report: BudgetResponse | null) {
   const campaigns = report?.campaigns ?? []
 
-  return campaigns.reduce(
+  const campaignTotals = campaigns.reduce(
     (summary, campaign) => ({
       dailyBudget: summary.dailyBudget + (campaign.dailyBudget ?? 0),
       budgetRemaining: summary.budgetRemaining + (campaign.budgetRemaining ?? 0),
@@ -415,6 +416,12 @@ function getBudgetTotals(report: BudgetResponse | null) {
     }),
     { dailyBudget: 0, budgetRemaining: 0, spendYesterday: 0, resultsYesterday: 0 },
   )
+
+  return {
+    ...campaignTotals,
+    dailyBudget: report?.metaTotalDailyBudget ?? campaignTotals.dailyBudget,
+    spendYesterday: report ? (getMetaTotalSpending(report) ?? 0) : 0,
+  }
 }
 
 function getMonthKey(dateValue: string) {
@@ -1343,10 +1350,8 @@ function App() {
         throw new Error(payload?.message ?? 'Facebook data fetch failed.')
       }
 
-      const nextMetaTotalSpending = sumNullableCampaignMetric(
-        payload.campaigns ?? [],
-        'spendYesterday',
-      )
+      const nextMetaTotalSpending = payload.metaTotalSpending
+        ?? sumNullableCampaignMetric(payload.campaigns ?? [], 'spendYesterday')
       const nextMetaLeadsTotal = sumNullableCampaignMetric(
         payload.campaigns ?? [],
         'resultsYesterday',

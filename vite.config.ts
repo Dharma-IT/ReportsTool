@@ -9,15 +9,10 @@ import react from '@vitejs/plugin-react'
 const execFileAsync = promisify(execFile)
 const ACCOUNT_ID = 'act_653630476536860'
 const GRAPH_VERSION = 'v20.0'
-const TARGET_CAMPAIGN_PATTERNS = [
+const SMG_CAMPAIGN_PATTERNS = [
   '{sp} smg campaign - 0123 v3 - secondary',
   '{sp} smg campaign - 0123 v2 - secondary',
   '{sp} smg campaign - new ppl - 0123 v3',
-  // These campaigns also contribute to the Meta account spend shown in Ads
-  // Manager. Keep the fragments broad enough to survive date/suffix renames.
-  '{sp} bot training cmg campaign',
-  '{sp} dm bot training cmg campaign',
-  '{sp} followers @dharma.clinic',
 ]
 const CALL_CONFIRMATION_AGENTS = ['William Carcamo', 'Kathering Silva']
 const BUSINESS_HOURS_END = 19
@@ -215,23 +210,6 @@ type HubSpotLineItem = {
   properties: Record<string, string | null | undefined>
 }
 
-type HubSpotContact = {
-  id: string
-  properties: Record<string, string | null | undefined>
-}
-
-type StripeCharge = {
-  id: string
-  amount: number
-  created: number
-  currency: string
-  paid: boolean
-  refunded: boolean
-  billing_details?: { name?: string | null; email?: string | null; phone?: string | null }
-  receipt_email?: string | null
-  customer?: string | { name?: string | null; email?: string | null; phone?: string | null } | null
-}
-
 type HubSpotSearchResponse<T> = {
   results?: T[]
   paging?: { next?: { after?: string } }
@@ -270,9 +248,13 @@ function facebookBudgetApi(token: string): Plugin {
             access_token: token,
           })
 
-          const activeTargets = (campaigns.data ?? []).filter(
-            (campaign) =>
-              isTargetSmgCampaign(campaign.name) && campaign.effective_status === 'ACTIVE',
+          // The detail table remains SMG-only, while the headline/Finance spend
+          // reconciles to every campaign Meta currently reports as active.
+          const activeCampaigns = (campaigns.data ?? []).filter(
+            (campaign) => campaign.effective_status === 'ACTIVE',
+          )
+          const activeSmgCampaigns = activeCampaigns.filter((campaign) =>
+            isSmgCampaign(campaign.name),
           )
 
           const insights = await graphGet<GraphList<GraphInsight>>(`${ACCOUNT_ID}/insights`, {
@@ -294,7 +276,11 @@ function facebookBudgetApi(token: string): Plugin {
             accountName: 'Dtrix Ad Account #1',
             accountId: ACCOUNT_ID,
             currency: 'USD',
-            campaigns: activeTargets.map((campaign) => {
+            metaTotalDailyBudget: activeCampaigns.reduce((total, campaign) =>
+              total + (centsToDollars(campaign.daily_budget) ?? 0), 0),
+            metaTotalSpending: activeCampaigns.reduce((total, campaign) =>
+              total + (decimalStringToNumber(insightsByCampaign.get(campaign.id)?.spend) ?? 0), 0),
+            campaigns: activeSmgCampaigns.map((campaign) => {
               const insight = insightsByCampaign.get(campaign.id)
 
               return {
@@ -834,7 +820,6 @@ function financeReportApi(
   hubSpotToken: string,
   supabaseUrl: string,
   supabaseServiceRoleKey: string,
-  stripeSecretKey: string,
 ): Plugin {
   return {
     name: 'hubspot-finance-report-api',
@@ -850,8 +835,7 @@ function financeReportApi(
           }
 
           const paidDate = String(new Date(`${reportDate}T00:00:00Z`).getTime())
-          const stripeDate = shiftIsoDate(reportDate, -1)
-          const [deals, savedAdSpend, stripeCharges] = await Promise.all([
+          const [deals, savedAdSpend] = await Promise.all([
             searchAllHubSpotObjects<HubSpotDeal>('deals', {
             // Match the HubSpot Finance dashboard's business-date filter. Deals
             // can enter the PAID stage on a later calendar day, so stage-entry
@@ -864,19 +848,9 @@ function financeReportApi(
             properties: ['dealname', 'amount', 'net_revenue', 'value_refund'],
             }, hubSpotToken),
             fetchSavedAdSpend(reportDate, supabaseUrl, supabaseServiceRoleKey),
-            stripeSecretKey ? fetchStripeChargesForNewYorkDate(stripeDate, stripeSecretKey) : [],
           ])
 
-          // A zero Net Revenue marks a paid-stage deal whose sale should not be
-          // included in the finance report. A blank value is still a valid sale.
-          const reportDeals = deals.filter((deal) => {
-            const netRevenue = deal.properties.net_revenue
-            return netRevenue === null || netRevenue === undefined || netRevenue.trim() === '' || finiteNumber(netRevenue) !== 0
-          })
-          const { includedDeals, excludedDealIds } = stripeSecretKey
-            ? await excludeStripeMatchedDeals(reportDeals, stripeCharges, hubSpotToken)
-            : { includedDeals: reportDeals, excludedDealIds: new Set<string>() }
-          const dealIds = includedDeals.map((deal) => deal.id)
+          const dealIds = deals.map((deal) => deal.id)
           const associations = dealIds.length
             ? await hubSpotPost<{ results?: Array<{ from: { id: string }; to: Array<{ toObjectId: string }> }> }>(
                 '/crm/v4/associations/deals/line_items/batch/read',
@@ -915,13 +889,14 @@ function financeReportApi(
             productRows.set(key, current)
           }
 
-          // Deal-level revenue is authoritative because it includes charges such
-          // as tax or fees that do not always have their own line item. Keep the
-          // product allocation line-item based and expose any difference so the
-          // report always reconciles instead of silently dropping revenue.
+          // Match the HubSpot Finance dashboard's (SUM) Amount card. Deal-level
+          // Amount is authoritative because it also includes charges such as tax
+          // or fees that do not always have their own line item. Net Revenue is
+          // not used here: a value of zero previously removed otherwise-paid
+          // deals and caused the report total to differ from HubSpot.
           const allocatedRevenue = roundMoney(Array.from(productRows.values()).reduce((sum, row) => sum + row.revenue, 0))
-          const totalRevenue = roundMoney(includedDeals.reduce(
-            (sum, deal) => sum + finiteNumber(deal.properties.net_revenue, finiteNumber(deal.properties.amount)), 0,
+          const totalRevenue = roundMoney(deals.reduce(
+            (sum, deal) => sum + finiteNumber(deal.properties.amount), 0,
           ))
           const reconciliationDifference = roundMoney(totalRevenue - allocatedRevenue)
           if (Math.abs(reconciliationDifference) > 0.005) {
@@ -937,9 +912,7 @@ function financeReportApi(
             reportDate,
             timezone: 'America/New_York',
             fetchedAt: new Date().toISOString(),
-            dealCount: includedDeals.length,
-            stripeCheckedDate: stripeDate,
-            stripeExcludedCount: excludedDealIds.size,
+            dealCount: deals.length,
             rows: Array.from(productRows.values()).sort((a, b) => b.revenue - a.revenue),
             totalRevenue,
             allocatedRevenue,
@@ -947,7 +920,7 @@ function financeReportApi(
             cogs,
             adsCostMeta: savedAdSpend.meta,
             adsCostTiktok: savedAdSpend.tiktok,
-            revenueLoss: { cancelled: 0, dispute: 0, refund: includedDeals.reduce((sum, deal) => sum + finiteNumber(deal.properties.value_refund), 0) },
+            revenueLoss: { cancelled: 0, dispute: 0, refund: deals.reduce((sum, deal) => sum + finiteNumber(deal.properties.value_refund), 0) },
           })
         } catch (error) {
           sendJson(response, 500, { message: error instanceof Error ? error.message : 'Unable to build finance report.' })
@@ -1659,106 +1632,6 @@ async function searchAllHubSpotObjects<T>(
   return results
 }
 
-async function fetchStripeChargesForNewYorkDate(reportDate: string, secretKey: string) {
-  const { start, end } = getNewYorkMillisecondDayRange(reportDate)
-  const charges: StripeCharge[] = []
-  let startingAfter = ''
-
-  do {
-    const url = new URL('https://api.stripe.com/v1/charges')
-    url.searchParams.set('limit', '100')
-    url.searchParams.set('created[gte]', String(Math.floor(Number(start) / 1000)))
-    url.searchParams.set('created[lt]', String(Math.floor(Number(end) / 1000)))
-    url.searchParams.append('expand[]', 'data.customer')
-    if (startingAfter) url.searchParams.set('starting_after', startingAfter)
-
-    const response = await fetch(url, { headers: { Authorization: `Bearer ${secretKey}` } })
-    const payload = await response.json().catch(() => ({})) as {
-      data?: StripeCharge[]
-      has_more?: boolean
-      error?: { message?: string }
-    }
-    if (!response.ok) throw new Error(payload.error?.message ?? `Stripe API failed with ${response.status}.`)
-
-    const page = payload.data ?? []
-    charges.push(...page.filter((charge) => charge.paid && !charge.refunded && charge.currency.toLowerCase() === 'usd'))
-    startingAfter = payload.has_more && page.length ? page[page.length - 1].id : ''
-  } while (startingAfter)
-
-  return charges
-}
-
-async function excludeStripeMatchedDeals(
-  deals: HubSpotDeal[],
-  charges: StripeCharge[],
-  hubSpotToken: string,
-) {
-  if (!deals.length || !charges.length) return { includedDeals: deals, excludedDealIds: new Set<string>() }
-
-  const associations = await hubSpotPost<{
-    results?: Array<{ from: { id: string }; to?: Array<{ toObjectId: string }> }>
-  }>('/crm/v4/associations/deals/contacts/batch/read', {
-    inputs: deals.map((deal) => ({ id: deal.id })),
-  }, hubSpotToken)
-  const contactIdsByDeal = new Map((associations.results ?? []).map((row) => [
-    row.from.id,
-    (row.to ?? []).map((contact) => contact.toObjectId),
-  ]))
-  const contactIds = Array.from(new Set(Array.from(contactIdsByDeal.values()).flat()))
-  if (!contactIds.length) return { includedDeals: deals, excludedDealIds: new Set<string>() }
-
-  const contactBatch = await hubSpotPost<{ results?: HubSpotContact[] }>(
-    '/crm/v3/objects/contacts/batch/read',
-    {
-      inputs: contactIds.map((id) => ({ id })),
-      properties: ['firstname', 'lastname', 'email', 'phone', 'mobilephone'],
-    },
-    hubSpotToken,
-  )
-  const contactsById = new Map((contactBatch.results ?? []).map((contact) => [contact.id, contact]))
-  const unmatchedChargeIds = new Set(charges.map((charge) => charge.id))
-  const excludedDealIds = new Set<string>()
-
-  for (const deal of deals) {
-    const amountCents = Math.round(finiteNumber(deal.properties.net_revenue, finiteNumber(deal.properties.amount)) * 100)
-    if (amountCents <= 0) continue
-    const contacts = (contactIdsByDeal.get(deal.id) ?? []).map((id) => contactsById.get(id)).filter(Boolean) as HubSpotContact[]
-    const matchedCharge = charges.find((charge) => unmatchedChargeIds.has(charge.id)
-      && charge.amount === amountCents
-      && contacts.some((contact) => stripeChargeMatchesContact(charge, contact)))
-    if (matchedCharge) {
-      excludedDealIds.add(deal.id)
-      unmatchedChargeIds.delete(matchedCharge.id)
-    }
-  }
-
-  return { includedDeals: deals.filter((deal) => !excludedDealIds.has(deal.id)), excludedDealIds }
-}
-
-function stripeChargeMatchesContact(charge: StripeCharge, contact: HubSpotContact) {
-  const customer = typeof charge.customer === 'object' && charge.customer ? charge.customer : undefined
-  const stripeName = charge.billing_details?.name || customer?.name || ''
-  const stripeEmail = charge.billing_details?.email || charge.receipt_email || customer?.email || ''
-  const stripePhone = charge.billing_details?.phone || customer?.phone || ''
-  const hubSpotName = `${contact.properties.firstname ?? ''} ${contact.properties.lastname ?? ''}`
-  const hubSpotEmail = contact.properties.email ?? ''
-  const hubSpotPhones = [contact.properties.phone, contact.properties.mobilephone]
-
-  return Boolean(
-    (normalizePersonName(stripeName) && normalizePersonName(stripeName) === normalizePersonName(hubSpotName))
-    || (normalizeEmail(stripeEmail) && normalizeEmail(stripeEmail) === normalizeEmail(hubSpotEmail))
-    || (normalizePhoneNumber(stripePhone) && hubSpotPhones.some((phone) => phoneNumbersMatch(normalizePhoneNumber(stripePhone), normalizePhoneNumber(phone)))),
-  )
-}
-
-function normalizePersonName(value: string) {
-  return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-}
-
-function normalizeEmail(value: string) {
-  return value.trim().toLowerCase()
-}
-
 function finiteNumber(value: string | null | undefined, fallback = 0) {
   if (value === null || value === undefined || value.trim() === '') return fallback
   const parsed = Number(value)
@@ -2164,13 +2037,6 @@ function getNewYorkUnixDayRange(reportDate: string) {
   }
 }
 
-function getNewYorkMillisecondDayRange(reportDate: string) {
-  const start = zonedTimeToUtc(reportDate, 0, 0, 0, 'America/New_York')
-  const followingDate = shiftIsoDate(reportDate, 1)
-  const end = zonedTimeToUtc(followingDate, 0, 0, 0, 'America/New_York')
-  return { start: String(start.getTime()), end: String(end.getTime()) }
-}
-
 function zonedTimeToUtc(
   date: string,
   hour: number,
@@ -2231,20 +2097,19 @@ function decimalStringToNumber(value?: string) {
   return value ? Number(value) : null
 }
 
-function integerStringToNumber(value?: string) {
-  return value ? Number.parseInt(value, 10) : null
-}
-
-function isTargetSmgCampaign(campaignName: string) {
+function isSmgCampaign(campaignName: string) {
   const normalizedName = normalizeCampaignName(campaignName)
-
-  return TARGET_CAMPAIGN_PATTERNS.some((pattern) =>
+  return SMG_CAMPAIGN_PATTERNS.some((pattern) =>
     normalizedName.includes(normalizeCampaignName(pattern)),
   )
 }
 
 function normalizeCampaignName(campaignName: string) {
   return campaignName.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function integerStringToNumber(value?: string) {
+  return value ? Number.parseInt(value, 10) : null
 }
 
 function getMessagingConversationResults(insight?: GraphInsight) {
@@ -2318,7 +2183,6 @@ export default defineConfig(({ mode }) => {
         env.HUBSPOT_ACCESS_TOKEN ?? '',
         env.VITE_SUPABASE_URL ?? '',
         env.SUPABASE_SERVICE_ROLE_KEY ?? '',
-        env.STRIPE_SECRET_KEY ?? '',
       ),
     ],
   }
