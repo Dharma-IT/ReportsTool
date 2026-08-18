@@ -67,6 +67,7 @@ function getNewYorkDate() {
 
 const percent = (value: number, total: number) => total ? `${Math.round((value / total) * 100)}%` : '0%'
 const productOrder = ['Lipo Mino', 'Metformin', 'NAD+', 'Nutritional Consultation', 'Semaglutide', 'Tirzepatide']
+const retentionProducts = ['NAD+', 'NAD+ Spray', 'Semaglutide', 'Tirzepatide', 'Lipo Mino', 'Metformin', 'Sildenafil / Tadalafil', 'Zepbound']
 
 function shiftDate(value: string, days: number) {
   const date = new Date(`${value}T12:00:00Z`)
@@ -267,6 +268,53 @@ function FinanceReport() {
             </tbody>
           </table>
         </div>
+        <section className="finance-performance" aria-labelledby="finance-performance-title">
+          <div className="finance-performance-heading">
+            <div>
+              <span>Customer performance</span>
+              <h2 id="finance-performance-title">Recovery &amp; retention</h2>
+            </div>
+            <p>Month-to-date subscription health and revenue outlook.</p>
+          </div>
+
+          <div className="finance-performance-grid">
+            <article className="finance-insight-card recovered-card">
+              <header><span className="finance-insight-icon">↗</span><div><small>Recovered</small><h3>Revenue recovery</h3></div></header>
+              <dl>
+                <div><dt>Cancelled / paused subscriptions</dt><dd>0</dd></div>
+                <div><dt>Recovered clients</dt><dd>0</dd></div>
+                <div className="finance-insight-total"><dt>Total recovered</dt><dd>0%</dd></div>
+              </dl>
+            </article>
+
+            <article className="finance-insight-card goal-card">
+              <header><span className="finance-insight-icon">◎</span><div><small>Month to date</small><h3>Monthly goal</h3></div></header>
+              <dl>
+                <div><dt>Goal</dt><dd>{displayMoney(0)}</dd></div>
+                <div><dt>Achieved</dt><dd>{displayMoney(0)}</dd></div>
+                <div className="finance-insight-total"><dt>% Total</dt><dd>0%</dd></div>
+              </dl>
+              <div className="finance-goal-track" aria-label="0 percent of monthly goal achieved"><span /></div>
+            </article>
+
+            <article className="finance-insight-card profit-card">
+              <header><span className="finance-insight-icon">$</span><div><small>Month to date</small><h3>Approximate net profit</h3></div></header>
+              <strong>{displayMoney(0)}</strong>
+              <p>Estimated profit after costs and ad spend.</p>
+            </article>
+          </div>
+
+          <div className="retention-table-wrap">
+            <table className="retention-table">
+              <caption><span>Retention</span><small>Month to date</small></caption>
+              <thead><tr><th>Subscription</th><th>Active</th><th>Total clients</th><th>Retention rate</th><th>3-month subscription forecast</th></tr></thead>
+              <tbody>
+                {retentionProducts.map((product) => <tr key={product}><th>{product}</th><td>0</td><td>0</td><td><span className="retention-rate">0%</span></td><td className="money-cell">{displayMoney(0, true)}</td></tr>)}
+                <tr className="retention-total"><th>Total</th><th>0</th><th>0</th><th>0%</th><th className="money-cell">{displayMoney(0)}</th></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
           </div>
         </div>
       </section>
