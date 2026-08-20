@@ -1880,6 +1880,44 @@ tbody tr:last-child td {
   background: #376b91;
 }
 
+.bot-performance-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid #c9ddbc;
+  border-radius: 12px;
+  background: #effbe8;
+}
+
+.bot-performance-section h2 {
+  margin: 2px 0 0;
+  color: #163e2d;
+}
+
+.bot-performance-total {
+  display: grid;
+  min-width: 180px;
+  gap: 4px;
+  padding-left: 22px;
+  border-left: 1px solid #c9ddbc;
+}
+
+.bot-performance-total span {
+  color: #52705c;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bot-performance-total strong {
+  color: #163e2d;
+  font-size: 1.65rem;
+}
+
 .agent-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

@@ -4,6 +4,9 @@ import ReportHeroVisual from '../components/ReportHeroVisual'
 type AgentReportResponse = {
   reportDate: string
   timezone: string
+  botPerformance?: {
+    totalBookings: number | null
+  }
   agents: Array<{
     id: number | null
     name: string
@@ -360,6 +363,16 @@ function AgentReport() {
 
         {!isLoading && report ? (
           <>
+            <section className="bot-performance-section" aria-labelledby="bot-performance-title">
+              <div>
+                <p className="eyebrow">HubSpot AI bookings</p>
+                <h2 id="bot-performance-title">Bot Performance</h2>
+              </div>
+              <div className="bot-performance-total">
+                <span>Total bookings</span>
+                <strong>{report.botPerformance?.totalBookings ?? '—'}</strong>
+              </div>
+            </section>
             <div className="agent-summary-grid">
               <div><span>Total call time</span><strong>{formatDuration(report.totals.callLengthSeconds)}</strong></div>
               <div><span>Inbound</span><strong>{report.totals.inbound}</strong></div>

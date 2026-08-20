@@ -1024,10 +1024,11 @@ function agentReportApi(
           }
 
           const { from, to } = getNewYorkUnixDayRange(reportDate)
-          const [calls, users, hubSpotBookings] = await Promise.all([
+          const [calls, users, hubSpotBookings, botBookings] = await Promise.all([
             fetchAircallCalls({ apiId, apiToken, from, to, phoneNumber: '', direction: null }),
             fetchAircallUsers(apiId, apiToken),
             fetchHubSpotStaffBookings(reportDate, hubSpotToken).catch(() => null),
+            fetchHubSpotBotBookings(reportDate, hubSpotToken).catch(() => null),
           ])
           const agents = AGENT_REPORT_AGENTS.map(({ name, aliases }) => {
             const matchingUsers = users.filter(
@@ -1132,6 +1133,9 @@ function agentReportApi(
           const reportData = {
             reportDate,
             timezone: 'America/New_York',
+            botPerformance: {
+              totalBookings: botBookings,
+            },
             agents,
             totals: {
               callLengthSeconds: agents.reduce((sum, agent) => sum + agent.callLengthSeconds, 0),
@@ -1565,6 +1569,50 @@ async function fetchHubSpotStaffBookings(reportDate: string, token: string) {
   }
 
   return bookings
+}
+
+async function fetchHubSpotBotBookings(reportDate: string, token: string) {
+  if (!token) throw new Error('HubSpot reporting is not configured.')
+  const { from, to } = getNewYorkUnixDayRange(reportDate)
+  let totalBookings = 0
+  let after: string | undefined
+
+  do {
+    const response = await hubSpotPost<HubSpotSearchResponse<HubSpotDeal>>(
+      '/crm/v3/objects/deals/search',
+      {
+        filterGroups: [
+          {
+            filters: [
+              {
+                propertyName: 'hs_createdate',
+                operator: 'GTE',
+                value: String(from * 1000),
+              },
+              {
+                propertyName: 'hs_createdate',
+                operator: 'LTE',
+                value: String(to * 1000),
+              },
+              {
+                propertyName: 'created_by_ai_bot',
+                operator: 'EQ',
+                value: 'true',
+              },
+            ],
+          },
+        ],
+        properties: ['hs_createdate'],
+        limit: 200,
+        ...(after ? { after } : {}),
+      },
+      token,
+    )
+    totalBookings += (response.results ?? []).length
+    after = response.paging?.next?.after
+  } while (after)
+
+  return totalBookings
 }
 
 async function fetchHubSpotOwners(token: string) {
