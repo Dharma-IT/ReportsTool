@@ -2183,6 +2183,27 @@ function sendJson(response: ServerResponse, status: number, data: unknown) {
   response.end(JSON.stringify(data))
 }
 
+function botReportsApi(): Plugin {
+  return {
+    name: 'bot-reports-api',
+    configureServer(server) {
+      server.middlewares.use('/api/bot-reports/bookings', async (_request, response) => {
+        try {
+          const upstream = await fetch('https://dharma-agent-yd5l.onrender.com/api/reports/bookings')
+          const body = await upstream.text()
+          response.statusCode = upstream.status
+          response.setHeader('Content-Type', upstream.headers.get('content-type') ?? 'application/json')
+          response.end(body)
+        } catch (error) {
+          sendJson(response, 502, {
+            message: error instanceof Error ? error.message : 'Unable to load booking report',
+          })
+        }
+      })
+    },
+  }
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
@@ -2195,6 +2216,7 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       react(),
+      botReportsApi(),
       facebookBudgetApi(env.FACEBOOK_SYSTEM_ACCESS_TOKEN ?? ''),
       respondIoReportMetricsApi(
         env.RESPOND_IO_ACCESS_TOKEN ?? '',

@@ -2937,3 +2937,25 @@ tbody tr:last-child td {
     font-size: 24px;
   }
 }
+
+.bot-reports-heading {
+  align-items: flex-end;
+  margin-bottom: 24px;
+}
+
+.bot-report-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 24px;
+}
+
+@media (max-width: 820px) {
+  .bot-reports-heading {
+    align-items: stretch;
+  }
+}
+
+@media (max-width: 540px) {
+  .bot-report-summary {
+    grid-template-columns: 1fr;
+  }
+}
