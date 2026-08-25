@@ -20,6 +20,17 @@ type BookingReport = {
   rows: Booking[]
 }
 
+async function parseReportResponse(response: Response) {
+  if (!response.ok) throw new Error('Unable to load booking report')
+
+  const contentType = response.headers.get('content-type') ?? ''
+  if (!contentType.includes('application/json')) {
+    throw new Error('The booking API is not configured on this deployment')
+  }
+
+  return response.json() as Promise<BookingReport>
+}
+
 const EASTERN_TIME_ZONE = 'America/New_York'
 
 const easternDateFormatter = new Intl.DateTimeFormat('en-CA', {
@@ -68,8 +79,7 @@ function BotReports() {
 
     try {
       const response = await fetch('/api/bot-reports/bookings', { signal })
-      if (!response.ok) throw new Error('Unable to load booking report')
-      setReport((await response.json()) as BookingReport)
+      setReport(await parseReportResponse(response))
     } catch (loadError) {
       if (loadError instanceof DOMException && loadError.name === 'AbortError') return
       setError(loadError instanceof Error ? loadError.message : 'Unable to load booking report')
@@ -82,10 +92,7 @@ function BotReports() {
     const controller = new AbortController()
 
     fetch('/api/bot-reports/bookings', { signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error('Unable to load booking report')
-        return response.json() as Promise<BookingReport>
-      })
+      .then(parseReportResponse)
       .then(setReport)
       .catch((loadError: unknown) => {
         if (loadError instanceof DOMException && loadError.name === 'AbortError') return
