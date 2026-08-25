@@ -3,12 +3,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 type Booking = {
   id: number
   respond_contact_id: string
+  contact_phone: string | null
   booked_at: string
   meeting_start_at: string
   source_platform: string | null
   source_type: string | null
   campaign_name: string | null
   ad_name: string | null
+  attribution_data?: {
+    contactPhone?: string | null
+  } | null
 }
 
 type BookingReport = {
@@ -64,6 +68,10 @@ function getSource(booking: Booking) {
   if (source.includes('tik') || source.includes('byte')) return 'tiktok'
   if (source.includes('organic')) return 'organic'
   return source || 'unknown'
+}
+
+function getPhoneNumber(booking: Booking) {
+  return booking.contact_phone ?? booking.attribution_data?.contactPhone ?? '—'
 }
 
 function BotReports() {
@@ -163,7 +171,7 @@ function BotReports() {
               </div>
               <div className="bot-table-wrap">
                 <table className="bot-report-table">
-                  <thead><tr><th>Contact ID</th><th>Booked at</th><th>Meeting time</th><th>Source</th></tr></thead>
+                  <thead><tr><th>Contact ID</th><th>Booked at</th><th>Meeting time</th><th>Source</th><th>Phone number</th><th>Status</th></tr></thead>
                   <tbody>
                     {rows.map((booking) => {
                       const source = getSource(booking)
@@ -172,9 +180,11 @@ function BotReports() {
                         <td>{formatDateTime(booking.booked_at)}</td>
                         <td>{formatDateTime(booking.meeting_start_at)}</td>
                         <td><span className={`bot-source-pill ${source}`}>{source}</span></td>
+                        <td>{getPhoneNumber(booking)}</td>
+                        <td />
                       </tr>
                     })}
-                    {!rows.length ? <tr><td className="bot-empty-state" colSpan={4}>No bookings match this Eastern Time date range.</td></tr> : null}
+                    {!rows.length ? <tr><td className="bot-empty-state" colSpan={6}>No bookings match this Eastern Time date range.</td></tr> : null}
                   </tbody>
                 </table>
               </div>
