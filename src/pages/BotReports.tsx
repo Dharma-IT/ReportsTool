@@ -163,7 +163,7 @@ function BotReports() {
               </div>
               <div className="bot-table-wrap">
                 <table className="bot-report-table">
-                  <thead><tr><th>Contact ID</th><th>Booked at</th><th>Meeting time</th><th>Source</th><th>Campaign</th><th>Ad</th></tr></thead>
+                  <thead><tr><th>Contact ID</th><th>Booked at</th><th>Meeting time</th><th>Source</th></tr></thead>
                   <tbody>
                     {rows.map((booking) => {
                       const source = getSource(booking)
@@ -172,11 +172,9 @@ function BotReports() {
                         <td>{formatDateTime(booking.booked_at)}</td>
                         <td>{formatDateTime(booking.meeting_start_at)}</td>
                         <td><span className={`bot-source-pill ${source}`}>{source}</span></td>
-                        <td>{booking.campaign_name ?? '—'}</td>
-                        <td>{booking.ad_name ?? '—'}</td>
                       </tr>
                     })}
-                    {!rows.length ? <tr><td className="bot-empty-state" colSpan={6}>No bookings match this Eastern Time date range.</td></tr> : null}
+                    {!rows.length ? <tr><td className="bot-empty-state" colSpan={4}>No bookings match this Eastern Time date range.</td></tr> : null}
                   </tbody>
                 </table>
               </div>
