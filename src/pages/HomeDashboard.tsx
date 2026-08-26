@@ -26,10 +26,26 @@ const reportLinks = [
   {
     path: '/agent-report',
     number: '04',
-    title: 'Agent activity',
+    title: 'Customer care',
     copy: 'See calls, messages, connection quality and bookings across the team.',
-    action: 'View agent report',
+    action: 'View customer care',
     icon: 'people',
+  },
+  {
+    path: '/daily',
+    number: '05',
+    title: 'Daily reports',
+    copy: 'Review live Aircall and HubSpot performance across customer care and sales.',
+    action: 'Open daily reports',
+    icon: 'calendar',
+  },
+  {
+    path: '/bot-reports',
+    number: '06',
+    title: 'Bot reports',
+    copy: 'Track automated conversations, engagement, and booking performance by date.',
+    action: 'View bot reports',
+    icon: 'bot',
   },
 ]
 
@@ -42,6 +58,12 @@ function ReportIcon({ name }: { name: string }) {
   }
   if (name === 'people') {
     return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm7-1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM2.5 20v-2.2c0-2.4 2.7-4.3 6-4.3s6 1.9 6 4.3V20h-12Zm12.7 0v-2.2c0-1.3-.5-2.5-1.5-3.5.6-.2 1.2-.3 1.8-.3 3.3 0 6 1.8 6 4v2h-6.3Z" /></svg>
+  }
+  if (name === 'calendar') {
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18M8 14h2M14 14h2M8 18h2M14 18h2"/></svg>
+  }
+  if (name === 'bot') {
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 3v4M8 12h.01M16 12h.01M8 16h8"/><circle cx="12" cy="3" r="1"/></svg>
   }
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18.5 8.1 13l4 3.4L21 6.5M16 6.5h5v5" /></svg>
 }

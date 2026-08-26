@@ -324,7 +324,7 @@ function AgentReport() {
         <div className="agent-report-heading">
           <div>
             <p className="eyebrow">Aircall analytics</p>
-            <h1 id="agent-report-title">Agent Report</h1>
+            <h1 id="agent-report-title">Customer Care</h1>
             <p>Total answered call time and call volume by agent.</p>
             <ReportHeroVisual variant="agents" />
           </div>

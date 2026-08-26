@@ -28,6 +28,20 @@ const AGENT_REPORT_AGENTS = [
   { name: 'Kevin Tinjaca', aliases: ['Kevin Tinjaca'] },
   { name: 'Zara Meza', aliases: ['Zara Meza'] },
 ]
+const DAILY_CS_AGENTS = [
+  { name: 'Arles Martinez', aliases: ['Arles Martinez'] },
+  { name: 'Aline Strelow', aliases: ['Aline Strelow', 'Ailene Nuevas', 'Alice F'] },
+  { name: 'Brayam Zuluaga', aliases: ['Brayam Zuluaga', 'Brayan Zuluaga'] },
+  { name: 'Edmilson Morales', aliases: ['Edmilson Morales'] },
+]
+const DAILY_SALES_AGENTS = [
+  { name: 'Andres Castro', aliases: ['Andres Castro', 'Andrés Castro'] },
+  { name: 'Maria Claudia', aliases: ['Maria Claudia', 'María Claudia'] },
+  { name: 'Alejandro Rivera', aliases: ['Alejandro Rivera'] },
+  { name: 'Erika Vargas', aliases: ['Erika Vargas'] },
+  { name: 'Meribet Yazziet', aliases: ['Meribet Yazziet'] },
+  { name: 'Ailin Isabel', aliases: ['Ailin Isabel', 'Ailín Isabel'] },
+]
 const STAFF_PERFORMANCE_REPORT = [
   { name: 'Belizabett Gonzalez', respondAliases: ['Belizabett Gonzalez'], hubSpotAliases: ['Belizabett Gonzalez'], hasCalls: true },
   { name: 'Carol Fernandes', respondAliases: ['Carolina Lopez'], hubSpotAliases: ['Carol Fernandes'], hasCalls: false },
@@ -816,6 +830,106 @@ function callConfirmationApi(hubSpotToken: string, apiId: string, apiToken: stri
   }
 }
 
+type DailyCsHubSpotMetrics = {
+  injections: number
+  nad: number
+  plan: number
+  peptides: number
+  sales: number
+  refunds: number
+  balance: number
+}
+
+function emptyDailyCsHubSpotMetrics(): DailyCsHubSpotMetrics {
+  return { injections: 0, nad: 0, plan: 0, peptides: 0, sales: 0, refunds: 0, balance: 0 }
+}
+
+function classifyDailyCsProduct(name: string) {
+  const product = name.toLowerCase()
+  if (product.includes('nad+') || /\bnad\b/.test(product)) return 'nad'
+  if (product.includes('nutrition')) return 'plan'
+  if (
+    (product.includes('peptide') && !product.includes('tirzepatide')) ||
+    ['bpc-157', 'bpc 157', 'cjc-1295', 'cjc 1295', 'ipamorelin', 'sermorelin', 'tesamorelin'].some((name) => product.includes(name))
+  ) return 'peptides'
+  if (product.includes('semaglutide') || product.includes('tirzepatide') || product.includes('injection') || product.includes('slim boost')) return 'injections'
+  return null
+}
+
+async function fetchDailyCsHubSpot(
+  fromDate: string,
+  toDate: string,
+  token: string,
+  teamAgents: Array<{ name: string; aliases: string[] }>,
+) {
+  if (!token) throw new Error('HubSpot reporting is not configured.')
+  const fromPaidDate = String(Date.parse(`${fromDate}T00:00:00Z`))
+  const toPaidDate = String(Date.parse(`${toDate}T00:00:00Z`))
+  const deals = await searchAllHubSpotObjects<HubSpotDeal>('deals', {
+    filterGroups: [{ filters: [{
+      propertyName: 'paid_date_all_pipelines',
+      operator: fromDate === toDate ? 'EQ' : 'BETWEEN',
+      value: fromPaidDate,
+      ...(fromDate === toDate ? {} : { highValue: toPaidDate }),
+    }] }],
+    properties: ['dealname', 'amount', 'value_refund', 'hubspot_owner_id'],
+  }, token)
+  const owners = await fetchHubSpotOwners(token)
+  const ownerNames = new Map(owners.map((owner) => [
+    owner.id,
+    `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim(),
+  ]))
+
+  const dealToLineItems = new Map<string, string[]>()
+  for (let index = 0; index < deals.length; index += 100) {
+    const dealBatch = deals.slice(index, index + 100)
+    const associations = await hubSpotPost<{ results?: Array<{ from: { id: string }; to: Array<{ toObjectId: string }> }> }>(
+      '/crm/v4/associations/deals/line_items/batch/read',
+      { inputs: dealBatch.map((deal) => ({ id: deal.id })) },
+      token,
+    )
+    for (const row of associations.results ?? []) {
+      dealToLineItems.set(row.from.id, row.to.map((item) => item.toObjectId))
+    }
+  }
+
+  const lineItemIds = Array.from(new Set(Array.from(dealToLineItems.values()).flat()))
+  const lineItemsById = new Map<string, HubSpotLineItem>()
+  for (let index = 0; index < lineItemIds.length; index += 100) {
+    const itemBatch = lineItemIds.slice(index, index + 100)
+    const payload = await hubSpotPost<{ results?: HubSpotLineItem[] }>(
+      '/crm/v3/objects/line_items/batch/read',
+      { inputs: itemBatch.map((id) => ({ id })), properties: ['name', 'quantity'] },
+      token,
+    )
+    for (const item of payload.results ?? []) lineItemsById.set(item.id, item)
+  }
+
+  const metrics = new Map<string, DailyCsHubSpotMetrics>()
+  for (const deal of deals) {
+    const ownerName = ownerNames.get(deal.properties.hubspot_owner_id ?? '')
+    if (!ownerName) continue
+    const matchingAgent = teamAgents.find((agent) =>
+      agent.aliases.some((alias) => namesMatch(ownerName, alias)),
+    )
+    if (!matchingAgent) continue
+    const key = matchingAgent.name.toLowerCase()
+    const row = metrics.get(key) ?? emptyDailyCsHubSpotMetrics()
+    row.sales += finiteNumber(deal.properties.amount)
+    row.refunds += finiteNumber(deal.properties.value_refund)
+    for (const itemId of dealToLineItems.get(deal.id) ?? []) {
+      const item = lineItemsById.get(itemId)
+      const category = classifyDailyCsProduct(item?.properties.name ?? '')
+      if (category) row[category] += finiteNumber(item?.properties.quantity, 1)
+    }
+    row.sales = roundMoney(row.sales)
+    row.refunds = roundMoney(row.refunds)
+    row.balance = roundMoney(row.sales - row.refunds)
+    metrics.set(key, row)
+  }
+  return metrics
+}
+
 function financeReportApi(
   hubSpotToken: string,
   supabaseUrl: string,
@@ -963,6 +1077,82 @@ function agentReportApi(
   return {
     name: 'aircall-agent-report-api',
     configureServer(server) {
+      server.middlewares.use('/api/daily-cs-report', async (request, response) => {
+        try {
+          if (!apiId || !apiToken) {
+            sendJson(response, 500, { message: 'Missing Aircall credentials.' })
+            return
+          }
+
+          const requestUrl = new URL(request.url ?? '', 'http://localhost')
+          const team = requestUrl.searchParams.get('team') === 'sales' ? 'sales' : 'cs'
+          const teamAgents = team === 'sales' ? DAILY_SALES_AGENTS : DAILY_CS_AGENTS
+          const fromDate = requestUrl.searchParams.get('from') || getTodayInNewYork()
+          const toDate = requestUrl.searchParams.get('to') || fromDate
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(toDate)) {
+            sendJson(response, 400, { message: 'Dates must use YYYY-MM-DD.' })
+            return
+          }
+          if (fromDate > toDate) {
+            sendJson(response, 400, { message: 'The start date must be before the end date.' })
+            return
+          }
+          const rangeDays = Math.floor((Date.parse(`${toDate}T12:00:00Z`) - Date.parse(`${fromDate}T12:00:00Z`)) / 86400000) + 1
+          if (rangeDays > 31) {
+            sendJson(response, 400, { message: 'Choose a date range of 31 days or fewer.' })
+            return
+          }
+
+          const startRange = getNewYorkUnixDayRange(fromDate)
+          const endRange = getNewYorkUnixDayRange(toDate)
+          let hubSpotError: string | null = null
+          const [calls, users, hubSpotRows] = await Promise.all([
+            fetchAircallCalls({ apiId, apiToken, from: startRange.from, to: endRange.to, phoneNumber: '', direction: 'outbound' }),
+            fetchAircallUsers(apiId, apiToken),
+            fetchDailyCsHubSpot(fromDate, toDate, hubSpotToken, teamAgents).catch((error: unknown) => {
+              hubSpotError = error instanceof Error ? error.message : 'Unable to load HubSpot sales.'
+              return new Map<string, DailyCsHubSpotMetrics>()
+            }),
+          ])
+
+          const agents = teamAgents.map(({ name, aliases }) => {
+            const matchingUserIds = new Set(users
+              .filter((user) => user.id && user.name && aliases.some((alias) => namesMatch(user.name!, alias)))
+              .map((user) => user.id!))
+            const agentCalls = calls.filter((call) =>
+              Boolean((call.user?.id && matchingUserIds.has(call.user.id)) ||
+                (call.user?.name && aliases.some((alias) => namesMatch(call.user!.name!, alias)))),
+            )
+            const validCalls = agentCalls.filter((call) =>
+              call.answered_at !== null && Math.max(0, call.ended_at - call.answered_at) > 60,
+            )
+            const validSeconds = validCalls.reduce((sum, call) => sum + Math.max(0, call.ended_at - call.answered_at!), 0)
+            const totalTalkSeconds = agentCalls.reduce((sum, call) =>
+              sum + (call.answered_at === null ? 0 : Math.max(0, call.ended_at - call.answered_at)), 0)
+            const uniqueNumbers = new Set(agentCalls.map((call) => call.raw_digits).filter(Boolean))
+
+            const hubSpot = hubSpotRows.get(name.toLowerCase()) ?? emptyDailyCsHubSpotMetrics()
+            return {
+              name,
+              numbersCalled: uniqueNumbers.size,
+              totalIntents: agentCalls.length,
+              validCalls: validCalls.length,
+              averageCallSeconds: validCalls.length ? Math.round(validSeconds / validCalls.length) : 0,
+              totalTalkSeconds,
+              ...hubSpot,
+            }
+          })
+
+          sendJson(response, 200, {
+            fromDate, toDate, team, timezone: 'America/New_York', agents,
+            hubSpotAvailable: hubSpotError === null,
+            hubSpotError,
+          })
+        } catch (error) {
+          sendJson(response, 500, { message: error instanceof Error ? error.message : 'Unable to build the CS daily report.' })
+        }
+      })
+
       server.middlewares.use('/api/agent-report', async (request, response) => {
         try {
           const requestUrl = new URL(request.url ?? '', 'http://localhost')
