@@ -125,6 +125,29 @@ function HomeDashboard() {
           ))}
         </div>
       </section>
+
+      <section className="home-insight-visual" aria-labelledby="insight-visual-title">
+        <div className="home-insight-copy">
+          <span>LIVE WORKSPACE PULSE</span>
+          <h2 id="insight-visual-title">Momentum at a glance</h2>
+          <p>A visual snapshot of activity flowing across campaigns, conversations, and team reports.</p>
+          <div className="home-insight-legend"><i /><span>Report activity</span><b>Updated continuously</b></div>
+        </div>
+        <div className="home-insight-chart" aria-label="Animated report activity trend">
+          <div className="home-insight-stat"><span>Workspace trend</span><strong>Growing</strong><em>↗</em></div>
+          <svg viewBox="0 0 760 280" role="img" aria-label="Rising activity line chart">
+            <defs>
+              <linearGradient id="insightFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#e1b64d" stopOpacity=".38"/><stop offset="1" stopColor="#e1b64d" stopOpacity="0"/></linearGradient>
+            </defs>
+            <g className="home-insight-grid"><path d="M20 45H740M20 105H740M20 165H740M20 225H740"/><path d="M120 20V250M260 20V250M400 20V250M540 20V250M680 20V250"/></g>
+            <path className="home-insight-area" d="M20 230 C80 210 105 218 150 185 S230 207 280 150 365 177 420 124 510 148 565 88 655 111 740 37 V260H20Z"/>
+            <path className="home-insight-glow" d="M20 230 C80 210 105 218 150 185 S230 207 280 150 365 177 420 124 510 148 565 88 655 111 740 37"/>
+            <path className="home-insight-line" d="M20 230 C80 210 105 218 150 185 S230 207 280 150 365 177 420 124 510 148 565 88 655 111 740 37"/>
+            <g className="home-insight-points"><circle cx="150" cy="185" r="5"/><circle cx="280" cy="150" r="5"/><circle cx="420" cy="124" r="5"/><circle cx="565" cy="88" r="5"/><circle cx="740" cy="37" r="7"/></g>
+          </svg>
+          <div className="home-insight-axis"><span>Campaigns</span><span>Customer care</span><span>Daily reports</span><span>Automation</span></div>
+        </div>
+      </section>
     </main>
   )
 }

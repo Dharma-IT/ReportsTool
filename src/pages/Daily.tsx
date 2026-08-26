@@ -77,13 +77,58 @@ function getApiUrl(path: string) {
 }
 
 function formatDuration(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00:00'
+  seconds = Math.round(seconds)
   const hours = Math.floor(seconds / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
   return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 }
 
 function durationSeconds(value: string) {
-  return value ? value.split(':').reduce((seconds, part) => seconds * 60 + Number(part), 0) : 0
+  if (!value || !/^\d+:\d{2}:\d{2}$/.test(value)) return 0
+  const seconds = value.split(':').reduce((total, part) => total * 60 + Number(part), 0)
+  return Number.isFinite(seconds) ? seconds : 0
+}
+
+function safeNumber(value: number | undefined) {
+  return Number.isFinite(value) ? value! : 0
+}
+
+function DailyVisualizations({ rows }: { rows: DailyRow[] }) {
+  const maxCalls = Math.max(1, ...rows.map((row) => row.intents))
+  const maxSales = Math.max(1, ...rows.map((row) => row.sales))
+
+  return (
+    <section className="daily-visuals" aria-labelledby="daily-visuals-title">
+      <div className="daily-visuals-heading">
+        <div><span>Team visuals</span><h2 id="daily-visuals-title">Performance breakdown</h2></div>
+        <p>Live comparison for the selected reporting range.</p>
+      </div>
+      <div className="daily-chart-grid">
+        <article className="daily-chart-card">
+          <header><div><span>Aircall</span><h3>Call activity</h3></div><div className="daily-chart-key"><i /> Attempts <i /> Valid</div></header>
+          <div className="daily-call-chart">
+            {rows.map((row, index) => <div className="daily-bar-row" key={row.staff}>
+              <strong>{row.staff.split(' ')[0]}</strong>
+              <div className="daily-bars">
+                <span className="daily-bar-attempts" style={{ width: `${(row.intents / maxCalls) * 100}%`, animationDelay: `${index * 90}ms` }}><b>{row.intents}</b></span>
+                <span className="daily-bar-valid" style={{ width: `${(row.valid / maxCalls) * 100}%`, animationDelay: `${index * 90 + 80}ms` }}><b>{row.valid}</b></span>
+              </div>
+            </div>)}
+          </div>
+        </article>
+        <article className="daily-chart-card daily-revenue-chart">
+          <header><div><span>HubSpot</span><h3>Sales by staff</h3></div><strong>{money.format(rows.reduce((sum, row) => sum + row.sales, 0))}</strong></header>
+          <div className="daily-column-chart">
+            {rows.map((row, index) => <div className="daily-column" key={row.staff}>
+              <div><span style={{ height: `${Math.max(row.sales > 0 ? 7 : 0, (row.sales / maxSales) * 100)}%`, animationDelay: `${index * 100}ms` }}><b>{row.sales > 0 ? money.format(row.sales) : '$0'}</b></span></div>
+              <small>{row.staff.split(' ')[0]}</small>
+            </div>)}
+          </div>
+        </article>
+      </div>
+    </section>
+  )
 }
 
 function Daily() {
@@ -157,17 +202,17 @@ function Daily() {
         const agent = payload.agents.find((candidate) => candidate.name === row.staff)
         return agent ? {
           ...row,
-          called: agent.numbersCalled,
-          intents: agent.totalIntents,
-          valid: agent.validCalls,
-          average: agent.validCalls ? formatDuration(agent.averageCallSeconds) : '—',
-          aircall: formatDuration(agent.totalTalkSeconds),
-          injections: agent.injections,
-          nad: agent.nad,
-          plan: agent.plan,
-          peptides: agent.peptides,
-          sales: agent.sales,
-          balance: agent.balance,
+          called: safeNumber(agent.numbersCalled),
+          intents: safeNumber(agent.totalIntents),
+          valid: safeNumber(agent.validCalls),
+          average: safeNumber(agent.validCalls) ? formatDuration(safeNumber(agent.averageCallSeconds)) : '—',
+          aircall: formatDuration(safeNumber(agent.totalTalkSeconds)),
+          injections: safeNumber(agent.injections),
+          nad: safeNumber(agent.nad),
+          plan: safeNumber(agent.plan),
+          peptides: safeNumber(agent.peptides),
+          sales: safeNumber(agent.sales),
+          balance: safeNumber(agent.balance),
         } : row
       })
       const warning = payload.hubSpotAvailable === false ? (payload.hubSpotError ?? 'HubSpot sales were unavailable.') : ''
@@ -244,7 +289,7 @@ function Daily() {
             {error && <div className="daily-error" role="alert">{error}</div>}
             {sourceWarning && <div className="daily-warning" role="status">Aircall loaded, but HubSpot did not: {sourceWarning}</div>}
             {hasLiveData && <div className="daily-source-note">Aircall supplies call activity. HubSpot supplies products, sales, and refund-adjusted balance.{isSales ? ' Doxy columns are intentionally empty until connected.' : ''}</div>}
-            {hasLiveData ? <div className="daily-table-scroll">
+            {hasLiveData ? <><div className="daily-table-scroll">
               <table className={`daily-table ${isSales ? 'daily-sales-table' : ''}`}>
                 <thead>
                   <tr className="daily-group-row">
@@ -269,7 +314,7 @@ function Daily() {
                   {isSales && <><td /><td /><td /><td /><td /></>}
                   <td>{totals.injections}</td><td>{totals.nad}</td><td>{totals.plan}</td><td>{totals.peptides}</td><td>{money.format(totals.sales)}</td><td>{money.format(totals.balance)}</td><td /></tr></tfoot>
               </table>
-            </div> : !isLoading && !error ? <div className="daily-awaiting-fetch"><span aria-hidden="true">↻</span><strong>No report loaded</strong><p>Select a date range and click Fetch to load live Aircall and HubSpot values.</p></div> : null}
+            </div><DailyVisualizations rows={rows} /></> : !isLoading && !error ? <div className="daily-awaiting-fetch"><span aria-hidden="true">↻</span><strong>No report loaded</strong><p>Select a date range and click Fetch to load live Aircall and HubSpot values.</p></div> : null}
           </div>
         </div>
       </section>
