@@ -901,10 +901,6 @@ function CprLineChart({
   )
 }
 
-function shouldFillMetaEntry(value: string) {
-  return !value || value === '0'
-}
-
 function mergeReportToEntry(
   entry: ReportEntry,
   report: RespondIoReportResponse,
@@ -913,7 +909,7 @@ function mergeReportToEntry(
   return {
     ...entry,
     meta:
-      metaLeadsTotal !== undefined && metaLeadsTotal !== null && shouldFillMetaEntry(entry.meta)
+      metaLeadsTotal !== undefined && metaLeadsTotal !== null
         ? String(metaLeadsTotal)
         : entry.meta,
     totalRespondMeta:
@@ -1048,6 +1044,24 @@ async function saveMetaBudgetReport(
         Prefer: 'resolution=merge-duplicates',
       },
     },
+  )
+}
+
+async function saveRespondIoMetaLeads(reportDate: string, metaLeadsTotal: number) {
+  const params = new URLSearchParams({
+    report_date: `eq.${reportDate}`,
+  })
+
+  await supabaseRequest(
+    'respond_io_conversations',
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        meta: metaLeadsTotal,
+        fetched_at: new Date().toISOString(),
+      }),
+    },
+    params,
   )
 }
 
@@ -1280,10 +1294,7 @@ function App() {
 
         nextEntries[report.reportDate] = {
           ...currentEntry,
-          meta:
-            metaLeadsTotal !== null && shouldFillMetaEntry(currentEntry.meta)
-              ? String(metaLeadsTotal)
-              : currentEntry.meta,
+          meta: metaLeadsTotal === null ? currentEntry.meta : String(metaLeadsTotal),
         }
       })
 
@@ -1369,6 +1380,16 @@ function App() {
       setData(nextReport)
       setMetaReports((currentReports) => upsertBudgetReport(currentReports, nextReport))
       await saveMetaBudgetReport(nextReport, nextMetaTotalSpending, nextMetaLeadsTotal)
+      if (nextMetaLeadsTotal !== null) {
+        setRespondIoEntries((currentEntries) => ({
+          ...currentEntries,
+          [nextReport.reportDate]: {
+            ...(currentEntries[nextReport.reportDate] ?? emptyReportEntry),
+            meta: String(nextMetaLeadsTotal),
+          },
+        }))
+        await saveRespondIoMetaLeads(nextReport.reportDate, nextMetaLeadsTotal)
+      }
 
       return nextReport
     } catch (fetchError) {

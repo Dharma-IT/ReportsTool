@@ -10,6 +10,8 @@ const execFileAsync = promisify(execFile)
 const ACCOUNT_ID = 'act_653630476536860'
 const GRAPH_VERSION = 'v20.0'
 const SMG_CAMPAIGN_PATTERNS = [
+  '{sp} smg campaign - 2047 [new ppl]',
+  '{sp} smg campaign - 2047 [broad]',
   '{sp} smg campaign - 0123 v3 - secondary',
   '{sp} smg campaign - 0123 v2 - secondary',
   '{sp} smg campaign - new ppl - 0123 v3',
