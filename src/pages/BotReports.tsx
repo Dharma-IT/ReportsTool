@@ -24,6 +24,9 @@ type BookingReport = {
   rows: Booking[]
 }
 
+type DateField = 'booked' | 'meeting'
+type SortOrder = 'booked-desc' | 'booked-asc' | 'meeting-asc' | 'meeting-desc'
+
 async function parseReportResponse(response: Response) {
   if (!response.ok) throw new Error('Unable to load booking report')
 
@@ -80,6 +83,8 @@ function BotReports() {
   const [error, setError] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
+  const [dateField, setDateField] = useState<DateField>('booked')
+  const [sortOrder, setSortOrder] = useState<SortOrder>('booked-desc')
 
   const loadReport = useCallback(async (signal?: AbortSignal) => {
     setIsLoading(true)
@@ -113,10 +118,18 @@ function BotReports() {
     return () => controller.abort()
   }, [])
 
-  const rows = useMemo(() => (report?.rows ?? []).filter((booking) => {
-    const date = easternDateKey(booking.booked_at)
-    return (!startDate || date >= startDate) && (!endDate || date <= endDate)
-  }), [report, startDate, endDate])
+  const rows = useMemo(() => (report?.rows ?? [])
+    .filter((booking) => {
+      const value = dateField === 'meeting' ? booking.meeting_start_at : booking.booked_at
+      const date = easternDateKey(value)
+      return (!startDate || date >= startDate) && (!endDate || date <= endDate)
+    })
+    .sort((left, right) => {
+      const [field, direction] = sortOrder.split('-') as ['booked' | 'meeting', 'asc' | 'desc']
+      const leftValue = new Date(field === 'meeting' ? left.meeting_start_at : left.booked_at).getTime()
+      const rightValue = new Date(field === 'meeting' ? right.meeting_start_at : right.booked_at).getTime()
+      return direction === 'asc' ? leftValue - rightValue : rightValue - leftValue
+    }), [report, startDate, endDate, dateField, sortOrder])
 
   const sourceCounts = useMemo(() => rows.reduce((counts, booking) => {
     const source = getSource(booking)
@@ -142,10 +155,12 @@ function BotReports() {
         </header>
 
         <div className="bot-reports-toolbar">
-          <div className="bot-date-controls" aria-label="Filter bookings by booked date in Eastern Time">
+          <div className="bot-date-controls" aria-label="Filter and sort bookings by date in Eastern Time">
+            <label><span>Date field</span><select value={dateField} onChange={(event) => setDateField(event.target.value as DateField)}><option value="booked">Booked date</option><option value="meeting">Meeting date</option></select></label>
             <label><span>From</span><input type="date" value={startDate} max={endDate || undefined} onChange={(event) => setStartDate(event.target.value)} /></label>
             <span className="bot-date-divider" aria-hidden="true">to</span>
             <label><span>Through</span><input type="date" value={endDate} min={startDate || undefined} onChange={(event) => setEndDate(event.target.value)} /></label>
+            <label><span>Sort by</span><select value={sortOrder} onChange={(event) => setSortOrder(event.target.value as SortOrder)}><option value="booked-desc">Booked: newest</option><option value="booked-asc">Booked: oldest</option><option value="meeting-asc">Meeting: soonest</option><option value="meeting-desc">Meeting: latest</option></select></label>
             {hasDateFilter ? <button type="button" className="bot-clear-filter" onClick={() => { setStartDate(''); setEndDate('') }}>Clear</button> : null}
           </div>
           <button type="button" className="bot-refresh-button" onClick={() => void loadReport()} disabled={isLoading}>
@@ -159,7 +174,7 @@ function BotReports() {
         {report ? (
           <>
             <div className="bot-summary-grid" aria-label="Booking source totals">
-              <article className="total"><span>Total bookings</span><strong>{rows.length}</strong><small>{hasDateFilter ? 'In selected date range' : 'All available bookings'}</small></article>
+              <article className="total"><span>Total bookings</span><strong>{rows.length}</strong><small>{hasDateFilter ? `In selected ${dateField} date range` : 'All available bookings'}</small></article>
               <article className="meta"><span>Meta</span><strong>{sourceCounts.meta ?? 0}</strong><small>Facebook &amp; Instagram</small></article>
               <article className="tiktok"><span>TikTok</span><strong>{sourceCounts.tiktok ?? 0}</strong><small>TikTok bookings</small></article>
               <article className="organic"><span>Organic</span><strong>{sourceCounts.organic ?? 0}</strong><small>Unpaid bookings</small></article>
@@ -184,7 +199,7 @@ function BotReports() {
                         <td />
                       </tr>
                     })}
-                    {!rows.length ? <tr><td className="bot-empty-state" colSpan={6}>No bookings match this Eastern Time date range.</td></tr> : null}
+                    {!rows.length ? <tr><td className="bot-empty-state" colSpan={6}>No bookings match this Eastern Time {dateField} date range.</td></tr> : null}
                   </tbody>
                 </table>
               </div>
