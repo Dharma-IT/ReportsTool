@@ -272,6 +272,9 @@ function facebookBudgetApi(token: string): Plugin {
           const activeSmgCampaigns = activeCampaigns.filter((campaign) =>
             isSmgCampaign(campaign.name),
           )
+          const activeJobCampaigns = activeCampaigns.filter(
+            (campaign) => isJobCampaign(campaign.name) && !isSmgCampaign(campaign.name),
+          )
 
           const insights = await graphGet<GraphList<GraphInsight>>(`${ACCOUNT_ID}/insights`, {
             fields: 'campaign_id,spend,impressions,clicks,actions',
@@ -296,7 +299,9 @@ function facebookBudgetApi(token: string): Plugin {
               total + (centsToDollars(campaign.daily_budget) ?? 0), 0),
             metaTotalSpending: activeCampaigns.reduce((total, campaign) =>
               total + (decimalStringToNumber(insightsByCampaign.get(campaign.id)?.spend) ?? 0), 0),
-            campaigns: activeSmgCampaigns.map((campaign) => {
+            // Keep job campaigns in the saved breakdown so the sheet can subtract
+            // their spend without changing the all-campaign dashboard total.
+            campaigns: [...activeSmgCampaigns, ...activeJobCampaigns].map((campaign) => {
               const insight = insightsByCampaign.get(campaign.id)
 
               return {
@@ -2342,6 +2347,10 @@ function isSmgCampaign(campaignName: string) {
   return SMG_CAMPAIGN_PATTERNS.some((pattern) =>
     normalizedName.includes(normalizeCampaignName(pattern)),
   )
+}
+
+function isJobCampaign(campaignName: string) {
+  return /\bjob\b/i.test(campaignName)
 }
 
 function normalizeCampaignName(campaignName: string) {

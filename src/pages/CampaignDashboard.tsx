@@ -470,6 +470,24 @@ function getMetaTotalSpending(report: BudgetResponse) {
     : sumNullableCampaignMetric(report.campaigns ?? [], 'spendYesterday')
 }
 
+function isJobCampaign(campaign: CampaignBudget) {
+  return /\bjob\b/i.test(campaign.campaignName)
+}
+
+function getMetaTableSpending(report: BudgetResponse) {
+  const totalSpending = getMetaTotalSpending(report)
+
+  if (totalSpending === null) {
+    return null
+  }
+
+  const jobSpending = report.campaigns
+    .filter(isJobCampaign)
+    .reduce((total, campaign) => total + (campaign.spendYesterday ?? 0), 0)
+
+  return Math.max(0, totalSpending - jobSpending)
+}
+
 function formatCostPerResult(spend: number | null | undefined, leads: number | null | undefined) {
   if (!spend || !leads) {
     return ''
@@ -490,7 +508,7 @@ function getCostPerResultValue(
 }
 
 function buildSpanishReportRow(report: BudgetResponse, respondIoEntry?: ReportEntry): SpanishReportRow {
-  const metaSpend = getMetaTotalSpending(report)
+  const metaSpend = getMetaTableSpending(report)
   const metaLeads = getMetaLeadsTotal(report)
   const averageRespondLeadsValue = respondIoEntry
     ? getReportEntryTotals(respondIoEntry).totalMetaAndTiktok
@@ -1364,7 +1382,7 @@ function App() {
       const nextMetaTotalSpending = payload.metaTotalSpending
         ?? sumNullableCampaignMetric(payload.campaigns ?? [], 'spendYesterday')
       const nextMetaLeadsTotal = sumNullableCampaignMetric(
-        payload.campaigns ?? [],
+        (payload.campaigns ?? []).filter((campaign) => !isJobCampaign(campaign)),
         'resultsYesterday',
       )
       const nextReport = {
