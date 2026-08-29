@@ -530,7 +530,7 @@ function buildSpanishReportRow(report: BudgetResponse, respondIoEntry?: ReportEn
 }
 
 function buildHeroChartPoint(report: BudgetResponse, respondIoEntry?: ReportEntry): HeroChartPoint {
-  const metaSpend = getMetaTotalSpending(report)
+  const metaSpend = getMetaTableSpending(report)
   const metaLeads = getMetaLeadsTotal(report)
   const totalsForEntry = respondIoEntry
     ? getReportEntryTotals(respondIoEntry)
