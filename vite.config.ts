@@ -808,8 +808,11 @@ function callConfirmationApi(hubSpotToken: string, apiId: string, apiToken: stri
               numbers,
             }
           }
+          // Saturday tasks are carried into the following day's report, but they
+          // must still appear on Saturday itself when they were created before
+          // the 7 PM business-hours cutoff.
           const previousOutsideHoursTasks = previousTasks.filter(isOutsideBusinessHoursTask)
-          const currentBusinessHoursTasks = tasks.filter((task) => !isOutsideBusinessHoursTask(task))
+          const currentBusinessHoursTasks = tasks.filter((task) => !isAtOrAfterBusinessHoursEnd(task))
           const rows = [
             ...(previousOutsideHoursTasks.length
               ? [makeRow(previousReportDate, true, previousOutsideHoursTasks)]
@@ -1959,6 +1962,23 @@ function isOutsideBusinessHoursTask(task: HubSpotTask) {
   const hour = Number(newYorkParts.find((part) => part.type === 'hour')?.value)
 
   return weekday === 'Sat' || hour >= BUSINESS_HOURS_END
+}
+
+function isAtOrAfterBusinessHoursEnd(task: HubSpotTask) {
+  const createdAt = task.properties.hs_createdate
+  if (!createdAt) return false
+
+  const hour = Number(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      hour: '2-digit',
+      hourCycle: 'h23',
+    })
+      .formatToParts(new Date(createdAt))
+      .find((part) => part.type === 'hour')?.value,
+  )
+
+  return hour >= BUSINESS_HOURS_END
 }
 
 function shiftIsoDate(value: string, days: number) {
