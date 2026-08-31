@@ -34,7 +34,7 @@ const DAILY_CS_AGENTS = [
   { name: 'Arles Martinez', aliases: ['Arles Martinez'] },
   { name: 'Aline Strelow', aliases: ['Aline Strelow', 'Ailene Nuevas', 'Alice F'] },
   { name: 'Brayam Zuluaga', aliases: ['Brayam Zuluaga', 'Brayan Zuluaga'] },
-  { name: 'Edmilson Morales', aliases: ['Edmilson Morales'] },
+  { name: 'Edmilson Morales', aliases: ['Edmilson Morales', 'Edmilson Velasquez'] },
 ]
 const DAILY_SALES_AGENTS = [
   { name: 'Andres Castro', aliases: ['Andres Castro', 'Andrés Castro'] },
