@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.0.2",
+    "html-to-image": "^1.11.13",
     "playwright": "^1.60.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",

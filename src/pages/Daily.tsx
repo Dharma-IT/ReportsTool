@@ -1,4 +1,5 @@
 import { type ChangeEvent, useEffect, useRef, useState } from 'react'
+import { toPng } from 'html-to-image'
 
 type DailySection = 'CS' | 'Sales'
 type DailyRow = {
@@ -173,7 +174,9 @@ function Daily() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [reportSource, setReportSource] = useState<'live' | 'saved' | null>(null)
   const [doxyUpload, setDoxyUpload] = useState('')
+  const [isExporting, setIsExporting] = useState(false)
   const doxyFileInput = useRef<HTMLInputElement>(null)
+  const reportCard = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!isLoading) return
@@ -316,6 +319,28 @@ function Daily() {
     }
   }
 
+  async function exportReportImage() {
+    if (!reportCard.current || !hasLiveData || isExporting) return
+    setIsExporting(true)
+    setError('')
+    try {
+      const dataUrl = await toPng(reportCard.current, {
+        backgroundColor: '#ffffff',
+        cacheBust: true,
+        pixelRatio: 2,
+        filter: (node) => !(node instanceof HTMLElement && node.classList.contains('daily-export-button')),
+      })
+      const link = document.createElement('a')
+      link.download = `daily-${activeSection.toLowerCase()}-${fromDate}-${toDate}.png`
+      link.href = dataUrl
+      link.click()
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : 'Unable to export the report image.')
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   const totals = rows.reduce((summary, row) => ({
     called: summary.called + row.called,
     intents: summary.intents + row.intents,
@@ -370,10 +395,15 @@ function Daily() {
             </div>
           </header>
 
-          <div className="daily-table-card">
+          <div className="daily-table-card" ref={reportCard}>
             <div className="daily-table-title">
               <div><span>Live team sheet</span><strong>{activeSection} daily report</strong></div>
-              <small>{hasLiveData ? (reportSource === 'saved' ? 'Saved report' : 'Live Aircall + HubSpot') : 'Awaiting fetch'}</small>
+              <div className="daily-table-actions">
+                {hasLiveData && <button className="daily-export-button" type="button" onClick={exportReportImage} disabled={isExporting}>
+                  {isExporting ? 'Creating image…' : 'Export image'}
+                </button>}
+                <small>{hasLiveData ? (reportSource === 'saved' ? 'Saved report' : 'Live Aircall + HubSpot') : 'Awaiting fetch'}</small>
+              </div>
             </div>
             {isLoading && <div className="daily-fetch-loader" role="status" aria-live="polite">
               <span className="daily-loader-spinner" aria-hidden="true" />
