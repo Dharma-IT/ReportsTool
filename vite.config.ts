@@ -863,6 +863,17 @@ function classifyDailyCsProduct(name: string) {
   return null
 }
 
+function parseDailyCsDealDescription(description: string) {
+  const products: Array<{ name: string; quantity: number }> = []
+  const itemPattern = /(?:^|,\s*)(\d+(?:\.\d+)?)x\s+(.+?)(?=,\s*\d+(?:\.\d+)?x\s+|$)/gi
+  for (const match of description.matchAll(itemPattern)) {
+    const quantity = Number(match[1])
+    const name = match[2]?.trim()
+    if (name && Number.isFinite(quantity)) products.push({ name, quantity })
+  }
+  return products
+}
+
 async function fetchDailyCsHubSpot(
   fromDate: string,
   toDate: string,
@@ -879,7 +890,7 @@ async function fetchDailyCsHubSpot(
       value: fromPaidDate,
       ...(fromDate === toDate ? {} : { highValue: toPaidDate }),
     }] }],
-    properties: ['dealname', 'amount', 'value_refund', 'hubspot_owner_id'],
+    properties: ['dealname', 'amount', 'value_refund', 'hubspot_owner_id', 'deal_description_items__test'],
   }, token)
   const owners = await fetchHubSpotOwners(token)
   const ownerNames = new Map(owners.map((owner) => [
@@ -924,10 +935,23 @@ async function fetchDailyCsHubSpot(
     const row = metrics.get(key) ?? emptyDailyCsHubSpotMetrics()
     row.sales += finiteNumber(deal.properties.amount)
     row.refunds += finiteNumber(deal.properties.value_refund)
-    for (const itemId of dealToLineItems.get(deal.id) ?? []) {
-      const item = lineItemsById.get(itemId)
-      const category = classifyDailyCsProduct(item?.properties.name ?? '')
-      if (category) row[category] += finiteNumber(item?.properties.quantity, 1)
+    const descriptionProducts = parseDailyCsDealDescription(
+      deal.properties.deal_description_items__test ?? '',
+    )
+    if (descriptionProducts.length) {
+      for (const item of descriptionProducts) {
+        const category = classifyDailyCsProduct(item.name)
+        if (category) row[category] += item.quantity
+      }
+    } else {
+      // Older deals may not have the Transactions table's aggregate field.
+      // Associated line items remain a fallback, but are never added on top of
+      // the aggregate description because that would count the same item twice.
+      for (const itemId of dealToLineItems.get(deal.id) ?? []) {
+        const item = lineItemsById.get(itemId)
+        const category = classifyDailyCsProduct(item?.properties.name ?? '')
+        if (category) row[category] += finiteNumber(item?.properties.quantity, 1)
+      }
     }
     row.sales = roundMoney(row.sales)
     row.refunds = roundMoney(row.refunds)
