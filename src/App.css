@@ -656,6 +656,11 @@
 .daily-sidebar button:disabled { cursor:wait; opacity:.62; }
 .daily-sidebar button b { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 8px; background: rgba(28, 84, 60, 0.09); font-size: 10px; letter-spacing: .04em; }
 .daily-sidebar button.active b { background: rgba(255,255,255,.14); color: #f3cd65; }
+.daily-doxy-upload { display:grid; gap:8px; margin-top:14px; padding-top:18px; border-top:1px solid rgba(69,105,72,.14); }
+.daily-doxy-upload > span { margin:0 10px; color:#a17b2c; font-size:9px; font-weight:900; letter-spacing:.11em; text-transform:uppercase; }
+.daily-doxy-upload input { display:none; }
+.daily-doxy-upload small { padding:0 6px; color:#788574; font-size:9px; line-height:1.4; text-align:center; }
+.daily-doxy-upload button { background:#fff; border-color:rgba(52,88,65,.15); box-shadow:0 7px 18px rgba(30,62,42,.07); }
 .daily-content { min-width: 0; padding: 34px; }
 .daily-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:28px; }
 .daily-heading h1 { margin: 13px 0 8px; color: #173f30; font: 600 clamp(46px, 5vw, 66px)/0.9 Georgia, serif; letter-spacing: -0.04em; }
@@ -688,6 +693,7 @@
 @keyframes daily-loader-slide { from { transform:translateX(-105%); } to { transform:translateX(245%); } }
 .daily-error { padding:10px 20px; border-bottom:1px solid #efd1c8; background:#fff3ef; color:#9d442f; font-size:11px; font-weight:750; }
 .daily-warning { padding:10px 20px; border-bottom:1px solid #eadcb5; background:#fff9e8; color:#806421; font-size:11px; font-weight:750; }
+.daily-success { padding:10px 20px; border-bottom:1px solid #cfe1c3; background:#f1f8ea; color:#326044; font-size:11px; font-weight:750; }
 .daily-source-note { padding:9px 20px; border-bottom:1px solid rgba(52,88,65,.1); background:#fffdf5; color:#7f7353; font-size:10px; line-height:1.45; }
 .daily-awaiting-fetch { display:grid; min-height:300px; place-items:center; align-content:center; padding:36px; background:#fbfcf8; text-align:center; }
 .daily-awaiting-fetch > span { display:grid; width:48px; height:48px; place-items:center; border-radius:14px; background:#e8f0dd; color:#2a6045; font-size:24px; }
@@ -751,6 +757,8 @@
   .daily-sidebar > span { display: none; }
   .daily-sidebar button { text-align: center; }
   .daily-sidebar button { justify-content:center; }
+  .daily-doxy-upload { margin:0 0 0 auto; padding:0 0 0 10px; border-top:0; border-left:1px solid rgba(69,105,72,.14); }
+  .daily-doxy-upload > span,.daily-doxy-upload small { display:none; }
   .daily-content { padding: 28px 20px; }
   .daily-heading { align-items:flex-start; flex-direction:column; }
   .daily-date-controls { width:100%; }

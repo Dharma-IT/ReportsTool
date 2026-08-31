@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { type ChangeEvent, useEffect, useRef, useState } from 'react'
 
 type DailySection = 'CS' | 'Sales'
 type DailyRow = {
@@ -8,6 +8,10 @@ type DailyRow = {
   valid: number
   average: string
   aircall: string
+  doxyCalls: number
+  doxyValid: number
+  doxyAverage: string
+  doxyTotal: string
   injections: number
   nad: number
   plan: number
@@ -54,7 +58,8 @@ const teamStaff: Record<DailySection, string[]> = {
 
 function emptyRows(team: DailySection): DailyRow[] {
   return teamStaff[team].map((staff) => ({
-    staff, called: 0, intents: 0, valid: 0, average: '', aircall: '', injections: 0,
+    staff, called: 0, intents: 0, valid: 0, average: '', aircall: '', doxyCalls: 0,
+    doxyValid: 0, doxyAverage: '', doxyTotal: '', injections: 0,
     nad: 0, plan: 0, peptides: 0, sales: 0, balance: 0, observation: '',
   }))
 }
@@ -92,6 +97,31 @@ function durationSeconds(value: string) {
 
 function safeNumber(value: number | undefined) {
   return Number.isFinite(value) ? value! : 0
+}
+
+function parseCsv(text: string) {
+  const records: string[][] = []
+  let record: string[] = [], field = '', quoted = false
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]
+    if (character === '"') {
+      if (quoted && text[index + 1] === '"') { field += '"'; index += 1 } else quoted = !quoted
+    } else if (character === ',' && !quoted) { record.push(field); field = ''
+    } else if ((character === '\n' || character === '\r') && !quoted) {
+      if (character === '\r' && text[index + 1] === '\n') index += 1
+      record.push(field)
+      if (record.some(Boolean)) records.push(record)
+      record = []; field = ''
+    } else field += character
+  }
+  record.push(field)
+  if (record.some(Boolean)) records.push(record)
+  return records
+}
+
+function doxyDate(value: string) {
+  const match = value.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  return match ? `${match[3]}-${match[1].padStart(2, '0')}-${match[2].padStart(2, '0')}` : ''
 }
 
 function DailyVisualizations({ rows }: { rows: DailyRow[] }) {
@@ -142,6 +172,8 @@ function Daily() {
   const [sourceWarning, setSourceWarning] = useState('')
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [reportSource, setReportSource] = useState<'live' | 'saved' | null>(null)
+  const [doxyUpload, setDoxyUpload] = useState('')
+  const doxyFileInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!isLoading) return
@@ -182,6 +214,57 @@ function Daily() {
     setError('')
     setSourceWarning('')
     setReportSource(null)
+    setDoxyUpload('')
+  }
+
+  async function uploadDoxyReport(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setError('')
+    setDoxyUpload('')
+    try {
+      if (!file.name.toLowerCase().endsWith('.csv')) throw new Error('Please upload the Doxy meeting history as a CSV file.')
+      const records = parseCsv(await file.text())
+      const headers = records.shift()?.map((header) => header.replace(/^\uFEFF/, '').trim().toLowerCase()) ?? []
+      const dateIndex = headers.indexOf('date')
+      const providerIndex = headers.indexOf('provider name')
+      const durationIndex = headers.indexOf('duration')
+      if ([dateIndex, providerIndex, durationIndex].some((index) => index < 0)) throw new Error('This CSV needs Date, Provider name, and Duration columns.')
+
+      const metrics = new Map<string, { calls: number; valid: number; validSeconds: number; totalSeconds: number }>()
+      let matchedCalls = 0
+      for (const record of records) {
+        const date = doxyDate(record[dateIndex] ?? '')
+        if (!date || date < fromDate || date > toDate) continue
+        const provider = (record[providerIndex] ?? '').trim().toLowerCase()
+        if (!teamStaff.Sales.some((staff) => staff.toLowerCase() === provider)) continue
+        const seconds = durationSeconds(record[durationIndex] ?? '')
+        const metric = metrics.get(provider) ?? { calls: 0, valid: 0, validSeconds: 0, totalSeconds: 0 }
+        metric.calls += 1
+        matchedCalls += 1
+        if (seconds > 0) metric.totalSeconds += seconds
+        if (seconds > 60) { metric.valid += 1; metric.validSeconds += seconds }
+        metrics.set(provider, metric)
+      }
+      if (!matchedCalls) throw new Error(`No Sales provider calls were found between ${fromDate} and ${toDate}.`)
+
+      const uploadedRows = rows.map((row) => {
+        const metric = metrics.get(row.staff.toLowerCase())
+        return { ...row, doxyCalls: metric?.calls ?? 0, doxyValid: metric?.valid ?? 0,
+          doxyAverage: metric?.valid ? formatDuration(metric.validSeconds / metric.valid) : '—',
+          doxyTotal: metric ? formatDuration(metric.totalSeconds) : '0:00:00' }
+      })
+      setRows(uploadedRows)
+      setHasLiveData(true)
+      setDoxyUpload(`${file.name}: ${matchedCalls} calls matched the selected date range.`)
+      try {
+        const saved: SavedDailyReport = { team: 'Sales', fromDate, toDate, rows: uploadedRows, sourceWarning, fetchedAt: new Date().toISOString() }
+        localStorage.setItem(reportCacheKey('Sales', fromDate, toDate), JSON.stringify(saved))
+      } catch { /* The uploaded report still displays when browser storage is unavailable. */ }
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : 'Unable to read the Doxy CSV file.')
+    }
   }
 
   async function fetchDailyReport() {
@@ -239,16 +322,21 @@ function Daily() {
     valid: summary.valid + row.valid,
     talk: summary.talk + durationSeconds(row.aircall),
     weightedValid: summary.weightedValid + durationSeconds(row.average) * row.valid,
+    doxyCalls: summary.doxyCalls + safeNumber(row.doxyCalls),
+    doxyValid: summary.doxyValid + safeNumber(row.doxyValid),
+    doxyTalk: summary.doxyTalk + durationSeconds(row.doxyTotal),
+    doxyWeightedValid: summary.doxyWeightedValid + durationSeconds(row.doxyAverage) * safeNumber(row.doxyValid),
     injections: summary.injections + row.injections,
     nad: summary.nad + row.nad,
     plan: summary.plan + row.plan,
     peptides: summary.peptides + row.peptides,
     sales: summary.sales + row.sales,
     balance: summary.balance + row.balance,
-  }), { called: 0, intents: 0, valid: 0, talk: 0, weightedValid: 0, injections: 0, nad: 0, plan: 0, peptides: 0, sales: 0, balance: 0 })
+  }), { called: 0, intents: 0, valid: 0, talk: 0, weightedValid: 0, doxyCalls: 0, doxyValid: 0, doxyTalk: 0, doxyWeightedValid: 0, injections: 0, nad: 0, plan: 0, peptides: 0, sales: 0, balance: 0 })
 
   const isSales = activeSection === 'Sales'
   const averageTotal = totals.valid ? formatDuration(Math.round(totals.weightedValid / totals.valid)) : '—'
+  const doxyAverageTotal = totals.doxyValid ? formatDuration(Math.round(totals.doxyWeightedValid / totals.doxyValid)) : '—'
 
   return (
     <main className="dashboard-shell daily-page">
@@ -260,6 +348,12 @@ function Daily() {
               <b>{team === 'CS' ? 'CS' : 'SL'}</b><span>{team}</span>
             </button>
           ))}
+          {isSales && <div className="daily-doxy-upload">
+            <span>Doxy data</span>
+            <input ref={doxyFileInput} type="file" accept=".csv,text/csv" onChange={uploadDoxyReport} />
+            <button type="button" onClick={() => doxyFileInput.current?.click()} disabled={isLoading || !fromDate || !toDate}><b>CSV</b><span>Upload Doxy</span></button>
+            <small>Uses the selected date range (EST).</small>
+          </div>}
         </aside>
 
         <div className="daily-content">
@@ -288,7 +382,8 @@ function Daily() {
             </div>}
             {error && <div className="daily-error" role="alert">{error}</div>}
             {sourceWarning && <div className="daily-warning" role="status">Aircall loaded, but HubSpot did not: {sourceWarning}</div>}
-            {hasLiveData && <div className="daily-source-note">Aircall supplies call activity. HubSpot supplies products, sales, and refund-adjusted balance.{isSales ? ' Doxy columns are intentionally empty until connected.' : ''}</div>}
+            {doxyUpload && <div className="daily-success" role="status">Doxy uploaded: {doxyUpload}</div>}
+            {hasLiveData && <div className="daily-source-note">Aircall supplies call activity. HubSpot supplies products, sales, and refund-adjusted balance.{isSales ? ' Doxy values come from the uploaded meeting-history CSV.' : ''}</div>}
             {hasLiveData ? <><div className="daily-table-scroll">
               <table className={`daily-table ${isSales ? 'daily-sales-table' : ''}`}>
                 <thead>
@@ -307,11 +402,11 @@ function Daily() {
                 <tbody>{rows.map((row) => <tr key={row.staff}>
                   <th scope="row"><span className="daily-avatar">{row.staff.split(' ').map((name) => name[0]).join('')}</span>{row.staff}</th>
                   <td>{row.called}</td><td>{row.intents}</td><td>{row.valid}</td><td>{row.average}</td><td>{row.aircall}</td>
-                  {isSales && <><td /><td /><td /><td /><td /></>}
+                  {isSales && <><td>{row.doxyCalls ?? 0}</td><td>{row.doxyValid ?? 0}</td><td>{row.doxyAverage || '—'}</td><td>{row.doxyTotal || '0:00:00'}</td><td>{formatDuration(durationSeconds(row.aircall) + durationSeconds(row.doxyTotal))}</td></>}
                   <td>{row.injections}</td><td>{row.nad}</td><td>{row.plan}</td><td>{row.peptides}</td><td className="daily-money">{money.format(row.sales)}</td><td className="daily-money">{money.format(row.balance)}</td><td>{row.observation}</td>
                 </tr>)}</tbody>
                 <tfoot><tr><th>Total</th><td>{totals.called}</td><td>{totals.intents}</td><td>{totals.valid}</td><td>{averageTotal}</td><td>{formatDuration(totals.talk)}</td>
-                  {isSales && <><td /><td /><td /><td /><td /></>}
+                  {isSales && <><td>{totals.doxyCalls}</td><td>{totals.doxyValid}</td><td>{doxyAverageTotal}</td><td>{formatDuration(totals.doxyTalk)}</td><td>{formatDuration(totals.talk + totals.doxyTalk)}</td></>}
                   <td>{totals.injections}</td><td>{totals.nad}</td><td>{totals.plan}</td><td>{totals.peptides}</td><td>{money.format(totals.sales)}</td><td>{money.format(totals.balance)}</td><td /></tr></tfoot>
               </table>
             </div><DailyVisualizations rows={rows} /></> : !isLoading && !error ? <div className="daily-awaiting-fetch"><span aria-hidden="true">↻</span><strong>No report loaded</strong><p>Select a date range and click Fetch to load live Aircall and HubSpot values.</p></div> : null}
