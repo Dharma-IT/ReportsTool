@@ -964,6 +964,59 @@ async function fetchDailyCsHubSpot(
   return metrics
 }
 
+function normalizeAppointmentSalesSource(value: string | null | undefined) {
+  const source = (value ?? '').trim().toLowerCase()
+  if (source.includes('facebook') || source.includes('instagram') || source.includes('meta')) return 'meta'
+  if (source.includes('tik') || source.includes('byte')) return 'tiktok'
+  if (source.includes('repurchase')) return 'repurchase'
+  if (source.includes('follow up') || source.includes('followup')) return 'follow-ups'
+  return 'organic'
+}
+
+async function fetchDailySalesBySource(fromDate: string, toDate: string, token: string) {
+  if (!token) throw new Error('HubSpot reporting is not configured.')
+  const fromPaidDate = String(Date.parse(`${fromDate}T00:00:00Z`))
+  const toPaidDate = String(Date.parse(`${toDate}T00:00:00Z`))
+  const allDeals = await searchAllHubSpotObjects<HubSpotDeal>('deals', {
+    filterGroups: [{ filters: [{
+      propertyName: 'paid_date_all_pipelines',
+      operator: fromDate === toDate ? 'EQ' : 'BETWEEN',
+      value: fromPaidDate,
+      ...(fromDate === toDate ? {} : { highValue: toPaidDate }),
+    }] }],
+    properties: ['paid_date_all_pipelines', 'hubspot_owner_id'],
+  }, token)
+  const owners = await fetchHubSpotOwners(token)
+  const ownerNames = new Map(owners.map((owner) => [owner.id, `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim()]))
+  const dailyAgents = [...DAILY_CS_AGENTS, ...DAILY_SALES_AGENTS]
+  const deals = allDeals.filter((deal) => {
+    const ownerName = ownerNames.get(deal.properties.hubspot_owner_id ?? '')
+    return Boolean(ownerName && dailyAgents.some((agent) => agent.aliases.some((alias) => namesMatch(ownerName, alias))))
+  })
+  const dealBatches = Array.from({ length: Math.ceil(deals.length / 100) }, (_, index) => deals.slice(index * 100, (index + 1) * 100))
+  const associationGroups = await Promise.all(dealBatches.map((batch) => hubSpotPost<{
+    results?: Array<{ from: { id: string }; to: Array<{ toObjectId: number }> }>
+  }>('/crm/v4/associations/deals/contacts/batch/read', {
+    inputs: batch.map((deal) => ({ id: deal.id })),
+  }, token)))
+  const associations = associationGroups.flatMap((group) => group.results ?? [])
+  const contactIds = [...new Set(associations.flatMap((row) => row.to ?? []).map((contact) => String(contact.toObjectId)))]
+  const contactBatches = Array.from({ length: Math.ceil(contactIds.length / 100) }, (_, index) => contactIds.slice(index * 100, (index + 1) * 100))
+  const contactGroups = await Promise.all(contactBatches.map((ids) => hubSpotPost<{
+    results?: Array<{ id: string; properties: { source?: string | null } }>
+  }>('/crm/v3/objects/contacts/batch/read', {
+    properties: ['source'], inputs: ids.map((id) => ({ id })),
+  }, token)))
+  const sources = new Map(contactGroups.flatMap((group) => group.results ?? []).map((contact) => [String(contact.id), contact.properties.source]))
+  const dealSources = new Map(associations.map((row) => [String(row.from.id), (row.to ?? []).map((contact) => sources.get(String(contact.toObjectId))).find(Boolean)]))
+  const bySource: Record<string, number> = { meta: 0, tiktok: 0, repurchase: 0, 'follow-ups': 0, organic: 0 }
+  for (const deal of deals) {
+    const source = normalizeAppointmentSalesSource(dealSources.get(String(deal.id)))
+    bySource[source] = (bySource[source] ?? 0) + 1
+  }
+  return { total: deals.length, bySource }
+}
+
 function financeReportApi(
   hubSpotToken: string,
   supabaseUrl: string,
@@ -1113,11 +1166,6 @@ function agentReportApi(
     configureServer(server) {
       server.middlewares.use('/api/daily-cs-report', async (request, response) => {
         try {
-          if (!apiId || !apiToken) {
-            sendJson(response, 500, { message: 'Missing Aircall credentials.' })
-            return
-          }
-
           const requestUrl = new URL(request.url ?? '', 'http://localhost')
           const team = requestUrl.searchParams.get('team') === 'sales' ? 'sales' : 'cs'
           const teamAgents = team === 'sales' ? DAILY_SALES_AGENTS : DAILY_CS_AGENTS
@@ -1134,6 +1182,36 @@ function agentReportApi(
           const rangeDays = Math.floor((Date.parse(`${toDate}T12:00:00Z`) - Date.parse(`${fromDate}T12:00:00Z`)) / 86400000) + 1
           if (rangeDays > 31) {
             sendJson(response, 400, { message: 'Choose a date range of 31 days or fewer.' })
+            return
+          }
+
+          if (requestUrl.searchParams.get('mode') === 'sales-summary') {
+            const sales = await fetchDailySalesBySource(fromDate, toDate, hubSpotToken)
+            sendJson(response, 200, { fromDate, toDate, timezone: 'America/New_York', ...sales })
+            return
+          }
+
+          if (requestUrl.searchParams.get('mode') === 'saved') {
+            if (!supabaseUrl || !supabaseServiceRoleKey) {
+              sendJson(response, 500, { message: 'Daily report storage is not configured.' })
+              return
+            }
+            const savedResponse = await supabaseRest(
+              supabaseUrl,
+              supabaseServiceRoleKey,
+              `daily_reports?team=eq.${team}&from_date=eq.${encodeURIComponent(fromDate)}&to_date=eq.${encodeURIComponent(toDate)}&select=report_data&limit=1`,
+            )
+            const savedRows = await savedResponse.json() as Array<{ report_data: unknown }>
+            if (!savedRows.length) {
+              sendJson(response, 404, { message: 'No saved daily report exists for this team and date range.' })
+              return
+            }
+            sendJson(response, 200, savedRows[0].report_data)
+            return
+          }
+
+          if (!apiId || !apiToken) {
+            sendJson(response, 500, { message: 'Missing Aircall credentials.' })
             return
           }
 
@@ -1177,11 +1255,38 @@ function agentReportApi(
             }
           })
 
-          sendJson(response, 200, {
+          const reportData = {
             fromDate, toDate, team, timezone: 'America/New_York', agents,
             hubSpotAvailable: hubSpotError === null,
             hubSpotError,
-          })
+            fetchedAt: new Date().toISOString(),
+          }
+          if (supabaseUrl && supabaseServiceRoleKey) {
+            try {
+              await supabaseRest(
+                supabaseUrl,
+                supabaseServiceRoleKey,
+                'daily_reports?on_conflict=team,from_date,to_date',
+                {
+                  method: 'POST',
+                  headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+                  body: JSON.stringify({
+                    team,
+                    from_date: fromDate,
+                    to_date: toDate,
+                    timezone: reportData.timezone,
+                    report_data: reportData,
+                    fetched_at: reportData.fetchedAt,
+                  }),
+                },
+              )
+            } catch (storageError) {
+              Object.assign(reportData, {
+                storageWarning: storageError instanceof Error ? storageError.message : 'Unable to save the daily report.',
+              })
+            }
+          }
+          sendJson(response, 200, reportData)
         } catch (error) {
           sendJson(response, 500, { message: error instanceof Error ? error.message : 'Unable to build the CS daily report.' })
         }

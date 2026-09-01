@@ -100,6 +100,19 @@ function safeNumber(value: number | undefined) {
   return Number.isFinite(value) ? value! : 0
 }
 
+function rowsFromDailyResponse(team: DailySection, payload: DailyResponse) {
+  return emptyRows(team).map((row) => {
+    const agent = payload.agents.find((candidate) => candidate.name === row.staff)
+    return agent ? {
+      ...row,
+      called: safeNumber(agent.numbersCalled), intents: safeNumber(agent.totalIntents), valid: safeNumber(agent.validCalls),
+      average: safeNumber(agent.validCalls) ? formatDuration(safeNumber(agent.averageCallSeconds)) : '—',
+      aircall: formatDuration(safeNumber(agent.totalTalkSeconds)), injections: safeNumber(agent.injections), nad: safeNumber(agent.nad),
+      plan: safeNumber(agent.plan), peptides: safeNumber(agent.peptides), sales: safeNumber(agent.sales), balance: safeNumber(agent.balance),
+    } : row
+  })
+}
+
 function parseCsv(text: string) {
   const records: string[][] = []
   let record: string[] = [], field = '', quoted = false
@@ -186,27 +199,34 @@ function Daily() {
 
   useEffect(() => {
     if (isLoading || !fromDate || !toDate) return
-    try {
-      const cached = localStorage.getItem(reportCacheKey(activeSection, fromDate, toDate))
-      if (!cached) {
-        setRows(emptyRows(activeSection))
-        setHasLiveData(false)
-        setReportSource(null)
-        setSourceWarning('')
-        return
-      }
-      const saved = JSON.parse(cached) as SavedDailyReport
-      if (saved.team !== activeSection || saved.fromDate !== fromDate || saved.toDate !== toDate || !Array.isArray(saved.rows)) return
-      setRows(saved.rows)
-      setSourceWarning(saved.sourceWarning ?? '')
-      setHasLiveData(true)
-      setReportSource('saved')
-      setError('')
-    } catch {
-      setRows(emptyRows(activeSection))
-      setHasLiveData(false)
-      setReportSource(null)
+    let cancelled = false
+    const loadSavedReport = async () => {
+      try {
+        const params = new URLSearchParams({ from: fromDate, to: toDate, team: activeSection.toLowerCase(), mode: 'saved' })
+        const response = await fetch(getApiUrl(`/api/daily-cs-report?${params}`))
+        if (response.ok) {
+          const payload = await response.json() as DailyResponse
+          if (cancelled) return
+          setRows(rowsFromDailyResponse(activeSection, payload))
+          setSourceWarning(payload.hubSpotAvailable === false ? (payload.hubSpotError ?? 'HubSpot sales were unavailable.') : '')
+          setHasLiveData(true); setReportSource('saved'); setError('')
+          return
+        }
+      } catch { /* Fall back to this browser's saved copy. */ }
+      if (cancelled) return
+      try {
+        const cached = localStorage.getItem(reportCacheKey(activeSection, fromDate, toDate))
+        if (cached) {
+          const saved = JSON.parse(cached) as SavedDailyReport
+          if (saved.team === activeSection && saved.fromDate === fromDate && saved.toDate === toDate && Array.isArray(saved.rows)) {
+            setRows(saved.rows); setSourceWarning(saved.sourceWarning ?? ''); setHasLiveData(true); setReportSource('saved'); setError(''); return
+          }
+        }
+      } catch { /* No browser cache is available. */ }
+      setRows(emptyRows(activeSection)); setHasLiveData(false); setReportSource(null); setSourceWarning('')
     }
+    void loadSavedReport()
+    return () => { cancelled = true }
   }, [activeSection, fromDate, toDate, isLoading])
 
   function selectTeam(team: DailySection) {

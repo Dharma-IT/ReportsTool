@@ -30,6 +30,47 @@ type BookingReport = {
 
 type DateField = 'booked' | 'meeting'
 type SortOrder = 'booked-desc' | 'booked-asc' | 'meeting-asc' | 'meeting-desc'
+type AppointmentView = 'bot' | 'manual' | 'sales'
+type SalesSummary = { total: number; bySource: Record<string, number> }
+
+const appointmentSalesSources = ['Meta', 'TikTok', 'Repurchase', 'Follow Ups', 'Organic']
+
+function AppointmentSales({ rows, sales, isLoading, error }: { rows: Booking[]; sales: SalesSummary | null; isLoading: boolean; error: string }) {
+  const sourceCounts = rows.reduce((counts, booking) => {
+    const source = getSource(booking)
+    counts[source] = (counts[source] ?? 0) + 1
+    return counts
+  }, {} as Record<string, number>)
+  const sourceKey: Record<string, string> = { Meta: 'meta', TikTok: 'tiktok', Repurchase: 'repurchase', 'Follow Ups': 'follow-ups', Organic: 'organic' }
+  const conversion = (source: string) => {
+    const leads = sourceCounts[sourceKey[source]] ?? 0
+    const salesCount = sales?.bySource[sourceKey[source]] ?? 0
+    return leads ? `${Math.round((salesCount / leads) * 100)}%` : '0%'
+  }
+
+  return (
+    <section className="appointment-sales-view" aria-labelledby="appointment-sales-heading">
+      <div className="appointment-sales-intro">
+        <div><span>Sales attribution</span><h2 id="appointment-sales-heading">Appointment sales</h2><p>See how valid appointments turn into sales across every lead source.</p></div>
+        <div className="appointment-sales-empty-badge"><i /> {isLoading ? 'Loading sales…' : error || 'Daily sales connected'}</div>
+      </div>
+      <div className="appointment-sales-kpis" aria-label="Appointment sales totals">
+        <article><span>Valid appointments</span><strong>{rows.length}</strong><small>Completed meetings</small></article>
+        <article><span>Total sales</span><strong>{isLoading ? '—' : (sales?.total ?? 0)}</strong><small>Paid HubSpot deals</small></article>
+        <article><span>Conversion rate</span><strong>{rows.length ? `${Math.round(((sales?.total ?? 0) / rows.length) * 100)}%` : '0%'}</strong><small>Sales per valid appointment</small></article>
+      </div>
+      <div className="appointment-sales-card">
+        <div className="appointment-sales-card-heading"><div><span>Source performance</span><h3>Sales by lead source</h3></div><small>{isLoading ? 'Loading HubSpot sales' : 'Paid-date sales'}</small></div>
+        <div className="appointment-sales-table-wrap">
+          <table className="appointment-sales-table">
+            <thead><tr><th>Source</th><th>Valid appointments</th><th>Sales</th><th>Sales / lead source</th></tr></thead>
+            <tbody>{appointmentSalesSources.map((source) => <tr key={source}><th scope="row"><i className={`sales-source-dot ${source.toLowerCase().replace(/\s/g, '-')}`} />{source}</th><td>{sourceCounts[sourceKey[source]] ?? 0}</td><td>{isLoading ? '—' : (sales?.bySource[sourceKey[source]] ?? 0)}</td><td><span className="sales-rate-empty">{isLoading ? '—' : conversion(source)}</span></td></tr>)}</tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  )
+}
 
 async function parseReportResponse(response: Response) {
   if (!response.ok) throw new Error('Unable to load booking report')
@@ -74,6 +115,7 @@ function getSource(booking: Booking) {
   if (source.includes('facebook') || source.includes('instagram') || source.includes('meta')) return 'meta'
   if (source.includes('tik') || source.includes('byte')) return 'tiktok'
   if (source.includes('repurchase')) return 'repurchase'
+  if (source.includes('follow up') || source.includes('followup')) return 'follow-ups'
   return 'organic'
 }
 
@@ -89,7 +131,10 @@ function BotReports() {
   const [endDate, setEndDate] = useState('')
   const [dateField, setDateField] = useState<DateField>('booked')
   const [sortOrder, setSortOrder] = useState<SortOrder>('booked-desc')
-  const [view, setView] = useState<'bot' | 'manual'>('bot')
+  const [view, setView] = useState<AppointmentView>('bot')
+  const [salesSummary, setSalesSummary] = useState<SalesSummary | null>(null)
+  const [isSalesLoading, setIsSalesLoading] = useState(false)
+  const [salesError, setSalesError] = useState('')
 
   const loadReport = useCallback(async (signal?: AbortSignal) => {
     setIsLoading(true)
@@ -123,7 +168,29 @@ function BotReports() {
     return () => controller.abort()
   }, [])
 
-  const rows = useMemo(() => (view === 'bot' ? report?.rows ?? [] : report?.manualRows ?? [])
+  useEffect(() => {
+    if (view !== 'sales') return
+    if (!startDate || !endDate) { setSalesSummary(null); setSalesError('Select a meeting date range.'); return }
+    const controller = new AbortController()
+    setIsSalesLoading(true); setSalesError('')
+    const params = new URLSearchParams({ from: startDate, to: endDate, team: 'cs', mode: 'sales-summary' })
+    fetch(`/api/daily-cs-report?${params}`, { signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json()
+        if (!response.ok) throw new Error(payload.message ?? 'Unable to load sales totals.')
+        return payload as SalesSummary
+      })
+      .then(setSalesSummary)
+      .catch((loadError: unknown) => {
+        if (loadError instanceof DOMException && loadError.name === 'AbortError') return
+        setSalesError(loadError instanceof Error ? loadError.message : 'Unable to load sales totals.')
+        setSalesSummary(null)
+      })
+      .finally(() => { if (!controller.signal.aborted) setIsSalesLoading(false) })
+    return () => controller.abort()
+  }, [view, startDate, endDate])
+
+  const rows = useMemo(() => (view === 'bot' ? report?.rows ?? [] : view === 'manual' ? report?.manualRows ?? [] : [])
     .filter((booking) => {
       const value = dateField === 'meeting' ? booking.meeting_start_at : booking.booked_at
       const date = easternDateKey(value)
@@ -143,6 +210,11 @@ function BotReports() {
   }, {} as Record<string, number>), [rows])
 
   const hasDateFilter = Boolean(startDate || endDate)
+  const salesRows = useMemo(() => [...(report?.rows ?? []), ...(report?.manualRows ?? [])].filter((booking) => {
+    if (booking.status !== 'Completed') return false
+    const date = easternDateKey(booking.meeting_start_at)
+    return (!startDate || date >= startDate) && (!endDate || date <= endDate)
+  }), [report, startDate, endDate])
 
   return (
     <main className="dashboard-shell bot-reports-page appointment-reports-layout">
@@ -150,6 +222,7 @@ function BotReports() {
         <span>Appointment type</span>
         <button className={view === 'bot' ? 'active' : ''} type="button" onClick={() => setView('bot')}><b>AI</b><span>Bot<small>Automated bookings</small></span></button>
         <button className={view === 'manual' ? 'active' : ''} type="button" onClick={() => setView('manual')}><b>HM</b><span>Manual<small>Booked by humans</small></span></button>
+        <button className={view === 'sales' ? 'active' : ''} type="button" onClick={() => { const today = easternDateKey(new Date().toISOString()); if (!startDate) setStartDate(today); if (!endDate) setEndDate(today); setView('sales') }}><b>$</b><span>Appointment Sales<small>Lead conversion</small></span></button>
       </aside>
       <section className="bot-reports-panel" aria-labelledby="bot-reports-title">
         <header className="bot-reports-hero">
@@ -164,7 +237,7 @@ function BotReports() {
           </div>
         </header>
 
-        <div className="bot-reports-toolbar">
+        {view !== 'sales' ? <div className="bot-reports-toolbar">
           <div className="bot-date-controls" aria-label="Filter and sort bookings by date in Eastern Time">
             <label><span>Date field</span><select value={dateField} onChange={(event) => setDateField(event.target.value as DateField)}><option value="booked">Booked date</option><option value="meeting">Meeting date</option></select></label>
             <label><span>From</span><input type="date" value={startDate} max={endDate || undefined} onChange={(event) => setStartDate(event.target.value)} /></label>
@@ -176,19 +249,27 @@ function BotReports() {
           <button type="button" className="bot-refresh-button" onClick={() => void loadReport()} disabled={isLoading}>
             <span aria-hidden="true">↻</span>{isLoading ? 'Refreshing…' : 'Refresh data'}
           </button>
-        </div>
+        </div> : <div className="bot-reports-toolbar appointment-sales-toolbar">
+          <div className="bot-date-controls" aria-label="Filter valid appointments by meeting date in Eastern Time">
+            <label><span>Meeting date from</span><input type="date" value={startDate} max={endDate || undefined} onChange={(event) => setStartDate(event.target.value)} /></label>
+            <span className="bot-date-divider" aria-hidden="true">to</span>
+            <label><span>Through</span><input type="date" value={endDate} min={startDate || undefined} onChange={(event) => setEndDate(event.target.value)} /></label>
+            {hasDateFilter ? <button type="button" className="bot-clear-filter" onClick={() => { setStartDate(''); setEndDate('') }}>Clear</button> : null}
+          </div>
+        </div>}
 
-        {error ? <div className="call-confirmation-message error">{error}</div> : null}
-        {report?.hubSpotWarning ? <div className="call-confirmation-message error">Manual appointments unavailable: {report.hubSpotWarning}</div> : null}
-        {isLoading && !report ? <div className="call-confirmation-message loading"><span className="report-loader-spinner" /><span>Loading bot bookings…</span></div> : null}
+        {view !== 'sales' && error ? <div className="call-confirmation-message error">{error}</div> : null}
+        {view !== 'sales' && report?.hubSpotWarning ? <div className="call-confirmation-message error">Manual appointments unavailable: {report.hubSpotWarning}</div> : null}
+        {view !== 'sales' && isLoading && !report ? <div className="call-confirmation-message loading"><span className="report-loader-spinner" /><span>Loading bot bookings…</span></div> : null}
 
-        {report ? (
+        {view === 'sales' ? <AppointmentSales rows={salesRows} sales={salesSummary} isLoading={isSalesLoading} error={salesError} /> : report ? (
           <>
             <div className="bot-summary-grid" aria-label="Booking source totals">
               <article className="total"><span>{view === 'bot' ? 'Bot appointments' : 'Manual appointments'}</span><strong>{rows.length}</strong><small>{hasDateFilter ? `In selected ${dateField} date range` : 'All available appointments'}</small></article>
               <article className="meta"><span>Meta</span><strong>{sourceCounts.meta ?? 0}</strong><small>Facebook &amp; Instagram</small></article>
               <article className="tiktok"><span>TikTok</span><strong>{sourceCounts.tiktok ?? 0}</strong><small>TikTok bookings</small></article>
               <article className="organic"><span>Repurchase</span><strong>{sourceCounts.repurchase ?? 0}</strong><small>Returning patients</small></article>
+              <article className="organic"><span>Follow Ups</span><strong>{sourceCounts['follow-ups'] ?? 0}</strong><small>Follow-up appointments</small></article>
               <article className="organic"><span>Organic</span><strong>{sourceCounts.organic ?? 0}</strong><small>All other sources</small></article>
             </div>
 
