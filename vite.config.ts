@@ -1017,6 +1017,45 @@ async function fetchDailySalesBySource(fromDate: string, toDate: string, token: 
   return { total: deals.length, bySource }
 }
 
+async function fetchValidAppointmentsBySource(fromDate: string, toDate: string, token: string) {
+  if (!token) throw new Error('HubSpot reporting is not configured.')
+  const start = getNewYorkUnixDayRange(fromDate).from * 1000
+  const end = getNewYorkUnixDayRange(toDate).to * 1000
+  const meetings = await searchAllHubSpotObjects<{
+    id: string
+    properties: { hs_meeting_outcome?: string | null }
+  }>('meetings', {
+    filterGroups: [{ filters: [
+      { propertyName: 'hs_meeting_start_time', operator: 'GTE', value: String(start) },
+      { propertyName: 'hs_meeting_start_time', operator: 'LTE', value: String(end) },
+    ] }],
+    properties: ['hs_meeting_start_time', 'hs_meeting_outcome'],
+  }, token)
+  const completed = meetings.filter((meeting) => String(meeting.properties.hs_meeting_outcome ?? '').toUpperCase() !== 'CANCELED')
+  const batches = Array.from({ length: Math.ceil(completed.length / 100) }, (_, index) => completed.slice(index * 100, (index + 1) * 100))
+  const associationGroups = await Promise.all(batches.map((batch) => hubSpotPost<{
+    results?: Array<{ from: { id: string }; to: Array<{ toObjectId: number }> }>
+  }>('/crm/v4/associations/meetings/contacts/batch/read', {
+    inputs: batch.map((meeting) => ({ id: meeting.id })),
+  }, token)))
+  const associations = associationGroups.flatMap((group) => group.results ?? [])
+  const contactIds = [...new Set(associations.flatMap((row) => row.to ?? []).map((contact) => String(contact.toObjectId)))]
+  const contactBatches = Array.from({ length: Math.ceil(contactIds.length / 100) }, (_, index) => contactIds.slice(index * 100, (index + 1) * 100))
+  const contactGroups = await Promise.all(contactBatches.map((ids) => hubSpotPost<{
+    results?: Array<{ id: string; properties: { source?: string | null } }>
+  }>('/crm/v3/objects/contacts/batch/read', {
+    properties: ['source'], inputs: ids.map((id) => ({ id })),
+  }, token)))
+  const sources = new Map(contactGroups.flatMap((group) => group.results ?? []).map((contact) => [String(contact.id), contact.properties.source]))
+  const meetingSources = new Map(associations.map((row) => [String(row.from.id), (row.to ?? []).map((contact) => sources.get(String(contact.toObjectId))).find(Boolean)]))
+  const bySource: Record<string, number> = { meta: 0, tiktok: 0, repurchase: 0, 'follow-ups': 0, organic: 0 }
+  for (const meeting of completed) {
+    const source = normalizeAppointmentSalesSource(meetingSources.get(String(meeting.id)))
+    bySource[source] = (bySource[source] ?? 0) + 1
+  }
+  return { total: completed.length, bySource }
+}
+
 function financeReportApi(
   hubSpotToken: string,
   supabaseUrl: string,
@@ -1025,6 +1064,100 @@ function financeReportApi(
   return {
     name: 'hubspot-finance-report-api',
     configureServer(server) {
+      server.middlewares.use('/api/refunds-report', async (request, response) => {
+        try {
+          if (!hubSpotToken) throw new Error('HubSpot reporting is not configured.')
+          const requestUrl = new URL(request.url ?? '', 'http://localhost')
+          const toDate = requestUrl.searchParams.get('to') || getTodayInNewYork()
+          const fromDate = requestUrl.searchParams.get('from') || shiftIsoDate(toDate, -55)
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(toDate) || fromDate > toDate) {
+            sendJson(response, 400, { message: 'Enter a valid date range using YYYY-MM-DD.' })
+            return
+          }
+          const fromValue = String(Date.parse(`${fromDate}T00:00:00Z`))
+          const toValue = String(Date.parse(`${toDate}T00:00:00Z`))
+          const [salesDeals, refundDeals, owners] = await Promise.all([
+            searchAllHubSpotObjects<HubSpotDeal>('deals', {
+              filterGroups: [{ filters: [{ propertyName: 'paid_date_all_pipelines', operator: 'BETWEEN', value: fromValue, highValue: toValue }] }],
+              properties: ['dealname', 'amount', 'paid_date_all_pipelines', 'hubspot_owner_id'],
+            }, hubSpotToken),
+            searchAllHubSpotObjects<HubSpotDeal>('deals', {
+              filterGroups: [{ filters: [
+                { propertyName: 'paid_date_all_pipelines', operator: 'BETWEEN', value: fromValue, highValue: toValue },
+                { propertyName: 'value_refund', operator: 'GT', value: '0' },
+              ] }],
+              properties: ['dealname', 'amount', 'value_refund', 'refund_date_all_pipelines', 'paid_date_all_pipelines', 'hubspot_owner_id', 'type_refund', 'refund_notes', 'observation'],
+            }, hubSpotToken),
+            fetchHubSpotOwners(hubSpotToken),
+          ])
+          const ownerNames = new Map(owners.map((owner) => [owner.id, `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim()]))
+          const weekStart = (date: string) => {
+            const value = new Date(`${date}T12:00:00Z`)
+            value.setUTCDate(value.getUTCDate() - ((value.getUTCDay() + 6) % 7))
+            return value.toISOString().slice(0, 10)
+          }
+          const weeks = new Map<string, { weekStart: string; weekEnd: string; sales: number; refunds: number }>()
+          const ownerWeekSales = new Map<string, number>()
+          for (let cursor = weekStart(fromDate); cursor <= toDate; cursor = shiftIsoDate(cursor, 7)) {
+            weeks.set(cursor, { weekStart: cursor, weekEnd: shiftIsoDate(cursor, 5), sales: 0, refunds: 0 })
+          }
+          for (const deal of salesDeals) {
+            const date = deal.properties.paid_date_all_pipelines?.slice(0, 10)
+            if (date && new Date(`${date}T12:00:00Z`).getUTCDay() === 0) continue
+            const week = date ? weeks.get(weekStart(date)) : undefined
+            const saleAmount = Math.max(0, finiteNumber(deal.properties.amount))
+            if (week) week.sales += saleAmount
+            if (date) {
+              const ownerWeekKey = `${deal.properties.hubspot_owner_id ?? ''}|${weekStart(date)}`
+              ownerWeekSales.set(ownerWeekKey, (ownerWeekSales.get(ownerWeekKey) ?? 0) + saleAmount)
+            }
+          }
+          for (const deal of refundDeals) {
+            const date = deal.properties.paid_date_all_pipelines?.slice(0, 10)
+            if (date && new Date(`${date}T12:00:00Z`).getUTCDay() === 0) continue
+            const week = date ? weeks.get(weekStart(date)) : undefined
+            if (week) week.refunds += finiteNumber(deal.properties.value_refund)
+          }
+          const weekly = [...weeks.values()].map((week) => ({
+            ...week,
+            sales: roundMoney(week.sales),
+            refunds: roundMoney(week.refunds),
+            refundRate: week.sales ? Math.round((week.refunds / week.sales) * 10000) / 100 : 0,
+          }))
+          const details = refundDeals.filter((deal) => {
+            const date = deal.properties.paid_date_all_pipelines?.slice(0, 10)
+            return Boolean(date && new Date(`${date}T12:00:00Z`).getUTCDay() !== 0)
+          }).map((deal) => {
+            const paidDate = deal.properties.paid_date_all_pipelines?.slice(0, 10) || ''
+            const saleAmount = ownerWeekSales.get(`${deal.properties.hubspot_owner_id ?? ''}|${weekStart(paidDate)}`) ?? 0
+            const refundAmount = finiteNumber(deal.properties.value_refund)
+            return {
+              id: deal.id,
+              dealName: deal.properties.dealname || `Deal ${deal.id}`,
+              refundDate: deal.properties.refund_date_all_pipelines?.slice(0, 10) || deal.properties.paid_date_all_pipelines?.slice(0, 10) || '',
+              paidDate,
+              saleAmount: roundMoney(saleAmount),
+              refundAmount: roundMoney(refundAmount),
+              refundRate: saleAmount ? Math.round((refundAmount / saleAmount) * 10000) / 100 : 0,
+              seller: ownerNames.get(deal.properties.hubspot_owner_id ?? '') || 'Unassigned',
+              type: deal.properties.type_refund || '',
+              observation: deal.properties.refund_notes || deal.properties.observation || '',
+            }
+          }).sort((left, right) => right.refundDate.localeCompare(left.refundDate))
+          sendJson(response, 200, {
+            fromDate, toDate, timezone: 'America/New_York', weekly, details,
+            totals: {
+              sales: roundMoney(weekly.reduce((sum, week) => sum + week.sales, 0)),
+              refunds: roundMoney(weekly.reduce((sum, week) => sum + week.refunds, 0)),
+              refundRate: weekly.reduce((sum, week) => sum + week.sales, 0) ? Math.round((weekly.reduce((sum, week) => sum + week.refunds, 0) / weekly.reduce((sum, week) => sum + week.sales, 0)) * 10000) / 100 : 0,
+              refundCount: details.length,
+            },
+          })
+        } catch (error) {
+          sendJson(response, 500, { message: error instanceof Error ? error.message : 'Unable to build the refunds report.' })
+        }
+      })
+
       server.middlewares.use('/api/finance-report', async (request, response) => {
         try {
           if (!hubSpotToken) throw new Error('HubSpot reporting is not configured.')
@@ -1186,8 +1319,11 @@ function agentReportApi(
           }
 
           if (requestUrl.searchParams.get('mode') === 'sales-summary') {
-            const sales = await fetchDailySalesBySource(fromDate, toDate, hubSpotToken)
-            sendJson(response, 200, { fromDate, toDate, timezone: 'America/New_York', ...sales })
+            const [sales, validAppointments] = await Promise.all([
+              fetchDailySalesBySource(fromDate, toDate, hubSpotToken),
+              fetchValidAppointmentsBySource(fromDate, toDate, hubSpotToken),
+            ])
+            sendJson(response, 200, { fromDate, toDate, timezone: 'America/New_York', ...sales, validAppointments })
             return
           }
 
