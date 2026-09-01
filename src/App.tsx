@@ -22,11 +22,13 @@ const routes: AppRoute[] = [
   { path: '/agent-report', label: 'Customer Care' },
   { path: '/daily', label: 'Daily' },
   { path: '/refunds', label: 'Refunds' },
-  { path: '/bot-reports', label: 'Bot Reports' },
+  { path: '/appointment-reports', label: 'Appointment Reports' },
 ]
 
 function getActiveRoute() {
   const pathname = window.location.pathname.replace(/\/$/, '') || '/'
+
+  if (pathname === '/bot-reports') return '/appointment-reports'
 
   if (routes.some((route) => route.path === pathname)) {
     return pathname
@@ -71,7 +73,7 @@ function App() {
         <Daily />
       ) : activeRoute === '/refunds' ? (
         <Refunds />
-      ) : activeRoute === '/bot-reports' ? (
+      ) : activeRoute === '/appointment-reports' ? (
         <BotReports />
       ) : activeRoute === '/finance-report' ? (
         <CampaignPinLock>

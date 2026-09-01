@@ -40,11 +40,11 @@ const reportLinks = [
     icon: 'calendar',
   },
   {
-    path: '/bot-reports',
+    path: '/appointment-reports',
     number: '06',
-    title: 'Bot reports',
-    copy: 'Track automated conversations, engagement, and booking performance by date.',
-    action: 'View bot reports',
+    title: 'Appointment reports',
+    copy: 'Review appointments booked by the bot and by the human team.',
+    action: 'View appointment reports',
     icon: 'bot',
   },
 ]

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 type Booking = {
-  id: number
+  id: number | string
   respond_contact_id: string
   contact_phone: string | null
   booked_at: string
@@ -13,6 +13,8 @@ type Booking = {
   attribution_data?: {
     contactPhone?: string | null
   } | null
+  meeting_name?: string | null
+  status?: 'Completed' | 'Cancelled'
 }
 
 type BookingReport = {
@@ -22,6 +24,8 @@ type BookingReport = {
     byPlatform: Record<string, number>
   }
   rows: Booking[]
+  manualRows?: Booking[]
+  hubSpotWarning?: string
 }
 
 type DateField = 'booked' | 'meeting'
@@ -69,8 +73,8 @@ function getSource(booking: Booking) {
   const source = (booking.source_platform ?? booking.source_type ?? 'unknown').trim().toLowerCase()
   if (source.includes('facebook') || source.includes('instagram') || source.includes('meta')) return 'meta'
   if (source.includes('tik') || source.includes('byte')) return 'tiktok'
-  if (source.includes('organic')) return 'organic'
-  return source || 'unknown'
+  if (source.includes('repurchase')) return 'repurchase'
+  return 'organic'
 }
 
 function getPhoneNumber(booking: Booking) {
@@ -85,6 +89,7 @@ function BotReports() {
   const [endDate, setEndDate] = useState('')
   const [dateField, setDateField] = useState<DateField>('booked')
   const [sortOrder, setSortOrder] = useState<SortOrder>('booked-desc')
+  const [view, setView] = useState<'bot' | 'manual'>('bot')
 
   const loadReport = useCallback(async (signal?: AbortSignal) => {
     setIsLoading(true)
@@ -118,7 +123,7 @@ function BotReports() {
     return () => controller.abort()
   }, [])
 
-  const rows = useMemo(() => (report?.rows ?? [])
+  const rows = useMemo(() => (view === 'bot' ? report?.rows ?? [] : report?.manualRows ?? [])
     .filter((booking) => {
       const value = dateField === 'meeting' ? booking.meeting_start_at : booking.booked_at
       const date = easternDateKey(value)
@@ -129,7 +134,7 @@ function BotReports() {
       const leftValue = new Date(field === 'meeting' ? left.meeting_start_at : left.booked_at).getTime()
       const rightValue = new Date(field === 'meeting' ? right.meeting_start_at : right.booked_at).getTime()
       return direction === 'asc' ? leftValue - rightValue : rightValue - leftValue
-    }), [report, startDate, endDate, dateField, sortOrder])
+    }), [report, startDate, endDate, dateField, sortOrder, view])
 
   const sourceCounts = useMemo(() => rows.reduce((counts, booking) => {
     const source = getSource(booking)
@@ -140,13 +145,18 @@ function BotReports() {
   const hasDateFilter = Boolean(startDate || endDate)
 
   return (
-    <main className="dashboard-shell bot-reports-page">
+    <main className="dashboard-shell bot-reports-page appointment-reports-layout">
+      <aside className="appointment-reports-sidebar" aria-label="Appointment sources">
+        <span>Appointment type</span>
+        <button className={view === 'bot' ? 'active' : ''} type="button" onClick={() => setView('bot')}><b>AI</b><span>Bot<small>Automated bookings</small></span></button>
+        <button className={view === 'manual' ? 'active' : ''} type="button" onClick={() => setView('manual')}><b>HM</b><span>Manual<small>Booked by humans</small></span></button>
+      </aside>
       <section className="bot-reports-panel" aria-labelledby="bot-reports-title">
         <header className="bot-reports-hero">
           <div className="bot-reports-title-block">
             <p className="eyebrow">Dharma Agent Analytics</p>
-            <h1 id="bot-reports-title">Bot Reports</h1>
-            <p>Booking performance and attribution, shown in Eastern Time.</p>
+            <h1 id="bot-reports-title">Appointment Reports</h1>
+            <p>Bot and manually booked appointments, shown in Eastern Time.</p>
           </div>
           <div className="bot-reports-status" aria-label="Report timezone">
             <span aria-hidden="true">ET</span>
@@ -169,37 +179,39 @@ function BotReports() {
         </div>
 
         {error ? <div className="call-confirmation-message error">{error}</div> : null}
+        {report?.hubSpotWarning ? <div className="call-confirmation-message error">Manual appointments unavailable: {report.hubSpotWarning}</div> : null}
         {isLoading && !report ? <div className="call-confirmation-message loading"><span className="report-loader-spinner" /><span>Loading bot bookings…</span></div> : null}
 
         {report ? (
           <>
             <div className="bot-summary-grid" aria-label="Booking source totals">
-              <article className="total"><span>Total bookings</span><strong>{rows.length}</strong><small>{hasDateFilter ? `In selected ${dateField} date range` : 'All available bookings'}</small></article>
+              <article className="total"><span>{view === 'bot' ? 'Bot appointments' : 'Manual appointments'}</span><strong>{rows.length}</strong><small>{hasDateFilter ? `In selected ${dateField} date range` : 'All available appointments'}</small></article>
               <article className="meta"><span>Meta</span><strong>{sourceCounts.meta ?? 0}</strong><small>Facebook &amp; Instagram</small></article>
               <article className="tiktok"><span>TikTok</span><strong>{sourceCounts.tiktok ?? 0}</strong><small>TikTok bookings</small></article>
-              <article className="organic"><span>Organic</span><strong>{sourceCounts.organic ?? 0}</strong><small>Unpaid bookings</small></article>
+              <article className="organic"><span>Repurchase</span><strong>{sourceCounts.repurchase ?? 0}</strong><small>Returning patients</small></article>
+              <article className="organic"><span>Organic</span><strong>{sourceCounts.organic ?? 0}</strong><small>All other sources</small></article>
             </div>
 
             <div className="bot-table-card">
               <div className="bot-table-heading">
-                <div><h2>Booking details</h2><p>{rows.length} {rows.length === 1 ? 'booking' : 'bookings'} · booked date in ET</p></div>
+                <div><h2>{view === 'bot' ? 'Bot' : 'Manual'} appointment details</h2><p>{rows.length} {rows.length === 1 ? 'appointment' : 'appointments'} · booked date in ET</p></div>
               </div>
               <div className="bot-table-wrap">
                 <table className="bot-report-table">
-                  <thead><tr><th>Contact ID</th><th>Booked at</th><th>Meeting time</th><th>Source</th><th>Phone number</th><th>Status</th></tr></thead>
+                  <thead><tr><th>{view === 'bot' ? 'Contact ID' : 'Meeting'}</th><th>Booked at</th><th>Meeting time</th><th>Source</th><th>Phone number</th><th>Status</th></tr></thead>
                   <tbody>
                     {rows.map((booking) => {
                       const source = getSource(booking)
                       return <tr key={booking.id}>
-                        <th scope="row">#{booking.respond_contact_id}</th>
+                        <th scope="row">{view === 'bot' ? `#${booking.respond_contact_id}` : (booking.meeting_name || `Meeting #${booking.id}`)}</th>
                         <td>{formatDateTime(booking.booked_at)}</td>
                         <td>{formatDateTime(booking.meeting_start_at)}</td>
                         <td><span className={`bot-source-pill ${source}`}>{source}</span></td>
                         <td>{getPhoneNumber(booking)}</td>
-                        <td />
+                        <td><span className={`appointment-status ${booking.status === 'Cancelled' ? 'cancelled' : 'completed'}`}>{booking.status ?? 'Completed'}</span></td>
                       </tr>
                     })}
-                    {!rows.length ? <tr><td className="bot-empty-state" colSpan={6}>No bookings match this Eastern Time {dateField} date range.</td></tr> : null}
+                    {!rows.length ? <tr><td className="bot-empty-state" colSpan={6}>No {view} appointments match this Eastern Time {dateField} date range.</td></tr> : null}
                   </tbody>
                 </table>
               </div>
