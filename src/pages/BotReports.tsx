@@ -25,12 +25,14 @@ type BookingReport = {
   }
   rows: Booking[]
   manualRows?: Booking[]
+  teamCounts?: { nutritionist: number; cs: number; sales: number }
+  teamAppointments?: Array<{ team: 'nutritionist' | 'cs' | 'sales'; meeting_start_at: string }>
   hubSpotWarning?: string
 }
 
 type DateField = 'booked' | 'meeting'
 type SortOrder = 'booked-desc' | 'booked-asc' | 'meeting-asc' | 'meeting-desc'
-type AppointmentView = 'bot' | 'manual' | 'sales'
+type AppointmentView = 'bot' | 'manual' | 'sales' | 'team'
 type SalesSummary = { total: number; bySource: Record<string, number>; validAppointments: { total: number; bySource: Record<string, number> } }
 
 const appointmentSalesSources = ['Meta', 'TikTok', 'Repurchase', 'Follow Ups', 'Organic']
@@ -66,6 +68,21 @@ function AppointmentSales({ sales, isLoading, error }: { sales: SalesSummary | n
       </div>
     </section>
   )
+}
+
+function AppointmentsPerTeam({ counts, isLoading, error }: { counts?: BookingReport['teamCounts']; isLoading: boolean; error: string }) {
+  const teams = [
+    { key: 'nutritionist', label: 'Nutritionist Team', detail: 'Maria Sandoval and Paula Alfonso', initials: 'NT' },
+    { key: 'cs', label: 'CS Team', detail: 'Customer Service, excluding Natasha Lopez', initials: 'CS' },
+    { key: 'sales', label: 'Sales Team', detail: 'Combined seller team appointments', initials: 'ST' },
+  ] as const
+  return <section className="appointment-team-view" aria-labelledby="appointment-team-heading">
+    <div className="appointment-sales-intro"><div><span>Team performance</span><h2 id="appointment-team-heading">Appointments per team</h2><p>Count of appointments booked for each assigned team.</p></div><div className="appointment-sales-empty-badge"><i /> {isLoading ? 'Loading team data…' : error ? 'Team data unavailable' : 'HubSpot assignments'}</div></div>
+    {error ? <div className="call-confirmation-message error">{error}</div> : null}
+    <div className="appointment-team-grid" aria-label="Appointments booked per team">
+      {teams.map((team) => <article key={team.key}><b>{team.initials}</b><div><span>{team.label}</span><small>{team.detail}</small></div><strong>{isLoading ? '—' : (counts?.[team.key] ?? 0)}</strong><em>appointments booked</em></article>)}
+    </div>
+  </section>
 }
 
 async function parseReportResponse(response: Response) {
@@ -206,6 +223,15 @@ function BotReports() {
   }, {} as Record<string, number>), [rows])
 
   const hasDateFilter = Boolean(startDate || endDate)
+  const teamCounts = useMemo(() => {
+    if (!report?.teamAppointments) return report?.teamCounts
+    const counts = { nutritionist: 0, cs: 0, sales: 0 }
+    report.teamAppointments.forEach((appointment) => {
+      const date = easternDateKey(appointment.meeting_start_at)
+      if ((!startDate || date >= startDate) && (!endDate || date <= endDate)) counts[appointment.team] += 1
+    })
+    return counts
+  }, [report, startDate, endDate])
 
   return (
     <main className="dashboard-shell bot-reports-page appointment-reports-layout">
@@ -214,6 +240,7 @@ function BotReports() {
         <button className={view === 'bot' ? 'active' : ''} type="button" onClick={() => setView('bot')}><b>AI</b><span>Bot<small>Automated bookings</small></span></button>
         <button className={view === 'manual' ? 'active' : ''} type="button" onClick={() => setView('manual')}><b>HM</b><span>Manual<small>Booked by humans</small></span></button>
         <button className={view === 'sales' ? 'active' : ''} type="button" onClick={() => { const today = easternDateKey(new Date().toISOString()); if (!startDate) setStartDate(today); if (!endDate) setEndDate(today); setView('sales') }}><b>$</b><span>Appointment Sales<small>Lead conversion</small></span></button>
+        <button className={view === 'team' ? 'active' : ''} type="button" onClick={() => setView('team')}><b>TM</b><span>Apt per Team<small>Team breakdown</small></span></button>
       </aside>
       <section className="bot-reports-panel" aria-labelledby="bot-reports-title">
         <header className="bot-reports-hero">
@@ -228,7 +255,7 @@ function BotReports() {
           </div>
         </header>
 
-        {view !== 'sales' ? <div className="bot-reports-toolbar">
+        {view !== 'sales' && view !== 'team' ? <div className="bot-reports-toolbar">
           <div className="bot-date-controls" aria-label="Filter and sort bookings by date in Eastern Time">
             <label><span>Date field</span><select value={dateField} onChange={(event) => setDateField(event.target.value as DateField)}><option value="booked">Booked date</option><option value="meeting">Meeting date</option></select></label>
             <label><span>From</span><input type="date" value={startDate} max={endDate || undefined} onChange={(event) => setStartDate(event.target.value)} /></label>
@@ -240,20 +267,20 @@ function BotReports() {
           <button type="button" className="bot-refresh-button" onClick={() => void loadReport()} disabled={isLoading}>
             <span aria-hidden="true">↻</span>{isLoading ? 'Refreshing…' : 'Refresh data'}
           </button>
-        </div> : <div className="bot-reports-toolbar appointment-sales-toolbar">
+        </div> : view === 'sales' || view === 'team' ? <div className="bot-reports-toolbar appointment-sales-toolbar">
           <div className="bot-date-controls" aria-label="Filter valid appointments by meeting date in Eastern Time">
             <label><span>Meeting date from</span><input type="date" value={startDate} max={endDate || undefined} onChange={(event) => setStartDate(event.target.value)} /></label>
             <span className="bot-date-divider" aria-hidden="true">to</span>
             <label><span>Through</span><input type="date" value={endDate} min={startDate || undefined} onChange={(event) => setEndDate(event.target.value)} /></label>
             {hasDateFilter ? <button type="button" className="bot-clear-filter" onClick={() => { setStartDate(''); setEndDate('') }}>Clear</button> : null}
           </div>
-        </div>}
+        </div> : null}
 
-        {view !== 'sales' && error ? <div className="call-confirmation-message error">{error}</div> : null}
-        {view !== 'sales' && report?.hubSpotWarning ? <div className="call-confirmation-message error">Manual appointments unavailable: {report.hubSpotWarning}</div> : null}
-        {view !== 'sales' && isLoading && !report ? <div className="call-confirmation-message loading"><span className="report-loader-spinner" /><span>Loading bot bookings…</span></div> : null}
+        {view !== 'sales' && view !== 'team' && error ? <div className="call-confirmation-message error">{error}</div> : null}
+        {view !== 'sales' && view !== 'team' && report?.hubSpotWarning ? <div className="call-confirmation-message error">Manual appointments unavailable: {report.hubSpotWarning}</div> : null}
+        {view !== 'sales' && view !== 'team' && isLoading && !report ? <div className="call-confirmation-message loading"><span className="report-loader-spinner" /><span>Loading bot bookings…</span></div> : null}
 
-        {view === 'sales' ? <AppointmentSales sales={salesSummary} isLoading={isSalesLoading} error={salesError} /> : report ? (
+        {view === 'sales' ? <AppointmentSales sales={salesSummary} isLoading={isSalesLoading} error={salesError} /> : view === 'team' ? <AppointmentsPerTeam counts={teamCounts} isLoading={isLoading} error={error || report?.hubSpotWarning || ''} /> : report ? (
           <>
             <div className="bot-summary-grid" aria-label="Booking source totals">
               <article className="total"><span>{view === 'bot' ? 'Bot appointments' : 'Manual appointments'}</span><strong>{rows.length}</strong><small>{hasDateFilter ? `In selected ${dateField} date range` : 'All available appointments'}</small></article>

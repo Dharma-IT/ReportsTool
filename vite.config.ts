@@ -2698,8 +2698,23 @@ async function fetchManualHubSpotAppointments(botRows: AppointmentBooking[], tok
       { propertyName: 'hs_createdate', operator: 'GTE', value: String(from) },
       { propertyName: 'hs_createdate', operator: 'LTE', value: String(to) },
     ] }],
-    properties: ['hs_createdate', 'hs_meeting_start_time', 'hs_meeting_title', 'hs_meeting_body', 'hs_internal_meeting_notes', 'hs_meeting_outcome'],
+    properties: ['hs_createdate', 'hs_meeting_start_time', 'hs_meeting_title', 'hs_meeting_body', 'hs_internal_meeting_notes', 'hs_meeting_outcome', 'hubspot_owner_id'],
   }, token)
+  const ownerNames = new Map((await fetchHubSpotOwners(token)).map((owner) => [String(owner.id), `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim()]))
+  const nutritionists = new Set(['maria sandoval', 'paula alfonso'])
+  const sellers = new Set(['meribet sampson', 'maria claudia', 'andres castro', 'erika vargas', 'ailin isabel'])
+  const customerService = new Set(['arles martinez', 'brayam zuluaga', 'edmilson velasquez', 'kevin tinjaca', 'alice f', 'kathering silva', 'zara meza'])
+  const teamAppointments = meetings.flatMap((meeting) => {
+    const assignee = (ownerNames.get(String(meeting.properties.hubspot_owner_id)) ?? '').toLowerCase()
+    const team = nutritionists.has(assignee) ? 'nutritionist' : sellers.has(assignee) ? 'sales' : customerService.has(assignee) ? 'cs' : null
+    const meetingAt = meeting.properties.hs_meeting_start_time || meeting.properties.hs_createdate
+    return team && meetingAt ? [{ team, meeting_start_at: meetingAt }] : []
+  })
+  const teamCounts = {
+    nutritionist: teamAppointments.filter((appointment) => appointment.team === 'nutritionist').length,
+    cs: teamAppointments.filter((appointment) => appointment.team === 'cs').length,
+    sales: teamAppointments.filter((appointment) => appointment.team === 'sales').length,
+  }
   const meetingBatches = Array.from({ length: Math.ceil(meetings.length / 100) }, (_, index) => meetings.slice(index * 100, (index + 1) * 100))
   const associationGroups = await Promise.all(meetingBatches.map((meetingBatch) => hubSpotPost<{
       results?: Array<{ from: { id: string }; to: Array<{ toObjectId: number }> }>
@@ -2747,7 +2762,7 @@ async function fetchManualHubSpotAppointments(botRows: AppointmentBooking[], tok
       status,
     }]
   })
-  return { manualRows, hubSpotMatches }
+  return { manualRows, hubSpotMatches, teamCounts, teamAppointments }
 }
 
 function botReportsApi(hubSpotToken: string): Plugin {
@@ -2757,12 +2772,14 @@ function botReportsApi(hubSpotToken: string): Plugin {
       server.middlewares.use('/api/bot-reports/bookings', async (_request, response) => {
         try {
           const upstream = await fetch('https://dharma-agent-yd5l.onrender.com/api/reports/bookings')
-          const report = await upstream.json() as { rows?: AppointmentBooking[]; manualRows?: unknown[]; hubSpotWarning?: string }
+          const report = await upstream.json() as { rows?: AppointmentBooking[]; manualRows?: unknown[]; teamCounts?: { nutritionist: number; cs: number; sales: number }; teamAppointments?: Array<{ team: string; meeting_start_at: string }>; hubSpotWarning?: string }
           response.statusCode = upstream.status
           if (upstream.ok) {
             try {
               const hubSpotAppointments = await fetchManualHubSpotAppointments(report.rows ?? [], hubSpotToken)
               report.manualRows = hubSpotAppointments.manualRows
+              report.teamCounts = hubSpotAppointments.teamCounts
+              report.teamAppointments = hubSpotAppointments.teamAppointments
               report.rows = (report.rows ?? []).map((row) => {
                 const phone = appointmentPhone(row.contact_phone ?? row.attribution_data?.contactPhone)
                 const rowTime = Date.parse(row.meeting_start_at || row.booked_at)
@@ -2773,6 +2790,8 @@ function botReportsApi(hubSpotToken: string): Plugin {
               })
             } catch (error) {
               report.manualRows = []
+              report.teamCounts = { nutritionist: 0, cs: 0, sales: 0 }
+              report.teamAppointments = []
               report.hubSpotWarning = error instanceof Error ? error.message : 'Unable to load HubSpot appointments'
             }
           }
