@@ -856,7 +856,9 @@ function emptyDailyCsHubSpotMetrics(): DailyCsHubSpotMetrics {
 
 function classifyDailyCsProduct(name: string) {
   const product = name.toLowerCase()
-  if (product.includes('nad+') || /\bnad\b/.test(product)) return 'nad'
+  const isNad = product.includes('nad+') || /\bnad\b/.test(product)
+  if (isNad && product.includes('injection')) return 'nad'
+  if (isNad) return null
   if (product.includes('nutrition')) return 'plan'
   if (
     (product.includes('peptide') && !product.includes('tirzepatide')) ||
