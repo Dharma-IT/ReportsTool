@@ -26,7 +26,7 @@ type BookingReport = {
   rows: Booking[]
   manualRows?: Booking[]
   teamCounts?: { nutritionist: number; cs: number; sales: number }
-  teamAppointments?: Array<{ team: 'nutritionist' | 'cs' | 'sales'; meeting_start_at: string }>
+  teamAppointments?: Array<{ team: 'nutritionist' | 'cs' | 'sales'; agent: string; meeting_start_at: string }>
   hubSpotWarning?: string
 }
 
@@ -34,17 +34,33 @@ type DateField = 'booked' | 'meeting'
 type SortOrder = 'booked-desc' | 'booked-asc' | 'meeting-asc' | 'meeting-desc'
 type AppointmentView = 'bot' | 'manual' | 'sales' | 'team'
 type SalesSummary = { total: number; bySource: Record<string, number>; validAppointments: { total: number; bySource: Record<string, number> } }
+type TeamSalesSummaries = { sales: SalesSummary; cs: SalesSummary }
 
-const appointmentSalesSources = ['Meta', 'TikTok', 'Repurchase', 'Follow Ups', 'Organic']
+const csAppointmentSalesSources = ['Meta', 'TikTok', 'Repurchase', 'Follow Ups', 'Organic']
+const salesAppointmentSalesSources = ['Meta', 'TikTok', 'Organic']
+const appointmentSalesSourceKeys: Record<string, string> = { Meta: 'meta', TikTok: 'tiktok', Repurchase: 'repurchase', 'Follow Ups': 'follow-ups', Organic: 'organic' }
 
-function AppointmentSales({ sales, isLoading, error }: { sales: SalesSummary | null; isLoading: boolean; error: string }) {
+function AppointmentSalesTable({ title, sales, sources, isLoading }: { title: string; sales?: SalesSummary; sources: string[]; isLoading: boolean }) {
   const sourceCounts = sales?.validAppointments.bySource ?? {}
-  const sourceKey: Record<string, string> = { Meta: 'meta', TikTok: 'tiktok', Repurchase: 'repurchase', 'Follow Ups': 'follow-ups', Organic: 'organic' }
   const conversion = (source: string) => {
-    const leads = sourceCounts[sourceKey[source]] ?? 0
-    const salesCount = sales?.bySource[sourceKey[source]] ?? 0
+    const leads = sourceCounts[appointmentSalesSourceKeys[source]] ?? 0
+    const salesCount = sales?.bySource[appointmentSalesSourceKeys[source]] ?? 0
     return leads ? `${Math.round((salesCount / leads) * 100)}%` : '0%'
   }
+  return <div className="appointment-sales-card">
+    <div className="appointment-sales-card-heading"><div><span>Source performance</span><h3>{title}</h3></div><small>{isLoading ? 'Loading HubSpot sales' : 'Paid-date sales'}</small></div>
+    <div className="appointment-sales-table-wrap">
+      <table className="appointment-sales-table">
+        <thead><tr><th>Source</th><th>Valid appointments</th><th>Sales</th><th>Sales / lead source</th></tr></thead>
+        <tbody>{sources.map((source) => <tr key={source}><th scope="row"><i className={`sales-source-dot ${source.toLowerCase().replace(/\s/g, '-')}`} />{source}</th><td>{sourceCounts[appointmentSalesSourceKeys[source]] ?? 0}</td><td>{isLoading ? '—' : (sales?.bySource[appointmentSalesSourceKeys[source]] ?? 0)}</td><td><span className="sales-rate-empty">{isLoading ? '—' : conversion(source)}</span></td></tr>)}</tbody>
+      </table>
+    </div>
+  </div>
+}
+
+function AppointmentSales({ summaries, isLoading, error }: { summaries: TeamSalesSummaries | null; isLoading: boolean; error: string }) {
+  const validAppointments = (summaries?.sales.validAppointments.total ?? 0) + (summaries?.cs.validAppointments.total ?? 0)
+  const totalSales = (summaries?.sales.total ?? 0) + (summaries?.cs.total ?? 0)
 
   return (
     <section className="appointment-sales-view" aria-labelledby="appointment-sales-heading">
@@ -53,34 +69,49 @@ function AppointmentSales({ sales, isLoading, error }: { sales: SalesSummary | n
         <div className="appointment-sales-empty-badge"><i /> {isLoading ? 'Loading sales…' : error || 'Daily sales connected'}</div>
       </div>
       <div className="appointment-sales-kpis" aria-label="Appointment sales totals">
-        <article><span>Valid appointments</span><strong>{isLoading ? '—' : (sales?.validAppointments.total ?? 0)}</strong><small>Completed meetings</small></article>
-        <article><span>Total sales</span><strong>{isLoading ? '—' : (sales?.total ?? 0)}</strong><small>Paid HubSpot deals</small></article>
-        <article><span>Conversion rate</span><strong>{sales?.validAppointments.total ? `${Math.round(((sales?.total ?? 0) / sales.validAppointments.total) * 100)}%` : '0%'}</strong><small>Sales per valid appointment</small></article>
+        <article><span>Valid appointments</span><strong>{isLoading ? '—' : validAppointments}</strong><small>Completed meetings</small></article>
+        <article><span>Total sales</span><strong>{isLoading ? '—' : totalSales}</strong><small>Paid HubSpot deals</small></article>
+        <article><span>Conversion rate</span><strong>{validAppointments ? `${Math.round((totalSales / validAppointments) * 100)}%` : '0%'}</strong><small>Sales per valid appointment</small></article>
       </div>
-      <div className="appointment-sales-card">
-        <div className="appointment-sales-card-heading"><div><span>Source performance</span><h3>Sales by lead source</h3></div><small>{isLoading ? 'Loading HubSpot sales' : 'Paid-date sales'}</small></div>
-        <div className="appointment-sales-table-wrap">
-          <table className="appointment-sales-table">
-            <thead><tr><th>Source</th><th>Valid appointments</th><th>Sales</th><th>Sales / lead source</th></tr></thead>
-            <tbody>{appointmentSalesSources.map((source) => <tr key={source}><th scope="row"><i className={`sales-source-dot ${source.toLowerCase().replace(/\s/g, '-')}`} />{source}</th><td>{sourceCounts[sourceKey[source]] ?? 0}</td><td>{isLoading ? '—' : (sales?.bySource[sourceKey[source]] ?? 0)}</td><td><span className="sales-rate-empty">{isLoading ? '—' : conversion(source)}</span></td></tr>)}</tbody>
-          </table>
-        </div>
+      <div className="appointment-sales-team-tables">
+        <AppointmentSalesTable title="Sales team by lead source" sales={summaries?.sales} sources={salesAppointmentSalesSources} isLoading={isLoading} />
+        <AppointmentSalesTable title="CS team by lead source" sales={summaries?.cs} sources={csAppointmentSalesSources} isLoading={isLoading} />
       </div>
     </section>
   )
 }
 
-function AppointmentsPerTeam({ counts, isLoading, error }: { counts?: BookingReport['teamCounts']; isLoading: boolean; error: string }) {
+const appointmentTeamMembers = {
+  sales: ['Andres Castro', 'Maria Claudia', 'Erika Vargas', 'Meribet Yazziet', 'Ailin Isabel'],
+  nutritionist: ['Maria Sandoval', 'Paula Alfonso'],
+  cs: ['Arles Martinez', 'Aline Strelow', 'Brayam Zuluaga', 'Edmilson Morales'],
+} as const
+
+function AppointmentsPerTeam({ appointments, isLoading, error }: { appointments: BookingReport['teamAppointments']; isLoading: boolean; error: string }) {
   const teams = [
-    { key: 'nutritionist', label: 'Nutritionist Team', detail: 'Maria Sandoval and Paula Alfonso', initials: 'NT' },
-    { key: 'cs', label: 'CS Team', detail: 'Customer Service, excluding Natasha Lopez', initials: 'CS' },
-    { key: 'sales', label: 'Sales Team', detail: 'Combined seller team appointments', initials: 'ST' },
+    { key: 'sales', label: 'Sales Team', detail: 'Seller appointment bookings' },
+    { key: 'nutritionist', label: 'Nutritionist Team', detail: 'Nutrition appointment bookings' },
+    { key: 'cs', label: 'CS Team', detail: 'Customer service appointment bookings' },
   ] as const
   return <section className="appointment-team-view" aria-labelledby="appointment-team-heading">
     <div className="appointment-sales-intro"><div><span>Team performance</span><h2 id="appointment-team-heading">Appointments per team</h2><p>Count of appointments booked for each assigned team.</p></div><div className="appointment-sales-empty-badge"><i /> {isLoading ? 'Loading team data…' : error ? 'Team data unavailable' : 'HubSpot assignments'}</div></div>
     {error ? <div className="call-confirmation-message error">{error}</div> : null}
-    <div className="appointment-team-grid" aria-label="Appointments booked per team">
-      {teams.map((team) => <article key={team.key}><b>{team.initials}</b><div><span>{team.label}</span><small>{team.detail}</small></div><strong>{isLoading ? '—' : (counts?.[team.key] ?? 0)}</strong><em>appointments booked</em></article>)}
+    <div className="appointment-team-tables" aria-label="Appointments booked per team and agent">
+      {teams.map((team) => {
+        const rows = appointmentTeamMembers[team.key].map((name) => ({
+          name,
+          bookings: appointments?.filter((appointment) => appointment.team === team.key && appointment.agent === name).length ?? 0,
+        }))
+        const total = rows.reduce((sum, row) => sum + row.bookings, 0)
+        return <div className="daily-table-card appointment-team-card" key={team.key}>
+          <div className="daily-table-title"><div><span>Team performance</span><strong>{team.label}</strong></div><small>{team.detail}</small></div>
+          <div className="daily-table-scroll"><table className="daily-table appointment-team-table">
+            <thead><tr className="daily-group-row"><th>Team member</th><th>Bookings</th></tr></thead>
+            <tbody>{rows.map((row) => <tr key={row.name}><th scope="row"><span className="daily-avatar">{row.name.split(' ').map((part) => part[0]).join('')}</span>{row.name}</th><td>{isLoading ? '—' : row.bookings}</td></tr>)}</tbody>
+            <tfoot><tr><th scope="row">Total bookings</th><td>{isLoading ? '—' : total}</td></tr></tfoot>
+          </table></div>
+        </div>
+      })}
     </div>
   </section>
 }
@@ -145,7 +176,7 @@ function BotReports() {
   const [dateField, setDateField] = useState<DateField>('booked')
   const [sortOrder, setSortOrder] = useState<SortOrder>('booked-desc')
   const [view, setView] = useState<AppointmentView>('bot')
-  const [salesSummary, setSalesSummary] = useState<SalesSummary | null>(null)
+  const [salesSummaries, setSalesSummaries] = useState<TeamSalesSummaries | null>(null)
   const [isSalesLoading, setIsSalesLoading] = useState(false)
   const [salesError, setSalesError] = useState('')
 
@@ -183,21 +214,22 @@ function BotReports() {
 
   useEffect(() => {
     if (view !== 'sales') return
-    if (!startDate || !endDate) { setSalesSummary(null); setSalesError('Select a meeting date range.'); return }
+    if (!startDate || !endDate) { setSalesSummaries(null); setSalesError('Select a meeting date range.'); return }
     const controller = new AbortController()
     setIsSalesLoading(true); setSalesError('')
-    const params = new URLSearchParams({ from: startDate, to: endDate, team: 'cs', mode: 'sales-summary' })
-    fetch(`/api/daily-cs-report?${params}`, { signal: controller.signal })
-      .then(async (response) => {
-        const payload = await response.json()
-        if (!response.ok) throw new Error(payload.message ?? 'Unable to load sales totals.')
-        return payload as SalesSummary
-      })
-      .then(setSalesSummary)
+    const fetchTeamSummary = async (team: 'sales' | 'cs') => {
+      const params = new URLSearchParams({ from: startDate, to: endDate, team, mode: 'sales-summary' })
+      const response = await fetch(`/api/daily-cs-report?${params}`, { signal: controller.signal })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.message ?? 'Unable to load sales totals.')
+      return payload as SalesSummary
+    }
+    Promise.all([fetchTeamSummary('sales'), fetchTeamSummary('cs')])
+      .then(([sales, cs]) => setSalesSummaries({ sales, cs }))
       .catch((loadError: unknown) => {
         if (loadError instanceof DOMException && loadError.name === 'AbortError') return
         setSalesError(loadError instanceof Error ? loadError.message : 'Unable to load sales totals.')
-        setSalesSummary(null)
+        setSalesSummaries(null)
       })
       .finally(() => { if (!controller.signal.aborted) setIsSalesLoading(false) })
     return () => controller.abort()
@@ -223,14 +255,12 @@ function BotReports() {
   }, {} as Record<string, number>), [rows])
 
   const hasDateFilter = Boolean(startDate || endDate)
-  const teamCounts = useMemo(() => {
-    if (!report?.teamAppointments) return report?.teamCounts
-    const counts = { nutritionist: 0, cs: 0, sales: 0 }
-    report.teamAppointments.forEach((appointment) => {
+  const teamAppointments = useMemo(() => {
+    if (!report?.teamAppointments) return []
+    return report.teamAppointments.filter((appointment) => {
       const date = easternDateKey(appointment.meeting_start_at)
-      if ((!startDate || date >= startDate) && (!endDate || date <= endDate)) counts[appointment.team] += 1
+      return (!startDate || date >= startDate) && (!endDate || date <= endDate)
     })
-    return counts
   }, [report, startDate, endDate])
 
   return (
@@ -280,7 +310,7 @@ function BotReports() {
         {view !== 'sales' && view !== 'team' && report?.hubSpotWarning ? <div className="call-confirmation-message error">Manual appointments unavailable: {report.hubSpotWarning}</div> : null}
         {view !== 'sales' && view !== 'team' && isLoading && !report ? <div className="call-confirmation-message loading"><span className="report-loader-spinner" /><span>Loading bot bookings…</span></div> : null}
 
-        {view === 'sales' ? <AppointmentSales sales={salesSummary} isLoading={isSalesLoading} error={salesError} /> : view === 'team' ? <AppointmentsPerTeam counts={teamCounts} isLoading={isLoading} error={error || report?.hubSpotWarning || ''} /> : report ? (
+        {view === 'sales' ? <AppointmentSales summaries={salesSummaries} isLoading={isSalesLoading} error={salesError} /> : view === 'team' ? <AppointmentsPerTeam appointments={teamAppointments} isLoading={isLoading} error={error || report?.hubSpotWarning || ''} /> : report ? (
           <>
             <div className="bot-summary-grid" aria-label="Booking source totals">
               <article className="total"><span>{view === 'bot' ? 'Bot appointments' : 'Manual appointments'}</span><strong>{rows.length}</strong><small>{hasDateFilter ? `In selected ${dateField} date range` : 'All available appointments'}</small></article>

@@ -48,14 +48,24 @@ async function fetchManualAppointments(botRows) {
   const ownersPayload = await ownersResponse.json()
   if (!ownersResponse.ok) throw new Error(ownersPayload.message ?? `HubSpot owners failed with ${ownersResponse.status}`)
   const ownerNames = new Map((ownersPayload.results ?? []).map((owner) => [String(owner.id), `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim()]))
-  const nutritionists = new Set(['maria sandoval', 'paula alfonso'])
-  const sellers = new Set(['meribet sampson', 'maria claudia', 'andres castro', 'erika vargas', 'ailin isabel'])
-  const customerService = new Set(['arles martinez', 'brayam zuluaga', 'edmilson velasquez', 'kevin tinjaca', 'alice f', 'kathering silva', 'zara meza'])
+  const appointmentTeams = [
+    { team: 'sales', name: 'Andres Castro', aliases: ['andres castro'] },
+    { team: 'sales', name: 'Maria Claudia', aliases: ['maria claudia'] },
+    { team: 'sales', name: 'Erika Vargas', aliases: ['erika vargas'] },
+    { team: 'sales', name: 'Meribet Yazziet', aliases: ['meribet yazziet', 'meribet sampson'] },
+    { team: 'sales', name: 'Ailin Isabel', aliases: ['ailin isabel'] },
+    { team: 'nutritionist', name: 'Maria Sandoval', aliases: ['maria sandoval'] },
+    { team: 'nutritionist', name: 'Paula Alfonso', aliases: ['paula alfonso'] },
+    { team: 'cs', name: 'Arles Martinez', aliases: ['arles martinez'] },
+    { team: 'cs', name: 'Aline Strelow', aliases: ['aline strelow', 'ailene nuevas', 'alice f'] },
+    { team: 'cs', name: 'Brayam Zuluaga', aliases: ['brayam zuluaga', 'brayan zuluaga'] },
+    { team: 'cs', name: 'Edmilson Morales', aliases: ['edmilson morales', 'edmilson velasquez'] },
+  ]
   const teamAppointments = meetings.flatMap((meeting) => {
     const assignee = (ownerNames.get(String(meeting.properties.hubspot_owner_id)) ?? '').toLowerCase()
-    const team = nutritionists.has(assignee) ? 'nutritionist' : sellers.has(assignee) ? 'sales' : customerService.has(assignee) ? 'cs' : null
+    const assignedAgent = appointmentTeams.find((agent) => agent.aliases.includes(assignee))
     const meetingAt = meeting.properties.hs_meeting_start_time || meeting.properties.hs_createdate
-    return team && meetingAt ? [{ team, meeting_start_at: meetingAt }] : []
+    return assignedAgent && meetingAt ? [{ team: assignedAgent.team, agent: assignedAgent.name, meeting_start_at: meetingAt }] : []
   })
   const teamCounts = {
     nutritionist: teamAppointments.filter((appointment) => appointment.team === 'nutritionist').length,

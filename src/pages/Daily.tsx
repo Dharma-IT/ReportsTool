@@ -54,7 +54,7 @@ type SavedDailyReport = {
 
 const teamStaff: Record<DailySection, string[]> = {
   CS: ['Arles Martinez', 'Aline Strelow', 'Brayam Zuluaga', 'Edmilson Morales'],
-  Sales: ['Andres Castro', 'Maria Claudia', 'Alejandro Rivera', 'Erika Vargas', 'Meribet Yazziet', 'Ailin Isabel'],
+  Sales: ['Andres Castro', 'Maria Claudia', 'Erika Vargas', 'Meribet Yazziet', 'Ailin Isabel'],
 }
 
 function emptyRows(team: DailySection): DailyRow[] {

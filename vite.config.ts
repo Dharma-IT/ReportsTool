@@ -39,10 +39,13 @@ const DAILY_CS_AGENTS = [
 const DAILY_SALES_AGENTS = [
   { name: 'Andres Castro', aliases: ['Andres Castro', 'Andrés Castro'] },
   { name: 'Maria Claudia', aliases: ['Maria Claudia', 'María Claudia'] },
-  { name: 'Alejandro Rivera', aliases: ['Alejandro Rivera'] },
   { name: 'Erika Vargas', aliases: ['Erika Vargas'] },
-  { name: 'Meribet Yazziet', aliases: ['Meribet Yazziet'] },
+  { name: 'Meribet Yazziet', aliases: ['Meribet Yazziet', 'Meribet Sampson'] },
   { name: 'Ailin Isabel', aliases: ['Ailin Isabel', 'Ailín Isabel'] },
+]
+const APPOINTMENT_NUTRITIONISTS = [
+  { name: 'Maria Sandoval', aliases: ['Maria Sandoval'] },
+  { name: 'Paula Alfonso', aliases: ['Paula Alfonso'] },
 ]
 const STAFF_PERFORMANCE_REPORT = [
   { name: 'Belizabett Gonzalez', respondAliases: ['Belizabett Gonzalez'], hubSpotAliases: ['Belizabett Gonzalez'], hasCalls: true },
@@ -939,7 +942,9 @@ async function fetchDailyCsHubSpot(
     const key = matchingAgent.name.toLowerCase()
     const row = metrics.get(key) ?? emptyDailyCsHubSpotMetrics()
     row.sales += finiteNumber(deal.properties.amount)
-    row.refunds += finiteNumber(deal.properties.value_refund)
+    // HubSpot may store refunds as negative adjustments. Normalize their sign
+    // so every refund is deducted from sales in the balance calculation below.
+    row.refunds += Math.abs(finiteNumber(deal.properties.value_refund))
     const descriptionProducts = parseDailyCsDealDescription(
       deal.properties.deal_description_items__test ?? '',
     )
@@ -975,7 +980,13 @@ function normalizeAppointmentSalesSource(value: string | null | undefined) {
   return 'organic'
 }
 
-async function fetchDailySalesBySource(fromDate: string, toDate: string, token: string) {
+async function fetchDailySalesBySource(
+  fromDate: string,
+  toDate: string,
+  token: string,
+  teamAgents: Array<{ name: string; aliases: string[] }>,
+  team: 'cs' | 'sales',
+) {
   if (!token) throw new Error('HubSpot reporting is not configured.')
   const fromPaidDate = String(Date.parse(`${fromDate}T00:00:00Z`))
   const toPaidDate = String(Date.parse(`${toDate}T00:00:00Z`))
@@ -990,10 +1001,9 @@ async function fetchDailySalesBySource(fromDate: string, toDate: string, token: 
   }, token)
   const owners = await fetchHubSpotOwners(token)
   const ownerNames = new Map(owners.map((owner) => [owner.id, `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim()]))
-  const dailyAgents = [...DAILY_CS_AGENTS, ...DAILY_SALES_AGENTS]
   const deals = allDeals.filter((deal) => {
     const ownerName = ownerNames.get(deal.properties.hubspot_owner_id ?? '')
-    return Boolean(ownerName && dailyAgents.some((agent) => agent.aliases.some((alias) => namesMatch(ownerName, alias))))
+    return Boolean(ownerName && teamAgents.some((agent) => agent.aliases.some((alias) => namesMatch(ownerName, alias))))
   })
   const dealBatches = Array.from({ length: Math.ceil(deals.length / 100) }, (_, index) => deals.slice(index * 100, (index + 1) * 100))
   const associationGroups = await Promise.all(dealBatches.map((batch) => hubSpotPost<{
@@ -1013,27 +1023,40 @@ async function fetchDailySalesBySource(fromDate: string, toDate: string, token: 
   const dealSources = new Map(associations.map((row) => [String(row.from.id), (row.to ?? []).map((contact) => sources.get(String(contact.toObjectId))).find(Boolean)]))
   const bySource: Record<string, number> = { meta: 0, tiktok: 0, repurchase: 0, 'follow-ups': 0, organic: 0 }
   for (const deal of deals) {
-    const source = normalizeAppointmentSalesSource(dealSources.get(String(deal.id)))
+    const normalizedSource = normalizeAppointmentSalesSource(dealSources.get(String(deal.id)))
+    const source = team === 'sales' && !['meta', 'tiktok'].includes(normalizedSource) ? 'organic' : normalizedSource
     bySource[source] = (bySource[source] ?? 0) + 1
   }
   return { total: deals.length, bySource }
 }
 
-async function fetchValidAppointmentsBySource(fromDate: string, toDate: string, token: string) {
+async function fetchValidAppointmentsBySource(
+  fromDate: string,
+  toDate: string,
+  token: string,
+  teamAgents: Array<{ name: string; aliases: string[] }>,
+  team: 'cs' | 'sales',
+) {
   if (!token) throw new Error('HubSpot reporting is not configured.')
   const start = getNewYorkUnixDayRange(fromDate).from * 1000
   const end = getNewYorkUnixDayRange(toDate).to * 1000
   const meetings = await searchAllHubSpotObjects<{
     id: string
-    properties: { hs_meeting_outcome?: string | null }
+    properties: { hs_meeting_outcome?: string | null; hubspot_owner_id?: string | null }
   }>('meetings', {
     filterGroups: [{ filters: [
       { propertyName: 'hs_meeting_start_time', operator: 'GTE', value: String(start) },
       { propertyName: 'hs_meeting_start_time', operator: 'LTE', value: String(end) },
     ] }],
-    properties: ['hs_meeting_start_time', 'hs_meeting_outcome'],
+    properties: ['hs_meeting_start_time', 'hs_meeting_outcome', 'hubspot_owner_id'],
   }, token)
-  const completed = meetings.filter((meeting) => String(meeting.properties.hs_meeting_outcome ?? '').toUpperCase() !== 'CANCELED')
+  const owners = await fetchHubSpotOwners(token)
+  const ownerNames = new Map(owners.map((owner) => [owner.id, `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim()]))
+  const completed = meetings.filter((meeting) => {
+    if (String(meeting.properties.hs_meeting_outcome ?? '').toUpperCase() === 'CANCELED') return false
+    const ownerName = ownerNames.get(meeting.properties.hubspot_owner_id ?? '')
+    return Boolean(ownerName && teamAgents.some((agent) => agent.aliases.some((alias) => namesMatch(ownerName, alias))))
+  })
   const batches = Array.from({ length: Math.ceil(completed.length / 100) }, (_, index) => completed.slice(index * 100, (index + 1) * 100))
   const associationGroups = await Promise.all(batches.map((batch) => hubSpotPost<{
     results?: Array<{ from: { id: string }; to: Array<{ toObjectId: number }> }>
@@ -1052,7 +1075,8 @@ async function fetchValidAppointmentsBySource(fromDate: string, toDate: string, 
   const meetingSources = new Map(associations.map((row) => [String(row.from.id), (row.to ?? []).map((contact) => sources.get(String(contact.toObjectId))).find(Boolean)]))
   const bySource: Record<string, number> = { meta: 0, tiktok: 0, repurchase: 0, 'follow-ups': 0, organic: 0 }
   for (const meeting of completed) {
-    const source = normalizeAppointmentSalesSource(meetingSources.get(String(meeting.id)))
+    const normalizedSource = normalizeAppointmentSalesSource(meetingSources.get(String(meeting.id)))
+    const source = team === 'sales' && !['meta', 'tiktok'].includes(normalizedSource) ? 'organic' : normalizedSource
     bySource[source] = (bySource[source] ?? 0) + 1
   }
   return { total: completed.length, bySource }
@@ -1322,8 +1346,8 @@ function agentReportApi(
 
           if (requestUrl.searchParams.get('mode') === 'sales-summary') {
             const [sales, validAppointments] = await Promise.all([
-              fetchDailySalesBySource(fromDate, toDate, hubSpotToken),
-              fetchValidAppointmentsBySource(fromDate, toDate, hubSpotToken),
+              fetchDailySalesBySource(fromDate, toDate, hubSpotToken, teamAgents, team),
+              fetchValidAppointmentsBySource(fromDate, toDate, hubSpotToken, teamAgents, team),
             ])
             sendJson(response, 200, { fromDate, toDate, timezone: 'America/New_York', ...sales, validAppointments })
             return
@@ -2701,14 +2725,17 @@ async function fetchManualHubSpotAppointments(botRows: AppointmentBooking[], tok
     properties: ['hs_createdate', 'hs_meeting_start_time', 'hs_meeting_title', 'hs_meeting_body', 'hs_internal_meeting_notes', 'hs_meeting_outcome', 'hubspot_owner_id'],
   }, token)
   const ownerNames = new Map((await fetchHubSpotOwners(token)).map((owner) => [String(owner.id), `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim()]))
-  const nutritionists = new Set(['maria sandoval', 'paula alfonso'])
-  const sellers = new Set(['meribet sampson', 'maria claudia', 'andres castro', 'erika vargas', 'ailin isabel'])
-  const customerService = new Set(['arles martinez', 'brayam zuluaga', 'edmilson velasquez', 'kevin tinjaca', 'alice f', 'kathering silva', 'zara meza'])
   const teamAppointments = meetings.flatMap((meeting) => {
-    const assignee = (ownerNames.get(String(meeting.properties.hubspot_owner_id)) ?? '').toLowerCase()
-    const team = nutritionists.has(assignee) ? 'nutritionist' : sellers.has(assignee) ? 'sales' : customerService.has(assignee) ? 'cs' : null
+    const assignee = ownerNames.get(String(meeting.properties.hubspot_owner_id)) ?? ''
+    const teamGroups = [
+      { team: 'sales', agents: DAILY_SALES_AGENTS },
+      { team: 'nutritionist', agents: APPOINTMENT_NUTRITIONISTS },
+      { team: 'cs', agents: DAILY_CS_AGENTS },
+    ] as const
+    const assignedGroup = teamGroups.find((group) => group.agents.some((agent) => agent.aliases.some((alias) => namesMatch(assignee, alias))))
+    const assignedAgent = assignedGroup?.agents.find((agent) => agent.aliases.some((alias) => namesMatch(assignee, alias)))
     const meetingAt = meeting.properties.hs_meeting_start_time || meeting.properties.hs_createdate
-    return team && meetingAt ? [{ team, meeting_start_at: meetingAt }] : []
+    return assignedGroup && assignedAgent && meetingAt ? [{ team: assignedGroup.team, agent: assignedAgent.name, meeting_start_at: meetingAt }] : []
   })
   const teamCounts = {
     nutritionist: teamAppointments.filter((appointment) => appointment.team === 'nutritionist').length,
