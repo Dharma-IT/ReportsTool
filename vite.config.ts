@@ -27,7 +27,6 @@ const AGENT_REPORT_AGENTS = [
   { name: 'Natasha Lopez', aliases: ['Natasha Lopez'] },
   { name: 'William Carcamo', aliases: ['William Carcamo'] },
   { name: 'Kathering Silva', aliases: ['Kathering Silva'] },
-  { name: 'Kevin Tinjaca', aliases: ['Kevin Tinjaca'] },
   { name: 'Zara Meza', aliases: ['Zara Meza'] },
 ]
 const DAILY_CS_AGENTS = [
@@ -56,7 +55,6 @@ const STAFF_PERFORMANCE_REPORT = [
   { name: 'Natasha Lorente', respondAliases: ['Jose Lorente'], hubSpotAliases: ['Natasha Lorente'], hasCalls: false },
   { name: 'William Carcamo', respondAliases: ['William Carcamo'], hubSpotAliases: ['William Carcamo'], hasCalls: true },
   { name: 'Kathering Silva', respondAliases: ['Kathering Silva'], hubSpotAliases: ['Kathering Silva'], hasCalls: true },
-  { name: 'Kevin Tinjaca', respondAliases: ['Kevin Tinjaca'], hubSpotAliases: ['Kevin Tinjaca'], hasCalls: true },
   { name: 'Zara Meza', respondAliases: ['Zara Meza'], hubSpotAliases: ['Zara Meza'], hasCalls: true },
 ]
 // The Public Calls API marks these as missed, but dashboard review confirmed that
@@ -159,6 +157,7 @@ type AircallCall = {
   raw_digits: string
   user?: AircallUser | null
   assigned_to?: AircallUser | null
+  transferred_by?: AircallUser | null
   transferred_to?: AircallUser | null
   number?: AircallNumber | null
   tags?: { name?: string }[]
@@ -194,6 +193,13 @@ type StoredAircallRingEvent = {
   call_id: number
   agent_name: string | null
   event_timestamp: number
+}
+
+type StoredAircallTransferEvent = {
+  call_id: number
+  event_type: string
+  event_timestamp: number
+  payload: AircallWebhookPayload
 }
 
 type HubSpotTask = {
@@ -661,11 +667,15 @@ function aircallWebhookApi(
   webhookToken: string,
 ): Plugin {
   const acceptedEvents = new Set([
+    'call.created',
     'call.ringing_on_agent',
     'call.agent_declined',
     'call.answered',
     'call.hungup',
     'call.ended',
+    'call.transferred',
+    'call.external_transferred',
+    'call.unsuccessful_transfer',
   ])
 
   return {
@@ -1424,23 +1434,30 @@ function agentReportApi(
           const startRange = getNewYorkUnixDayRange(fromDate)
           const endRange = getNewYorkUnixDayRange(toDate)
           let hubSpotError: string | null = null
-          const [calls, users, hubSpotRows] = await Promise.all([
+          const [calls, users, hubSpotRows, transferOrigins] = await Promise.all([
             fetchAircallCalls({ apiId, apiToken, from: startRange.from, to: endRange.to, phoneNumber: '', direction: 'outbound' }),
             fetchAircallUsers(apiId, apiToken),
             fetchDailyCsHubSpot(fromDate, toDate, hubSpotToken, teamAgents).catch((error: unknown) => {
               hubSpotError = error instanceof Error ? error.message : 'Unable to load HubSpot sales.'
               return new Map<string, DailyCsHubSpotMetrics>()
             }),
+            fetchAircallTransferOrigins(
+              startRange.from,
+              endRange.to,
+              supabaseUrl,
+              supabaseServiceRoleKey,
+            ).catch(() => new Map<number, AircallUser>()),
           ])
 
           const agents = teamAgents.map(({ name, aliases }) => {
             const matchingUserIds = new Set(users
               .filter((user) => user.id && user.name && aliases.some((alias) => namesMatch(user.name!, alias)))
               .map((user) => user.id!))
-            const agentCalls = calls.filter((call) =>
-              Boolean((call.user?.id && matchingUserIds.has(call.user.id)) ||
-                (call.user?.name && aliases.some((alias) => namesMatch(call.user!.name!, alias)))),
-            )
+            const agentCalls = calls.filter((call) => {
+              const reportingUser = transferOrigins.get(call.id) ?? call.transferred_by ?? call.user
+              return Boolean((reportingUser?.id && matchingUserIds.has(reportingUser.id)) ||
+                (reportingUser?.name && aliases.some((alias) => namesMatch(reportingUser.name!, alias))))
+            })
             const validCalls = agentCalls.filter((call) =>
               call.answered_at !== null && Math.max(0, call.ended_at - call.answered_at) > 60,
             )
@@ -2341,10 +2358,6 @@ function getVerifiedMissedByName(callId: number) {
   // attempts here as a fallback when route timing is unavailable in the API response.
   const verifiedMissedBy: Record<number, string> = {
     3957724828: 'William Carcamo',
-    3958681499: 'Kevin Tinjaca',
-    3976084348: 'Kevin Tinjaca',
-    3979647200: 'Kevin Tinjaca',
-    3979664579: 'Kevin Tinjaca',
   }
 
   return verifiedMissedBy[callId] ?? null
@@ -2417,6 +2430,36 @@ async function fetchLastRungAgents(
   const rows = (await response.json()) as StoredAircallRingEvent[]
   rows.forEach((row) => {
     if (row.agent_name && !result.has(row.call_id)) result.set(row.call_id, row.agent_name)
+  })
+  return result
+}
+
+async function fetchAircallTransferOrigins(
+  from: number,
+  to: number,
+  supabaseUrl: string,
+  serviceRoleKey: string,
+) {
+  const result = new Map<number, AircallUser>()
+  if (!supabaseUrl || !serviceRoleKey) return result
+
+  const params = new URLSearchParams({
+    select: 'call_id,event_type,event_timestamp,payload',
+    event_type: 'in.(call.transferred,call.external_transferred)',
+    event_timestamp: `gte.${from}`,
+    order: 'event_timestamp.asc',
+  })
+  const response = await supabaseRest(
+    supabaseUrl,
+    serviceRoleKey,
+    `aircall_call_events?${params.toString()}&event_timestamp=lte.${to}`,
+  )
+  const rows = (await response.json()) as StoredAircallTransferEvent[]
+  rows.forEach((row) => {
+    const origin = row.payload.data?.transferred_by ?? row.payload.data?.user
+    // The first transfer identifies the agent who originated the call. Later
+    // transfer legs must not replace that ownership with an intermediary.
+    if (origin?.name && !result.has(row.call_id)) result.set(row.call_id, origin)
   })
   return result
 }

@@ -241,11 +241,17 @@ function AgentReport() {
     }
   }
 
-  const secondaryAgentNames = new Set(['Kathering Silva', 'Kevin Tinjaca', 'Zara Meza'])
-  const primaryAgents = report?.agents.filter((agent) => !secondaryAgentNames.has(agent.name)) ?? []
-  const secondaryAgents = report?.agents.filter((agent) => secondaryAgentNames.has(agent.name)) ?? []
-  const primaryStaff = report?.staff.filter((row) => !secondaryAgentNames.has(row.name)) ?? []
-  const savedSecondaryStaff = report?.staff.filter((row) => secondaryAgentNames.has(row.name)) ?? []
+  const secondaryAgentNames = new Set(['Kathering Silva', 'Zara Meza'])
+  const currentAgentNames = new Set([
+    'Belizabett Gonzalez', 'Carol Fernandes', 'Ailene Nuevas', 'Laura Sanchez',
+    'Natasha Lopez', 'Natasha Lorente', 'William Carcamo', 'Kathering Silva', 'Zara Meza',
+  ])
+  const currentAgents = report?.agents.filter((agent) => currentAgentNames.has(agent.name)) ?? []
+  const currentStaff = report?.staff.filter((row) => currentAgentNames.has(row.name)) ?? []
+  const primaryAgents = currentAgents.filter((agent) => !secondaryAgentNames.has(agent.name))
+  const secondaryAgents = currentAgents.filter((agent) => secondaryAgentNames.has(agent.name))
+  const primaryStaff = currentStaff.filter((row) => !secondaryAgentNames.has(row.name))
+  const savedSecondaryStaff = currentStaff.filter((row) => secondaryAgentNames.has(row.name))
   const secondaryStaff = secondaryAgents.map((agent) =>
     savedSecondaryStaff.find((row) => row.name === agent.name) ?? {
       name: agent.name,
@@ -381,7 +387,7 @@ function AgentReport() {
             </div>
             <div className="agent-report-tables">
               {renderAgentTable(primaryAgents, 'Primary agents')}
-              {renderAgentTable(secondaryAgents, 'Kathering Silva, Kevin Tinjaca, and Zara Meza')}
+              {renderAgentTable(secondaryAgents, 'Kathering Silva and Zara Meza')}
             </div>
             <p className="agent-report-note">Answered talk time only. Dates are interpreted in {report.timezone.replace('_', ' ')}.</p>
 
@@ -407,11 +413,11 @@ function AgentReport() {
               <div className="staff-performance-heading">
                 <div>
                   <p className="eyebrow">Dedicated team report</p>
-                  <h2 id="secondary-staff-performance-title">Kathering, Kevin &amp; Zara Performance</h2>
+                  <h2 id="secondary-staff-performance-title">Kathering &amp; Zara Performance</h2>
                   <p>Messages, calls, connected conversations and bookings for the selected date.</p>
                 </div>
               </div>
-              {renderStaffTable(secondaryStaff, 'Kathering Silva, Kevin Tinjaca, and Zara Meza performance')}
+              {renderStaffTable(secondaryStaff, 'Kathering Silva and Zara Meza performance')}
               <p className="agent-report-note">Older saved reports may show unavailable message and booking fields until Fetch Live refreshes that date.</p>
             </section>
           </>
