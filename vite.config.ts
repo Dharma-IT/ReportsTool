@@ -951,7 +951,9 @@ async function fetchDailyCsHubSpot(
     if (!matchingAgent) continue
     const key = matchingAgent.name.toLowerCase()
     const row = metrics.get(key) ?? emptyDailyCsHubSpotMetrics()
-    row.sales += finiteNumber(deal.properties.amount)
+    // Gross sales are always reported as a positive amount. Refunds are kept
+    // separately below and deducted exactly once when calculating balance.
+    row.sales += Math.abs(finiteNumber(deal.properties.amount))
     // HubSpot may store refunds as negative adjustments. Normalize their sign
     // so every refund is deducted from sales in the balance calculation below.
     row.refunds += Math.abs(finiteNumber(deal.properties.value_refund))
@@ -1454,6 +1456,14 @@ function agentReportApi(
               .filter((user) => user.id && user.name && aliases.some((alias) => namesMatch(user.name!, alias)))
               .map((user) => user.id!))
             const agentCalls = calls.filter((call) => {
+              const normalizedLineName = (call.number?.name ?? '').replace(/^spam\s+/i, '').trim()
+              const lineOwner = teamAgents.find((candidate) =>
+                candidate.aliases.some((alias) => namesMatch(normalizedLineName, alias)),
+              )
+              // Dedicated Aircall lines identify the originating agent even
+              // when Aircall changes `user` to the final transfer recipient.
+              if (lineOwner) return lineOwner.name === name
+
               const reportingUser = transferOrigins.get(call.id) ?? call.transferred_by ?? call.user
               return Boolean((reportingUser?.id && matchingUserIds.has(reportingUser.id)) ||
                 (reportingUser?.name && aliases.some((alias) => namesMatch(reportingUser.name!, alias))))
