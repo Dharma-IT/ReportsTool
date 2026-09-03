@@ -1092,7 +1092,6 @@ function financeReportApi(
     configureServer(server) {
       server.middlewares.use('/api/refunds-report', async (request, response) => {
         try {
-          if (!hubSpotToken) throw new Error('HubSpot reporting is not configured.')
           const requestUrl = new URL(request.url ?? '', 'http://localhost')
           const toDate = requestUrl.searchParams.get('to') || getTodayInNewYork()
           const fromDate = requestUrl.searchParams.get('from') || shiftIsoDate(toDate, -55)
@@ -1100,6 +1099,25 @@ function financeReportApi(
             sendJson(response, 400, { message: 'Enter a valid date range using YYYY-MM-DD.' })
             return
           }
+          if (requestUrl.searchParams.get('mode') === 'saved') {
+            if (!supabaseUrl || !supabaseServiceRoleKey) {
+              sendJson(response, 500, { message: 'Refund report storage is not configured.' })
+              return
+            }
+            const savedResponse = await supabaseRest(
+              supabaseUrl,
+              supabaseServiceRoleKey,
+              `refund_reports?from_date=eq.${encodeURIComponent(fromDate)}&to_date=eq.${encodeURIComponent(toDate)}&select=report_data&limit=1`,
+            )
+            const savedRows = await savedResponse.json() as Array<{ report_data: unknown }>
+            if (!savedRows.length) {
+              sendJson(response, 404, { message: 'No saved refund report exists for this date range.' })
+              return
+            }
+            sendJson(response, 200, savedRows[0].report_data)
+            return
+          }
+          if (!hubSpotToken) throw new Error('HubSpot reporting is not configured.')
           const fromValue = String(Date.parse(`${fromDate}T00:00:00Z`))
           const toValue = String(Date.parse(`${toDate}T00:00:00Z`))
           const [salesDeals, refundDeals, owners] = await Promise.all([
@@ -1170,15 +1188,41 @@ function financeReportApi(
               observation: deal.properties.refund_notes || deal.properties.observation || '',
             }
           }).sort((left, right) => right.refundDate.localeCompare(left.refundDate))
-          sendJson(response, 200, {
+          const reportData = {
             fromDate, toDate, timezone: 'America/New_York', weekly, details,
+            fetchedAt: new Date().toISOString(),
             totals: {
               sales: roundMoney(weekly.reduce((sum, week) => sum + week.sales, 0)),
               refunds: roundMoney(weekly.reduce((sum, week) => sum + week.refunds, 0)),
               refundRate: weekly.reduce((sum, week) => sum + week.sales, 0) ? Math.round((weekly.reduce((sum, week) => sum + week.refunds, 0) / weekly.reduce((sum, week) => sum + week.sales, 0)) * 10000) / 100 : 0,
               refundCount: details.length,
             },
-          })
+          }
+          if (supabaseUrl && supabaseServiceRoleKey) {
+            try {
+              await supabaseRest(
+                supabaseUrl,
+                supabaseServiceRoleKey,
+                'refund_reports?on_conflict=from_date,to_date',
+                {
+                  method: 'POST',
+                  headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+                  body: JSON.stringify({
+                    from_date: fromDate,
+                    to_date: toDate,
+                    timezone: reportData.timezone,
+                    report_data: reportData,
+                    fetched_at: reportData.fetchedAt,
+                  }),
+                },
+              )
+            } catch (storageError) {
+              Object.assign(reportData, {
+                storageWarning: storageError instanceof Error ? storageError.message : 'Unable to save the refund report.',
+              })
+            }
+          }
+          sendJson(response, 200, reportData)
         } catch (error) {
           sendJson(response, 500, { message: error instanceof Error ? error.message : 'Unable to build the refunds report.' })
         }

@@ -1,10 +1,21 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 type RefundReport = {
   timezone: string
   weekly: Array<{ weekStart: string; weekEnd: string; sales: number; refunds: number; refundRate: number }>
   details: Array<{ id: string; dealName: string; refundDate: string; paidDate: string; saleAmount: number; refundAmount: number; refundRate: number; seller: string; type: string; observation: string }>
   totals: { sales: number; refunds: number; refundRate: number; refundCount: number }
+  fetchedAt?: string
+  storageWarning?: string
+}
+
+const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+const apiBaseUrl = configuredApiBaseUrl === 'https://dharma-campaignreport-1.onrender.com'
+  ? 'https://dharma-campaignreport-503z.onrender.com'
+  : configuredApiBaseUrl
+
+function getApiUrl(path: string) {
+  return `${['localhost', '127.0.0.1'].includes(window.location.hostname) ? '' : apiBaseUrl}${path}`
 }
 
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
@@ -29,32 +40,61 @@ function displayDate(value: string) {
 }
 
 function Refunds() {
-  const initialRange = useMemo(defaultRange, [])
+  const [initialRange] = useState(defaultRange)
   const [fromDate, setFromDate] = useState(initialRange.from)
   const [toDate, setToDate] = useState(initialRange.to)
   const [report, setReport] = useState<RefundReport | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const fetchReport = useCallback(async (signal?: AbortSignal) => {
+  async function fetchReport(mode: 'live' | 'saved' = 'live', signal?: AbortSignal) {
     setIsLoading(true); setError('')
     try {
       const params = new URLSearchParams({ from: fromDate, to: toDate })
-      const response = await fetch(`/api/refunds-report?${params}`, { signal })
-      const payload = await response.json()
+      if (mode === 'saved') params.set('mode', 'saved')
+      const response = await fetch(getApiUrl(`/api/refunds-report?${params}`), { signal })
+      const contentType = response.headers.get('content-type') ?? ''
+      if (!contentType.includes('application/json')) {
+        throw new Error('The Refunds API is not available on the deployed server yet. Redeploy the latest server version, then click Fetch again.')
+      }
+      const payload = await response.json() as RefundReport & { message?: string }
+      if (mode === 'saved' && response.status === 404) {
+        setReport(null)
+        return
+      }
       if (!response.ok) throw new Error(payload.message ?? 'Unable to load refunds.')
-      setReport(payload as RefundReport)
+      setReport(payload)
     } catch (loadError) {
       if (loadError instanceof DOMException && loadError.name === 'AbortError') return
       setError(loadError instanceof Error ? loadError.message : 'Unable to load refunds.')
     } finally { if (!signal?.aborted) setIsLoading(false) }
-  }, [fromDate, toDate])
+  }
 
   useEffect(() => {
     const controller = new AbortController()
-    void fetchReport(controller.signal)
+    const loadSavedReport = async () => {
+      try {
+        const params = new URLSearchParams({ from: fromDate, to: toDate, mode: 'saved' })
+        const response = await fetch(getApiUrl(`/api/refunds-report?${params}`), { signal: controller.signal })
+        if (response.status === 404) {
+          setReport(null)
+          setError('')
+          return
+        }
+        const contentType = response.headers.get('content-type') ?? ''
+        if (!contentType.includes('application/json')) return
+        const payload = await response.json() as RefundReport & { message?: string }
+        if (!response.ok) throw new Error(payload.message ?? 'Unable to load the saved refund report.')
+        setReport(payload)
+        setError('')
+      } catch (loadError) {
+        if (loadError instanceof DOMException && loadError.name === 'AbortError') return
+        setReport(null)
+      }
+    }
+    void loadSavedReport()
     return () => controller.abort()
-  }, [fetchReport])
+  }, [fromDate, toDate])
 
   const maxWeeklyAmount = Math.max(1, ...(report?.weekly ?? []).map((week) => Math.max(week.sales, week.refunds)))
 
@@ -66,7 +106,7 @@ function Refunds() {
           <div className="refunds-date-controls">
             <label><span>From</span><input type="date" value={fromDate} max={toDate} onChange={(event) => setFromDate(event.target.value)} /></label>
             <label><span>To</span><input type="date" value={toDate} min={fromDate} onChange={(event) => setToDate(event.target.value)} /></label>
-            <button type="button" disabled={isLoading || !fromDate || !toDate} onClick={() => void fetchReport()}>{isLoading ? 'Loading…' : 'Fetch'}</button>
+            <button type="button" disabled={isLoading || !fromDate || !toDate} onClick={() => void fetchReport('live')}>{isLoading ? 'Loading…' : 'Fetch'}</button>
           </div>
         </header>
 

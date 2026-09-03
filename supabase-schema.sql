@@ -75,6 +75,19 @@ create table if not exists public.daily_reports (
   constraint daily_reports_data_is_object check (jsonb_typeof(report_data) = 'object')
 );
 
+create table if not exists public.refund_reports (
+  from_date date not null,
+  to_date date not null,
+  timezone text not null default 'America/New_York',
+  report_data jsonb not null,
+  fetched_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (from_date, to_date),
+  constraint refund_reports_valid_range check (from_date <= to_date),
+  constraint refund_reports_data_is_object check (jsonb_typeof(report_data) = 'object')
+);
+
 create index if not exists aircall_call_events_call_timeline_idx
 on public.aircall_call_events (call_id, event_timestamp desc);
 
@@ -117,6 +130,15 @@ alter table public.meta_budget_reports enable row level security;
 alter table public.aircall_call_events enable row level security;
 alter table public.agent_reports enable row level security;
 alter table public.daily_reports enable row level security;
+alter table public.refund_reports enable row level security;
+
+drop trigger if exists set_refund_reports_updated_at on public.refund_reports;
+create trigger set_refund_reports_updated_at
+before update on public.refund_reports
+for each row
+execute function public.set_updated_at();
+
+-- Refund snapshots are server-only because they contain deal-level data.
 
 drop policy if exists "Allow anon insert daily reports" on public.daily_reports;
 create policy "Allow anon insert daily reports"
