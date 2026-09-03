@@ -1437,7 +1437,18 @@ function agentReportApi(
           const endRange = getNewYorkUnixDayRange(toDate)
           let hubSpotError: string | null = null
           const [calls, users, hubSpotRows, transferOrigins] = await Promise.all([
-            fetchAircallCalls({ apiId, apiToken, from: startRange.from, to: endRange.to, phoneNumber: '', direction: 'outbound' }),
+            fetchAircallCalls({
+              apiId,
+              apiToken,
+              from: startRange.from,
+              to: endRange.to,
+              phoneNumber: '',
+              // Aircall can expose an outbound transferred call as `inbound`
+              // on the complete Calls endpoint (for example 4106416726).
+              // Fetch both directions, then attribute by the dedicated line.
+              direction: null,
+              includeTransferredCalls: true,
+            }),
             fetchAircallUsers(apiId, apiToken),
             fetchDailyCsHubSpot(fromDate, toDate, hubSpotToken, teamAgents).catch((error: unknown) => {
               hubSpotError = error instanceof Error ? error.message : 'Unable to load HubSpot sales.'
@@ -1956,6 +1967,7 @@ async function fetchAircallCalls({
   phoneNumber,
   direction = 'inbound',
   userId,
+  includeTransferredCalls = false,
 }: {
   apiId: string
   apiToken: string
@@ -1964,22 +1976,25 @@ async function fetchAircallCalls({
   phoneNumber: string
   direction?: 'inbound' | 'outbound' | null
   userId?: number
+  includeTransferredCalls?: boolean
 }) {
-  const url = new URL('https://api.aircall.io/v1/calls/search')
+  // Call Search omits calls transferred between Aircall users. The general
+  // Calls endpoint includes those records and exposes transferred_by/to.
+  const url = new URL(`https://api.aircall.io/v1/${includeTransferredCalls ? 'calls' : 'calls/search'}`)
   url.searchParams.set('from', String(from))
   url.searchParams.set('to', String(to))
   url.searchParams.set('per_page', '100')
   url.searchParams.set('fetch_call_timeline', 'true')
 
-  if (direction) {
+  if (direction && !includeTransferredCalls) {
     url.searchParams.set('direction', direction)
   }
 
-  if (phoneNumber) {
+  if (phoneNumber && !includeTransferredCalls) {
     url.searchParams.set('phone_number', phoneNumber)
   }
 
-  if (userId) {
+  if (userId && !includeTransferredCalls) {
     url.searchParams.set('user_id', String(userId))
   }
 
@@ -1993,7 +2008,13 @@ async function fetchAircallCalls({
     nextUrl = payload.meta?.next_page_link ?? null
   }
 
-  return calls
+  // Apply these filters locally too because the general Calls endpoint does
+  // not support every Call Search filter consistently.
+  return calls.filter((call) =>
+    (!direction || call.direction === direction) &&
+    (!phoneNumber || call.raw_digits.replace(/\D/g, '') === phoneNumber.replace(/\D/g, '')) &&
+    (!userId || call.user?.id === userId),
+  )
 }
 
 async function fetchAircallUsers(apiId: string, apiToken: string) {
