@@ -12,9 +12,11 @@ if (!existsSync(statePath) && !existsSync(profilePath)) {
 }
 
 let browser = null
-const context = existsSync(profilePath)
-  ? await chromium.launchPersistentContext(profilePath, { headless: true })
-  : await createStorageStateContext()
+// The dashboard login writes the newest authenticated session to statePath.
+// Only fall back to the legacy persistent profile when no state file exists.
+const context = existsSync(statePath)
+  ? await createStorageStateContext()
+  : await chromium.launchPersistentContext(profilePath, { headless: true })
 const page = await context.newPage()
 
 try {
