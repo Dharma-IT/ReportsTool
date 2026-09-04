@@ -27,11 +27,45 @@ if (isProfileMode) {
   console.log('This window will stay open. After login reaches Reports > Conversations, close it.')
   await page.waitForEvent('close', { timeout: 0 })
 } else if (isAutoMode) {
-  console.log('This window will close after Reports analytics is authenticated.')
-  await page.waitForFunction(isAuthenticatedOnReportsPage, undefined, {
-    timeout: 10 * 60 * 1000,
-    polling: 3000,
+  console.log('After Reports > Conversations is visible, click "Save session & close" in the browser.')
+
+  let finishLogin
+  const loginFinished = new Promise((resolve) => {
+    finishLogin = resolve
   })
+
+  await page.exposeFunction('__saveRespondSession', () => finishLogin())
+
+  // Login redirects and SPA navigation replace the document, so keep adding the
+  // control to whichever respond.io page is currently visible.
+  const addSaveControl = async () => {
+    if (page.isClosed()) return
+    await page.evaluate(() => {
+      if (document.querySelector('#dharma-save-respond-session')) return
+      const button = document.createElement('button')
+      button.id = 'dharma-save-respond-session'
+      button.type = 'button'
+      button.textContent = 'Save session & close'
+      button.title = 'Click after Reports > Conversations is fully visible'
+      button.style.cssText = [
+        'position:fixed', 'right:24px', 'bottom:24px', 'z-index:2147483647',
+        'padding:14px 20px', 'border:2px solid #f3cd65', 'border-radius:10px',
+        'background:#1c543c', 'color:white', 'font:700 14px system-ui',
+        'box-shadow:0 12px 35px rgba(0,0,0,.3)', 'cursor:pointer',
+      ].join(';')
+      button.addEventListener('click', async () => {
+        button.disabled = true
+        button.textContent = 'Saving session…'
+        await window.__saveRespondSession()
+      })
+      document.body.appendChild(button)
+    }).catch(() => {})
+  }
+
+  await addSaveControl()
+  const controlTimer = setInterval(addSaveControl, 1000)
+  await loginFinished
+  clearInterval(controlTimer)
 } else {
   console.log('When the report page is visible, come back here and press Enter.')
 
@@ -44,51 +78,3 @@ await context.storageState({ path: statePath })
 await context.close()
 
 console.log(`Saved respond.io browser session to ${statePath}`)
-
-async function isAuthenticatedOnReportsPage() {
-  if (!window.location.pathname.includes('/reports/conversations')) {
-    return false
-  }
-
-  try {
-    // respond.io can return a valid analytics-shaped response from its public app
-    // shell before login has completed. PostHog's user state changes from
-    // "anonymous" to "identified" only after the authenticated workspace loads.
-    const identityEntry = Object.entries(window.localStorage).find(([key]) =>
-      key.startsWith('ph_') && key.endsWith('_posthog'),
-    )
-    if (!identityEntry) return false
-
-    const identity = JSON.parse(identityEntry[1])
-    if (identity?.$user_state !== 'identified') return false
-
-    const response = await fetch('/analytics/conversation', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        date: {
-          from: '2026-06-02 00:00:00',
-          to: '2026-06-02 23:59:59',
-        },
-        timezone: 'America/New_York',
-      }),
-    })
-
-    if (!response.ok) {
-      console.log(`Reports analytics not ready: ${response.status}`)
-      return false
-    }
-
-    const payload = await response.json().catch(() => null)
-    const hasOverviewCounts =
-      typeof payload?.opened?.count === 'number' || typeof payload?.closed?.count === 'number'
-    const hasChartData = Boolean(payload?.labels || payload?.values)
-
-    return hasOverviewCounts || hasChartData
-  } catch {
-    return false
-  }
-}

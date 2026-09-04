@@ -1578,7 +1578,7 @@ function agentReportApi(
             loginProcess.unref()
             sendJson(response, 202, {
               message:
-                'respond.io login opened. Sign in and leave the browser on Reports > Conversations; it will close after saving the session.',
+                'respond.io login opened. After Reports > Conversations loads, click the green "Save session & close" button in that browser.',
             })
             return
           }
