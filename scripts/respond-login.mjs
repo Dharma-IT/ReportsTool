@@ -51,6 +51,17 @@ async function isAuthenticatedOnReportsPage() {
   }
 
   try {
+    // respond.io can return a valid analytics-shaped response from its public app
+    // shell before login has completed. PostHog's user state changes from
+    // "anonymous" to "identified" only after the authenticated workspace loads.
+    const identityEntry = Object.entries(window.localStorage).find(([key]) =>
+      key.startsWith('ph_') && key.endsWith('_posthog'),
+    )
+    if (!identityEntry) return false
+
+    const identity = JSON.parse(identityEntry[1])
+    if (identity?.$user_state !== 'identified') return false
+
     const response = await fetch('/analytics/conversation', {
       method: 'POST',
       credentials: 'include',
