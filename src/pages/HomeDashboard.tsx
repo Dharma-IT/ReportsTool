@@ -47,6 +47,14 @@ const reportLinks = [
     action: 'View appointment reports',
     icon: 'bot',
   },
+  {
+    path: '/ac-automation',
+    number: '07',
+    title: 'AC Automation',
+    copy: 'Configure abandoned-cart reminders and monitor recovered orders and revenue.',
+    action: 'Open cart automation',
+    icon: 'cart',
+  },
 ]
 
 function ReportIcon({ name }: { name: string }) {
@@ -64,6 +72,9 @@ function ReportIcon({ name }: { name: string }) {
   }
   if (name === 'bot') {
     return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 3v4M8 12h.01M16 12h.01M8 16h8"/><circle cx="12" cy="3" r="1"/></svg>
+  }
+  if (name === 'cart') {
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l2.2 10.1a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 1.9-1.4L21 8H6.1M10 20h.01M18 20h.01" /></svg>
   }
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18.5 8.1 13l4 3.4L21 6.5M16 6.5h5v5" /></svg>
 }

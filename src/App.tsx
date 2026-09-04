@@ -7,6 +7,7 @@ import FinanceReport from './pages/FinanceReport'
 import BotReports from './pages/BotReports'
 import Daily from './pages/Daily'
 import Refunds from './pages/Refunds'
+import ACAutomation from './pages/ACAutomation'
 import CampaignPinLock from './components/CampaignPinLock'
 
 type AppRoute = {
@@ -23,6 +24,7 @@ const routes: AppRoute[] = [
   { path: '/daily', label: 'Daily' },
   { path: '/refunds', label: 'Refunds' },
   { path: '/appointment-reports', label: 'Appointment Reports' },
+  { path: '/ac-automation', label: 'AC Automation' },
 ]
 
 function getActiveRoute() {
@@ -79,6 +81,8 @@ function App() {
         <CampaignPinLock>
           <FinanceReport />
         </CampaignPinLock>
+      ) : activeRoute === '/ac-automation' ? (
+        <ACAutomation />
       ) : (
         <CampaignPinLock>
           <CampaignDashboard />
