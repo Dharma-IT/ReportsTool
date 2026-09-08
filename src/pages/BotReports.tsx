@@ -36,6 +36,12 @@ type AppointmentView = 'bot' | 'manual' | 'sales' | 'team'
 type SalesSummary = { total: number; bySource: Record<string, number>; validAppointments: { total: number; bySource: Record<string, number> } }
 type TeamSalesSummaries = { sales: SalesSummary; cs: SalesSummary }
 
+const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+
+function getApiUrl(path: string) {
+  return configuredApiBaseUrl ? `${configuredApiBaseUrl}${path}` : path
+}
+
 const csAppointmentSalesSources = ['Meta', 'TikTok', 'Repurchase', 'Follow Ups', 'Organic']
 const salesAppointmentSalesSources = ['Meta', 'TikTok', 'Organic']
 const appointmentSalesSourceKeys: Record<string, string> = { Meta: 'meta', TikTok: 'tiktok', Repurchase: 'repurchase', 'Follow Ups': 'follow-ups', Organic: 'organic' }
@@ -219,7 +225,11 @@ function BotReports() {
     setIsSalesLoading(true); setSalesError('')
     const fetchTeamSummary = async (team: 'sales' | 'cs') => {
       const params = new URLSearchParams({ from: startDate, to: endDate, team, mode: 'sales-summary' })
-      const response = await fetch(`/api/daily-cs-report?${params}`, { signal: controller.signal })
+      const response = await fetch(getApiUrl(`/api/daily-cs-report?${params}`), { signal: controller.signal })
+      const contentType = response.headers.get('content-type') ?? ''
+      if (!contentType.includes('application/json')) {
+        throw new Error('The sales API is not configured on this deployment.')
+      }
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.message ?? 'Unable to load sales totals.')
       return payload as SalesSummary
