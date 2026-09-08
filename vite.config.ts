@@ -2973,6 +2973,171 @@ function botReportsApi(hubSpotToken: string): Plugin {
   }
 }
 
+type StripeObject = Record<string, any>
+
+function stripePhone(value: unknown) {
+  const digits = String(value ?? '').replace(/\D/g, '')
+  if (digits.length === 10) return `1${digits}`
+  return digits.length >= 7 ? digits : ''
+}
+
+function canonicalClientEmail(value: string) {
+  const [rawLocal = '', rawDomain = ''] = value.trim().toLowerCase().split('@')
+  const domain = rawDomain === 'googlemail.com' ? 'gmail.com' : rawDomain
+  let local = rawLocal.split('+')[0]
+  if (domain === 'gmail.com') local = local.replaceAll('.', '')
+  return local && domain ? `${local}@${domain}` : ''
+}
+
+function stripeContact(payment: StripeObject) {
+  const customer = payment.customer && typeof payment.customer === 'object' ? payment.customer : {}
+  const charge = payment.object === 'charge' ? payment : payment.latest_charge && typeof payment.latest_charge === 'object' ? payment.latest_charge : {}
+  const billing = charge.billing_details && typeof charge.billing_details === 'object' ? charge.billing_details : {}
+  const failedBilling = payment.last_payment_error?.payment_method?.billing_details ?? {}
+  const shipping = payment.shipping && typeof payment.shipping === 'object' ? payment.shipping : {}
+  const fullName = String(customer.name || billing.name || failedBilling.name || shipping.name || payment.metadata?.name || '').trim()
+  const nameIsPhone = !/[a-z]/i.test(fullName) ? stripePhone(fullName) : ''
+  const phone = stripePhone(customer.phone || billing.phone || failedBilling.phone || shipping.phone || payment.metadata?.phone) || nameIsPhone
+  const email = String(customer.email || billing.email || failedBilling.email || payment.receipt_email || '').trim().toLowerCase()
+  const pieces = fullName.split(/\s+/).filter(Boolean)
+  return {
+    phone,
+    email,
+    firstName: nameIsPhone ? '' : pieces.shift() ?? '',
+    lastName: nameIsPhone ? '' : pieces.join(' '),
+  }
+}
+
+async function listStripePaymentIntents(secretKey: string, start: number, end: number) {
+  const payments: StripeObject[] = []
+  let startingAfter = ''
+  do {
+    const params = new URLSearchParams({ limit: '100', 'created[gte]': String(start), 'created[lt]': String(end) })
+    params.append('expand[]', 'data.customer')
+    params.append('expand[]', 'data.latest_charge')
+    if (startingAfter) params.set('starting_after', startingAfter)
+    const upstream = await fetch(`https://api.stripe.com/v1/payment_intents?${params}`, {
+      headers: { Authorization: `Bearer ${secretKey}` },
+    })
+    const payload = await upstream.json() as { data?: StripeObject[]; has_more?: boolean; error?: { message?: string } }
+    if (!upstream.ok) throw new Error(payload.error?.message || 'Stripe rejected the payment report request.')
+    payments.push(...(payload.data ?? []))
+    startingAfter = payload.has_more && payload.data?.length ? String(payload.data.at(-1)?.id ?? '') : ''
+  } while (startingAfter)
+  return payments
+}
+
+async function listStripeCharges(secretKey: string, start: number, end: number) {
+  const charges: StripeObject[] = []
+  let startingAfter = ''
+  do {
+    const params = new URLSearchParams({ limit: '100', 'created[gte]': String(start), 'created[lt]': String(end) })
+    params.append('expand[]', 'data.customer')
+    if (startingAfter) params.set('starting_after', startingAfter)
+    const upstream = await fetch(`https://api.stripe.com/v1/charges?${params}`, { headers: { Authorization: `Bearer ${secretKey}` } })
+    const payload = await upstream.json() as { data?: StripeObject[]; has_more?: boolean; error?: { message?: string } }
+    if (!upstream.ok) throw new Error(payload.error?.message || 'Stripe rejected the charge report request.')
+    charges.push(...(payload.data ?? []))
+    startingAfter = payload.has_more && payload.data?.length ? String(payload.data.at(-1)?.id ?? '') : ''
+  } while (startingAfter)
+  return charges
+}
+
+function acAutomationApi(stripeSecretKey: string): Plugin {
+  return {
+    name: 'ac-automation-api',
+    configureServer(server) {
+      server.middlewares.use('/api/ac-automation', async (request, response) => {
+        try {
+          const url = new URL(request.url ?? '', 'http://localhost')
+          if (url.searchParams.get('action') === 'stripe-login') {
+            const stdout = openSync('stripe-login.out.log', 'a')
+            const stderr = openSync('stripe-login.err.log', 'a')
+            const child = spawnNodeScript(['stripe-login.mjs'], { cwd: getAppRoot(), detached: true, stdio: ['ignore', stdout, stderr] })
+            child.unref()
+            return sendJson(response, 202, { message: 'Stripe login opened. Sign in, then click Save Stripe session & close.' })
+          }
+          if (!stripeSecretKey) return sendJson(response, 500, { message: 'STRIPE_SECRET_KEY is not configured.' })
+          const fromDate = url.searchParams.get('from') ?? ''
+          const toDate = url.searchParams.get('to') ?? fromDate
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(toDate) || fromDate > toDate) {
+            return sendJson(response, 400, { message: 'Choose a valid EST date range.' })
+          }
+          // AC deal dates are assigned to the previous day: a 9/2 deal sheet is
+          // built from the Stripe Dashboard's 9/3 Eastern transaction day.
+          const sourceStartDate = new Date(`${fromDate}T12:00:00Z`)
+          sourceStartDate.setUTCDate(sourceStartDate.getUTCDate() + 1)
+          const stripeFromDate = sourceStartDate.toISOString().slice(0, 10)
+          const sourceEndDate = new Date(`${toDate}T12:00:00Z`)
+          sourceEndDate.setUTCDate(sourceEndDate.getUTCDate() + 2)
+          const endDate = sourceEndDate.toISOString().slice(0, 10)
+          const start = Math.floor(zonedTimeToUtc(stripeFromDate, 0, 0, 0, 'America/New_York').getTime() / 1000)
+          const end = Math.floor(zonedTimeToUtc(endDate, 0, 0, 0, 'America/New_York').getTime() / 1000)
+          const [paymentIntents, charges] = await Promise.all([
+            listStripePaymentIntents(stripeSecretKey, start, end),
+            listStripeCharges(stripeSecretKey, start, end),
+          ])
+          // Stripe's Dashboard lists individual charge attempts. PaymentIntents alone
+          // hide earlier failed attempts after a retry and often omit their contact data.
+          const payments = [...charges, ...paymentIntents.filter((payment) =>
+            payment.status === 'canceled' || (!payment.latest_charge && payment.status !== 'succeeded'),
+          )]
+          const stripeContacts = payments.map((payment) => ({ payment, contact: stripeContact(payment) }))
+          const dashboardIds = [...new Set(stripeContacts
+            .map(({ payment }) => String(payment.payment_intent || payment.id || ''))
+            .filter((id) => id.startsWith('pi_')))]
+          let dashboardPhones: Record<string, string> = {}
+          if (dashboardIds.length) {
+            if (process.env.RENDER) throw new Error('Stripe Dashboard phone lookup requires the local saved browser session.')
+            const { stdout } = await execNodeScript(['stripe-phones.mjs', `--ids=${dashboardIds.join(',')}`], { cwd: getAppRoot(), timeout: 300_000 })
+            dashboardPhones = (JSON.parse(String(stdout)) as { phones?: Record<string, string> }).phones ?? {}
+          }
+          for (const entry of stripeContacts) {
+            const dashboardId = String(entry.payment.payment_intent || entry.payment.id || '')
+            entry.contact.phone ||= stripePhone(dashboardPhones[dashboardId])
+          }
+          const stripeIdentityByEmail = new Map<string, ReturnType<typeof stripeContact>>()
+          for (const { contact } of stripeContacts) {
+            if (!contact.email) continue
+            const current = stripeIdentityByEmail.get(contact.email)
+            stripeIdentityByEmail.set(contact.email, {
+              email: contact.email,
+              phone: current?.phone || contact.phone,
+              firstName: current?.firstName || contact.firstName,
+              lastName: current?.lastName || contact.lastName,
+            })
+          }
+          const resolved = stripeContacts.map(({ payment, contact }) => {
+            const stripeIdentity = stripeIdentityByEmail.get(contact.email)
+            return { payment, contact: { phone: stripeIdentity?.phone || contact.phone, email: contact.email, firstName: stripeIdentity?.firstName || contact.firstName, lastName: stripeIdentity?.lastName || contact.lastName } }
+          })
+          const succeeded = resolved.filter(({ payment }) => payment.object === 'charge' && payment.status === 'succeeded')
+          const succeededEmails = new Set(succeeded.map(({ contact }) => canonicalClientEmail(contact.email)).filter(Boolean))
+          const succeededPhones = new Set(succeeded.map(({ contact }) => contact.phone).filter(Boolean))
+          const contacts = new Map<string, ReturnType<typeof stripeContact>>()
+          for (const { payment, contact } of resolved) {
+            if (payment.object === 'charge' && payment.status === 'succeeded') continue
+            const clientKey = contact.phone || contact.email
+            const clientEmail = canonicalClientEmail(contact.email)
+            const alsoSucceeded = succeededPhones.has(contact.phone)
+              || Boolean(clientEmail && succeededEmails.has(clientEmail))
+            if (!contact.phone || alsoSucceeded || contacts.has(clientKey)) continue
+            const charge = payment.object === 'charge' ? payment : payment.latest_charge && typeof payment.latest_charge === 'object' ? payment.latest_charge : {}
+            const isBlocked = charge.outcome?.type === 'blocked'
+            const isCanceled = payment.object === 'payment_intent' && payment.status === 'canceled'
+            const isFailed = payment.object === 'charge' ? payment.status === 'failed' : Boolean(payment.last_payment_error || charge.status === 'failed')
+            const isIncomplete = ['requires_payment_method', 'requires_confirmation', 'requires_action', 'processing', 'requires_capture'].includes(payment.status)
+            if (isBlocked || isCanceled || isFailed || isIncomplete) contacts.set(clientKey, contact)
+          }
+          sendJson(response, 200, { fromDate, toDate, timezone: 'America/New_York', contacts: [...contacts.values()] })
+        } catch (error) {
+          sendJson(response, 500, { message: error instanceof Error ? error.message : 'Unable to load Stripe abandoned carts.' })
+        }
+      })
+    },
+  }
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
@@ -2985,6 +3150,7 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       react(),
+      acAutomationApi(env.STRIPE_SECRET_KEY ?? ''),
       botReportsApi(env.HUBSPOT_ACCESS_TOKEN ?? ''),
       facebookBudgetApi(env.FACEBOOK_SYSTEM_ACCESS_TOKEN ?? ''),
       respondIoReportMetricsApi(

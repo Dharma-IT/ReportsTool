@@ -15,6 +15,7 @@
     "preview": "vite preview",
     "respond:login": "node scripts/respond-login.mjs",
     "respond:report": "node scripts/respond-report.mjs",
+    "stripe:login": "node scripts/stripe-login.mjs",
     "tiktok:login": "node scripts/tiktok-login.mjs",
     "tiktok:report": "node scripts/tiktok-report.mjs"
   },
