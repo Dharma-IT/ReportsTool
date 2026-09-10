@@ -11,6 +11,17 @@ const dailyExpenses = [
   'Cost of Goods Sold',
 ]
 
+type SupplementsView = 'daily' | 'ads' | 'cogs' | 'shopify' | 'orders' | 'sales'
+
+const supplementViews: Array<{ key: SupplementsView; label: string; short: string; detail: string }> = [
+  { key: 'daily', label: 'Report Daily', short: 'RD', detail: 'Daily finance overview' },
+  { key: 'ads', label: 'ADS', short: 'AD', detail: 'Advertising spend' },
+  { key: 'cogs', label: 'COGS & FEE', short: 'CF', detail: 'Costs and fees' },
+  { key: 'shopify', label: 'Shopify', short: 'SH', detail: 'Store performance' },
+  { key: 'orders', label: 'Orders', short: 'OR', detail: 'Order reporting' },
+  { key: 'sales', label: 'Total sales by order', short: 'TS', detail: 'Order-level sales' },
+]
+
 function getToday() {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -24,9 +35,19 @@ function EmptyAmount() {
 export default function Supplements() {
   const [dateInput, setDateInput] = useState(getToday())
   const [reportDate, setReportDate] = useState(getToday())
+  const [view, setView] = useState<SupplementsView>('daily')
+  const activeView = supplementViews.find((item) => item.key === view) ?? supplementViews[0]
 
   return (
-    <main className="dashboard-shell supplements-page">
+    <main className="dashboard-shell supplements-page supplements-layout">
+      <aside className="supplements-sidebar" aria-label="Supplements report sections">
+        <span>Report section</span>
+        {supplementViews.map((item) => (
+          <button className={view === item.key ? 'active' : ''} key={item.key} type="button" onClick={() => setView(item.key)}>
+            <b>{item.short}</b><span>{item.label}<small>{item.detail}</small></span>
+          </button>
+        ))}
+      </aside>
       <section className="supplements-panel" aria-labelledby="supplements-title">
         <header className="supplements-hero">
           <div>
@@ -37,7 +58,7 @@ export default function Supplements() {
           <div className="supplements-hero-mark" aria-hidden="true"><span>$</span><i /><i /><i /></div>
         </header>
 
-        <div className="supplements-toolbar">
+        {view === 'daily' ? <><div className="supplements-toolbar">
           <div><span>Report controls</span><strong>Select a reporting date</strong></div>
           <form onSubmit={(event) => { event.preventDefault(); setReportDate(dateInput) }}>
             <label htmlFor="supplements-date">Report date</label>
@@ -67,7 +88,13 @@ export default function Supplements() {
             </table>
           </div>
           <p className="supplements-note"><span /> No supplement data has been connected yet. Values will appear here once a source is available.</p>
-        </div>
+        </div></> : <section className="supplements-progress" aria-labelledby="supplements-progress-title">
+          <div className="supplements-progress-icon" aria-hidden="true">{activeView.short}</div>
+          <p>Coming soon</p>
+          <h2 id="supplements-progress-title">{activeView.label}</h2>
+          <span>The {activeView.label} workspace is being prepared. Reporting controls and data will appear here once its source is connected.</span>
+          <div className="supplements-progress-status"><i /> In progress</div>
+        </section>}
       </section>
     </main>
   )
