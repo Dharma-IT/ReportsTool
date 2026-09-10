@@ -1,5 +1,3 @@
-const BOOKINGS_API_URL = 'https://dharma-agent-yd5l.onrender.com/api/reports/bookings'
-
 function normalizePhone(value) {
   const digits = String(value ?? '').replace(/\D/g, '')
   return digits.length > 10 ? digits.slice(-10) : digits
@@ -11,14 +9,13 @@ function dummyEmailPhone(properties) {
   return match ? normalizePhone(match[1]) : ''
 }
 
-async function fetchManualAppointments(botRows) {
+async function fetchManualAppointments() {
   const token = process.env.HUBSPOT_ACCESS_TOKEN
   if (!token) throw new Error('HubSpot reporting is not configured')
 
-  const dates = botRows.flatMap((row) => [Date.parse(row.booked_at), Date.parse(row.meeting_start_at)]).filter(Number.isFinite)
   const now = Date.now()
-  const from = dates.length ? Math.min(...dates) - 86400000 : now - (30 * 86400000)
-  const to = dates.length ? Math.max(...dates) + 86400000 : now + (30 * 86400000)
+  const from = now - (30 * 86400000)
+  const to = now + (30 * 86400000)
   const meetings = []
   let after
 
@@ -104,14 +101,11 @@ async function fetchManualAppointments(botRows) {
     if (source) sourceByMeeting.set(String(association.from.id), source)
   }
 
-  const botPhones = new Set(botRows.map((row) => normalizePhone(row.contact_phone ?? row.attribution_data?.contactPhone)).filter(Boolean))
-  const hubSpotMatches = []
   const manualRows = meetings.flatMap((meeting) => {
     const phone = dummyEmailPhone(meeting.properties)
     const source = sourceByMeeting.get(String(meeting.id)) || 'unknown'
     const status = String(meeting.properties.hs_meeting_outcome ?? '').toUpperCase() === 'CANCELED' ? 'Cancelled' : 'Completed'
-    if (phone) hubSpotMatches.push({ phone, status, meetingAt: meeting.properties.hs_meeting_start_time || meeting.properties.hs_createdate })
-    if (!phone || botPhones.has(phone)) return []
+    if (!phone) return []
     const bookedAt = meeting.properties.hs_createdate
     const meetingAt = meeting.properties.hs_meeting_start_time || bookedAt
     if (!bookedAt) return []
@@ -129,7 +123,7 @@ async function fetchManualAppointments(botRows) {
       status,
     }]
   })
-  return { manualRows, hubSpotMatches, teamCounts, teamAppointments }
+  return { manualRows, teamCounts, teamAppointments }
 }
 
 export default async function handler(request, response) {
@@ -139,29 +133,13 @@ export default async function handler(request, response) {
   }
 
   try {
-    const upstream = await fetch(BOOKINGS_API_URL, {
-      headers: { Accept: 'application/json' },
-    })
-    const report = await upstream.json()
-    if (!upstream.ok) return response.status(upstream.status).json(report)
-    try {
-      const hubSpotAppointments = await fetchManualAppointments(report.rows ?? [])
-      report.manualRows = hubSpotAppointments.manualRows
-      report.teamCounts = hubSpotAppointments.teamCounts
-      report.teamAppointments = hubSpotAppointments.teamAppointments
-      report.rows = (report.rows ?? []).map((row) => {
-        const phone = normalizePhone(row.contact_phone ?? row.attribution_data?.contactPhone)
-        const rowTime = Date.parse(row.meeting_start_at || row.booked_at)
-        const match = hubSpotAppointments.hubSpotMatches
-          .filter((item) => item.phone === phone)
-          .sort((left, right) => Math.abs(Date.parse(left.meetingAt) - rowTime) - Math.abs(Date.parse(right.meetingAt) - rowTime))[0]
-        return { ...row, status: match?.status ?? 'Completed' }
-      })
-    } catch (error) {
-      report.manualRows = []
-      report.teamCounts = { nutritionist: 0, cs: 0, sales: 0 }
-      report.teamAppointments = []
-      report.hubSpotWarning = error instanceof Error ? error.message : 'Unable to load HubSpot appointments'
+    const hubSpotAppointments = await fetchManualAppointments()
+    const report = {
+      summary: { total: 0, fromAds: 0, byPlatform: {} },
+      rows: [],
+      manualRows: hubSpotAppointments.manualRows,
+      teamCounts: hubSpotAppointments.teamCounts,
+      teamAppointments: hubSpotAppointments.teamAppointments,
     }
 
     response.status(200)
@@ -170,7 +148,7 @@ export default async function handler(request, response) {
     return response.send(JSON.stringify(report))
   } catch (error) {
     return response.status(502).json({
-      message: error instanceof Error ? error.message : 'Unable to load booking report',
+      message: error instanceof Error ? error.message : 'Unable to load manual appointments',
     })
   }
 }

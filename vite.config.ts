@@ -2834,25 +2834,16 @@ function sendJson(response: ServerResponse, status: number, data: unknown) {
   response.end(JSON.stringify(data))
 }
 
-type AppointmentBooking = {
-  id: number | string
-  contact_phone?: string | null
-  booked_at: string
-  meeting_start_at: string
-  attribution_data?: { contactPhone?: string | null } | null
-}
-
 function appointmentPhone(value: unknown) {
   const digits = String(value ?? '').replace(/\D/g, '')
   return digits.length > 10 ? digits.slice(-10) : digits
 }
 
-async function fetchManualHubSpotAppointments(botRows: AppointmentBooking[], token: string) {
+async function fetchManualHubSpotAppointments(token: string) {
   if (!token) throw new Error('HubSpot reporting is not configured.')
-  const dates = botRows.flatMap((row) => [Date.parse(row.booked_at), Date.parse(row.meeting_start_at)]).filter(Number.isFinite)
   const now = Date.now()
-  const from = dates.length ? Math.min(...dates) - 86_400_000 : now - (30 * 86_400_000)
-  const to = dates.length ? Math.max(...dates) + 86_400_000 : now + (30 * 86_400_000)
+  const from = now - (30 * 86_400_000)
+  const to = now + (30 * 86_400_000)
   const meetings = await searchAllHubSpotObjects<{
     id: string
     properties: Record<string, string | null | undefined>
@@ -2902,18 +2893,14 @@ async function fetchManualHubSpotAppointments(botRows: AppointmentBooking[], tok
     const source = (association.to ?? []).map((item) => contactSources.get(String(item.toObjectId))).find(Boolean)
     if (source) sourceByMeeting.set(String(association.from.id), source)
   }
-  const botPhones = new Set(botRows.map((row) => appointmentPhone(row.contact_phone ?? row.attribution_data?.contactPhone)).filter(Boolean))
-
-  const hubSpotMatches: Array<{ phone: string; status: string; meetingAt: string }> = []
   const manualRows = meetings.flatMap((meeting) => {
     const text = Object.values(meeting.properties).filter(Boolean).join(' ')
     const match = text.match(/([+\d][\d\s().-]{6,})@dummy\.com/i)
     const phone = match ? appointmentPhone(match[1]) : ''
     const source = sourceByMeeting.get(String(meeting.id)) || 'unknown'
     const status = String(meeting.properties.hs_meeting_outcome ?? '').toUpperCase() === 'CANCELED' ? 'Cancelled' : 'Completed'
-    if (phone) hubSpotMatches.push({ phone, status, meetingAt: meeting.properties.hs_meeting_start_time || meeting.properties.hs_createdate || '' })
     const bookedAt = meeting.properties.hs_createdate
-    if (!phone || botPhones.has(phone) || !bookedAt) return []
+    if (!phone || !bookedAt) return []
     return [{
       id: `hubspot-${meeting.id}`,
       respond_contact_id: meeting.id,
@@ -2928,7 +2915,7 @@ async function fetchManualHubSpotAppointments(botRows: AppointmentBooking[], tok
       status,
     }]
   })
-  return { manualRows, hubSpotMatches, teamCounts, teamAppointments }
+  return { manualRows, teamCounts, teamAppointments }
 }
 
 function botReportsApi(hubSpotToken: string): Plugin {
@@ -2937,35 +2924,19 @@ function botReportsApi(hubSpotToken: string): Plugin {
     configureServer(server) {
       server.middlewares.use('/api/bot-reports/bookings', async (_request, response) => {
         try {
-          const upstream = await fetch('https://dharma-agent-yd5l.onrender.com/api/reports/bookings')
-          const report = await upstream.json() as { rows?: AppointmentBooking[]; manualRows?: unknown[]; teamCounts?: { nutritionist: number; cs: number; sales: number }; teamAppointments?: Array<{ team: string; meeting_start_at: string }>; hubSpotWarning?: string }
-          response.statusCode = upstream.status
-          if (upstream.ok) {
-            try {
-              const hubSpotAppointments = await fetchManualHubSpotAppointments(report.rows ?? [], hubSpotToken)
-              report.manualRows = hubSpotAppointments.manualRows
-              report.teamCounts = hubSpotAppointments.teamCounts
-              report.teamAppointments = hubSpotAppointments.teamAppointments
-              report.rows = (report.rows ?? []).map((row) => {
-                const phone = appointmentPhone(row.contact_phone ?? row.attribution_data?.contactPhone)
-                const rowTime = Date.parse(row.meeting_start_at || row.booked_at)
-                const match = hubSpotAppointments.hubSpotMatches
-                  .filter((item) => item.phone === phone)
-                  .sort((left, right) => Math.abs(Date.parse(left.meetingAt) - rowTime) - Math.abs(Date.parse(right.meetingAt) - rowTime))[0]
-                return { ...row, status: match?.status ?? 'Completed' }
-              })
-            } catch (error) {
-              report.manualRows = []
-              report.teamCounts = { nutritionist: 0, cs: 0, sales: 0 }
-              report.teamAppointments = []
-              report.hubSpotWarning = error instanceof Error ? error.message : 'Unable to load HubSpot appointments'
-            }
+          const hubSpotAppointments = await fetchManualHubSpotAppointments(hubSpotToken)
+          const report = {
+            summary: { total: 0, fromAds: 0, byPlatform: {} }, rows: [],
+            manualRows: hubSpotAppointments.manualRows,
+            teamCounts: hubSpotAppointments.teamCounts,
+            teamAppointments: hubSpotAppointments.teamAppointments,
           }
+          response.statusCode = 200
           response.setHeader('Content-Type', 'application/json')
           response.end(JSON.stringify(report))
         } catch (error) {
           sendJson(response, 502, {
-            message: error instanceof Error ? error.message : 'Unable to load booking report',
+            message: error instanceof Error ? error.message : 'Unable to load manual appointments',
           })
         }
       })

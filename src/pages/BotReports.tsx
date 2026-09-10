@@ -32,7 +32,7 @@ type BookingReport = {
 
 type DateField = 'booked' | 'meeting'
 type SortOrder = 'booked-desc' | 'booked-asc' | 'meeting-asc' | 'meeting-desc'
-type AppointmentView = 'bot' | 'manual' | 'sales' | 'team'
+type AppointmentView = 'manual' | 'sales' | 'team'
 type SalesSummary = { total: number; bySource: Record<string, number>; validAppointments: { total: number; bySource: Record<string, number> } }
 type TeamSalesSummaries = { sales: SalesSummary; cs: SalesSummary }
 
@@ -123,7 +123,7 @@ function AppointmentsPerTeam({ appointments, isLoading, error }: { appointments:
 }
 
 async function parseReportResponse(response: Response) {
-  if (!response.ok) throw new Error('Unable to load booking report')
+  if (!response.ok) throw new Error('Unable to load manual appointments')
 
   const contentType = response.headers.get('content-type') ?? ''
   if (!contentType.includes('application/json')) {
@@ -181,7 +181,7 @@ function BotReports() {
   const [endDate, setEndDate] = useState('')
   const [dateField, setDateField] = useState<DateField>('booked')
   const [sortOrder, setSortOrder] = useState<SortOrder>('booked-desc')
-  const [view, setView] = useState<AppointmentView>('bot')
+  const [view, setView] = useState<AppointmentView>('manual')
   const [salesSummaries, setSalesSummaries] = useState<TeamSalesSummaries | null>(null)
   const [isSalesLoading, setIsSalesLoading] = useState(false)
   const [salesError, setSalesError] = useState('')
@@ -195,7 +195,7 @@ function BotReports() {
       setReport(await parseReportResponse(response))
     } catch (loadError) {
       if (loadError instanceof DOMException && loadError.name === 'AbortError') return
-      setError(loadError instanceof Error ? loadError.message : 'Unable to load booking report')
+      setError(loadError instanceof Error ? loadError.message : 'Unable to load manual appointments')
     } finally {
       if (!signal?.aborted) setIsLoading(false)
     }
@@ -209,7 +209,7 @@ function BotReports() {
       .then(setReport)
       .catch((loadError: unknown) => {
         if (loadError instanceof DOMException && loadError.name === 'AbortError') return
-        setError(loadError instanceof Error ? loadError.message : 'Unable to load booking report')
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load manual appointments')
       })
       .finally(() => {
         if (!controller.signal.aborted) setIsLoading(false)
@@ -245,7 +245,7 @@ function BotReports() {
     return () => controller.abort()
   }, [view, startDate, endDate])
 
-  const rows = useMemo(() => (view === 'bot' ? report?.rows ?? [] : view === 'manual' ? report?.manualRows ?? [] : [])
+  const rows = useMemo(() => (view === 'manual' ? report?.manualRows ?? [] : [])
     .filter((booking) => {
       const value = dateField === 'meeting' ? booking.meeting_start_at : booking.booked_at
       const date = easternDateKey(value)
@@ -277,7 +277,6 @@ function BotReports() {
     <main className="dashboard-shell bot-reports-page appointment-reports-layout">
       <aside className="appointment-reports-sidebar" aria-label="Appointment sources">
         <span>Appointment type</span>
-        <button className={view === 'bot' ? 'active' : ''} type="button" onClick={() => setView('bot')}><b>AI</b><span>Bot<small>Automated bookings</small></span></button>
         <button className={view === 'manual' ? 'active' : ''} type="button" onClick={() => setView('manual')}><b>HM</b><span>Manual<small>Booked by humans</small></span></button>
         <button className={view === 'sales' ? 'active' : ''} type="button" onClick={() => { const today = easternDateKey(new Date().toISOString()); if (!startDate) setStartDate(today); if (!endDate) setEndDate(today); setView('sales') }}><b>$</b><span>Appointment Sales<small>Lead conversion</small></span></button>
         <button className={view === 'team' ? 'active' : ''} type="button" onClick={() => setView('team')}><b>TM</b><span>Apt per Team<small>Team breakdown</small></span></button>
@@ -287,7 +286,7 @@ function BotReports() {
           <div className="bot-reports-title-block">
             <p className="eyebrow">Dharma Agent Analytics</p>
             <h1 id="bot-reports-title">Appointment Reports</h1>
-            <p>Bot and manually booked appointments, shown in Eastern Time.</p>
+            <p>Manually booked appointments, shown in Eastern Time.</p>
           </div>
           <div className="bot-reports-status" aria-label="Report timezone">
             <span aria-hidden="true">ET</span>
@@ -318,12 +317,12 @@ function BotReports() {
 
         {view !== 'sales' && view !== 'team' && error ? <div className="call-confirmation-message error">{error}</div> : null}
         {view !== 'sales' && view !== 'team' && report?.hubSpotWarning ? <div className="call-confirmation-message error">Manual appointments unavailable: {report.hubSpotWarning}</div> : null}
-        {view !== 'sales' && view !== 'team' && isLoading && !report ? <div className="call-confirmation-message loading"><span className="report-loader-spinner" /><span>Loading bot bookings…</span></div> : null}
+        {view !== 'sales' && view !== 'team' && isLoading && !report ? <div className="call-confirmation-message loading"><span className="report-loader-spinner" /><span>Loading manual appointments…</span></div> : null}
 
         {view === 'sales' ? <AppointmentSales summaries={salesSummaries} isLoading={isSalesLoading} error={salesError} /> : view === 'team' ? <AppointmentsPerTeam appointments={teamAppointments} isLoading={isLoading} error={error || report?.hubSpotWarning || ''} /> : report ? (
           <>
             <div className="bot-summary-grid" aria-label="Booking source totals">
-              <article className="total"><span>{view === 'bot' ? 'Bot appointments' : 'Manual appointments'}</span><strong>{rows.length}</strong><small>{hasDateFilter ? `In selected ${dateField} date range` : 'All available appointments'}</small></article>
+              <article className="total"><span>Manual appointments</span><strong>{rows.length}</strong><small>{hasDateFilter ? `In selected ${dateField} date range` : 'All available appointments'}</small></article>
               <article className="meta"><span>Meta</span><strong>{sourceCounts.meta ?? 0}</strong><small>Facebook &amp; Instagram</small></article>
               <article className="tiktok"><span>TikTok</span><strong>{sourceCounts.tiktok ?? 0}</strong><small>TikTok bookings</small></article>
               <article className="organic"><span>Repurchase</span><strong>{sourceCounts.repurchase ?? 0}</strong><small>Returning patients</small></article>
@@ -333,16 +332,16 @@ function BotReports() {
 
             <div className="bot-table-card">
               <div className="bot-table-heading">
-                <div><h2>{view === 'bot' ? 'Bot' : 'Manual'} appointment details</h2><p>{rows.length} {rows.length === 1 ? 'appointment' : 'appointments'} · booked date in ET</p></div>
+                <div><h2>Manual appointment details</h2><p>{rows.length} {rows.length === 1 ? 'appointment' : 'appointments'} · booked date in ET</p></div>
               </div>
               <div className="bot-table-wrap">
                 <table className="bot-report-table">
-                  <thead><tr><th>{view === 'bot' ? 'Contact ID' : 'Meeting'}</th><th>Booked at</th><th>Meeting time</th><th>Source</th><th>Phone number</th><th>Status</th></tr></thead>
+                  <thead><tr><th>Meeting</th><th>Booked at</th><th>Meeting time</th><th>Source</th><th>Phone number</th><th>Status</th></tr></thead>
                   <tbody>
                     {rows.map((booking) => {
                       const source = getSource(booking)
                       return <tr key={booking.id}>
-                        <th scope="row">{view === 'bot' ? `#${booking.respond_contact_id}` : (booking.meeting_name || `Meeting #${booking.id}`)}</th>
+                        <th scope="row">{booking.meeting_name || `Meeting #${booking.id}`}</th>
                         <td>{formatDateTime(booking.booked_at)}</td>
                         <td>{formatDateTime(booking.meeting_start_at)}</td>
                         <td><span className={`bot-source-pill ${source}`}>{source}</span></td>
