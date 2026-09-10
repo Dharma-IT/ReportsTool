@@ -174,11 +174,12 @@ function getPhoneNumber(booking: Booking) {
 }
 
 function BotReports() {
+  const initialDate = useMemo(() => easternDateKey(new Date().toISOString()), [])
   const [report, setReport] = useState<BookingReport | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
+  const [startDate, setStartDate] = useState(initialDate)
+  const [endDate, setEndDate] = useState(initialDate)
   const [dateField, setDateField] = useState<DateField>('booked')
   const [sortOrder, setSortOrder] = useState<SortOrder>('booked-desc')
   const [view, setView] = useState<AppointmentView>('manual')
@@ -191,7 +192,8 @@ function BotReports() {
     setError('')
 
     try {
-      const response = await fetch('/api/bot-reports/bookings', { signal })
+      const params = new URLSearchParams({ from: startDate, to: endDate, dateField })
+      const response = await fetch(`/api/bot-reports/bookings?${params}`, { signal })
       setReport(await parseReportResponse(response))
     } catch (loadError) {
       if (loadError instanceof DOMException && loadError.name === 'AbortError') return
@@ -199,12 +201,13 @@ function BotReports() {
     } finally {
       if (!signal?.aborted) setIsLoading(false)
     }
-  }, [])
+  }, [startDate, endDate, dateField])
 
   useEffect(() => {
     const controller = new AbortController()
 
-    fetch('/api/bot-reports/bookings', { signal: controller.signal })
+    const params = new URLSearchParams({ from: initialDate, to: initialDate, dateField: 'booked' })
+    fetch(`/api/bot-reports/bookings?${params}`, { signal: controller.signal })
       .then(parseReportResponse)
       .then(setReport)
       .catch((loadError: unknown) => {
@@ -216,7 +219,7 @@ function BotReports() {
       })
 
     return () => controller.abort()
-  }, [])
+  }, [initialDate])
 
   useEffect(() => {
     if (view !== 'sales') return

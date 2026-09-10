@@ -9,13 +9,17 @@ function dummyEmailPhone(properties) {
   return match ? normalizePhone(match[1]) : ''
 }
 
-async function fetchManualAppointments() {
+async function fetchManualAppointments(fromDate, toDate, dateField) {
   const token = process.env.HUBSPOT_ACCESS_TOKEN
   if (!token) throw new Error('HubSpot reporting is not configured')
 
-  const now = Date.now()
-  const from = now - (30 * 86400000)
-  const to = now + (30 * 86400000)
+  const fallback = new Date().toISOString().slice(0, 10)
+  const start = /^\d{4}-\d{2}-\d{2}$/.test(fromDate ?? '') ? fromDate : fallback
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(toDate ?? '') ? toDate : start
+  // Eastern midnight is 04:00 or 05:00 UTC; keep a one-hour DST buffer.
+  const from = Date.parse(`${start}T00:00:00Z`) + (3 * 3600000)
+  const to = Date.parse(`${end}T00:00:00Z`) + (30 * 3600000)
+  const dateProperty = dateField === 'meeting' ? 'hs_meeting_start_time' : 'hs_createdate'
   const meetings = []
   let after
 
@@ -25,8 +29,8 @@ async function fetchManualAppointments() {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         filterGroups: [{ filters: [
-          { propertyName: 'hs_createdate', operator: 'GTE', value: String(from) },
-          { propertyName: 'hs_createdate', operator: 'LTE', value: String(to) },
+          { propertyName: dateProperty, operator: 'GTE', value: String(from) },
+          { propertyName: dateProperty, operator: 'LT', value: String(to) },
         ] }],
         properties: ['hs_createdate', 'hs_meeting_start_time', 'hs_meeting_title', 'hs_meeting_body', 'hs_internal_meeting_notes', 'hs_meeting_outcome', 'hubspot_owner_id'],
         limit: 200,
@@ -133,7 +137,10 @@ export default async function handler(request, response) {
   }
 
   try {
-    const hubSpotAppointments = await fetchManualAppointments()
+    const fromDate = Array.isArray(request.query?.from) ? request.query.from[0] : request.query?.from
+    const toDate = Array.isArray(request.query?.to) ? request.query.to[0] : request.query?.to
+    const dateField = Array.isArray(request.query?.dateField) ? request.query.dateField[0] : request.query?.dateField
+    const hubSpotAppointments = await fetchManualAppointments(fromDate, toDate, dateField)
     const report = {
       summary: { total: 0, fromAds: 0, byPlatform: {} },
       rows: [],
