@@ -3163,6 +3163,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     server: {
+      cors: {
+        origin: ['https://dharma-reports.vercel.app'],
+      },
       allowedHosts: [
         'dharma-campaignreport-503z.onrender.com',
         'reportstool.onrender.com',
