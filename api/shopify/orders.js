@@ -8,7 +8,8 @@ export default async function handler(request, response) {
 
   try {
     const body = typeof request.body === 'string' ? JSON.parse(request.body) : request.body ?? {}
-    const result = await syncShopifyOrders(body.from, body.to)
+    const date = body.date
+    const result = await syncShopifyOrders(date, date)
     response.setHeader('Cache-Control', 'no-store')
     return response.status(200).json(result)
   } catch (error) {

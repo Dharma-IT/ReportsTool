@@ -3144,8 +3144,8 @@ function shopifyOrdersApi(env: Record<string, string>): Plugin {
           process.env.SHOPIFY_API_VERSION = env.SHOPIFY_API_VERSION ?? ''
           process.env.VITE_SUPABASE_URL = env.VITE_SUPABASE_URL ?? ''
           process.env.SUPABASE_SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY ?? ''
-          const body = await readJsonRequest<{ from?: string; to?: string }>(request)
-          const result = await syncShopifyOrders(body.from ?? '', body.to ?? '')
+          const body = await readJsonRequest<{ date?: string }>(request)
+          const result = await syncShopifyOrders(body.date ?? '', body.date ?? '')
           response.setHeader('Cache-Control', 'no-store')
           return sendJson(response, 200, result)
         } catch (error) {

@@ -69,8 +69,7 @@ export default function Supplements() {
   const [dateInput, setDateInput] = useState(getToday())
   const [reportDate, setReportDate] = useState(getToday())
   const [view, setView] = useState<SupplementsView>('daily')
-  const [ordersFrom, setOrdersFrom] = useState(earliestShopifyDate)
-  const [ordersTo, setOrdersTo] = useState(getToday())
+  const [ordersDate, setOrdersDate] = useState(getToday())
   const [orderRows, setOrderRows] = useState<ShopifyOrderRow[]>([])
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError] = useState('')
@@ -85,7 +84,7 @@ export default function Supplements() {
       const response = await fetch(getApiUrl('/api/shopify/orders'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: ordersFrom, to: ordersTo }),
+        body: JSON.stringify({ date: ordersDate }),
       })
       const responseText = await response.text()
       let payload: { rows?: ShopifyOrderRow[]; message?: string } = {}
@@ -168,13 +167,15 @@ export default function Supplements() {
             <div><span>Shopify export</span><h2 id="supplements-orders-title">Orders</h2></div>
           </div>
           <form className="supplements-orders-filter" onSubmit={(event) => { event.preventDefault(); void fetchOrders() }}>
-            <label htmlFor="shopify-orders-from">From
-              <input id="shopify-orders-from" type="date" min={earliestShopifyDate} max={ordersTo} value={ordersFrom} onChange={(event) => setOrdersFrom(event.target.value)} />
+            <label htmlFor="shopify-orders-date">Order date
+              <input id="shopify-orders-date" type="date" min={earliestShopifyDate} max={getToday()} value={ordersDate} onChange={(event) => {
+                setOrdersDate(event.target.value)
+                setOrderRows([])
+                setOrdersMessage('')
+                setOrdersError('')
+              }} />
             </label>
-            <label htmlFor="shopify-orders-to">To
-              <input id="shopify-orders-to" type="date" min={ordersFrom || earliestShopifyDate} max={getToday()} value={ordersTo} onChange={(event) => setOrdersTo(event.target.value)} />
-            </label>
-            <button type="submit" disabled={ordersLoading || !ordersFrom || !ordersTo || ordersFrom < earliestShopifyDate || ordersFrom > ordersTo}>
+            <button type="submit" disabled={ordersLoading || !ordersDate || ordersDate < earliestShopifyDate || ordersDate > getToday()}>
               {ordersLoading ? 'Fetching…' : 'Fetch orders'}
             </button>
           </form>
@@ -185,22 +186,22 @@ export default function Supplements() {
               <thead><tr>{orderHeaders.map((header) => <th scope="col" key={header}>{header}</th>)}</tr></thead>
               <tbody>
                 {orderRows.length ? orderRows.map((row) => <tr key={`${row.shopify_order_id}-${row.shopify_lineitem_id}`}>
-                  <td>{row.name}</td>
-                  <td>{row.email || '—'}</td>
-                  <td>{row.financial_status.replaceAll('_', ' ')}</td>
-                  <td>{row.paid_at ? new Date(row.paid_at).toLocaleString() : '—'}</td>
+                  <td title={row.name}>{row.name}</td>
+                  <td title={row.email || undefined}>{row.email || '—'}</td>
+                  <td title={row.financial_status.replaceAll('_', ' ')}>{row.financial_status.replaceAll('_', ' ')}</td>
+                  <td title={row.paid_at ? new Date(row.paid_at).toLocaleString() : undefined}>{row.paid_at ? new Date(row.paid_at).toLocaleString() : '—'}</td>
                   <td>{row.lineitem_quantity}</td>
-                  <td>{row.lineitem_name}</td>
+                  <td title={row.lineitem_name}>{row.lineitem_name}</td>
                   <td>{row.lineitem_price.toFixed(2)}</td>
                   <td>{row.lineitem_compare_at_price?.toFixed(2) ?? '—'}</td>
-                  <td>{row.lineitem_sku || '—'}</td>
+                  <td title={row.lineitem_sku || undefined}>{row.lineitem_sku || '—'}</td>
                 </tr>) : <tr className="supplements-placeholder-row">
-                  <td colSpan={orderHeaders.length}>Choose a date range and fetch Shopify orders.</td>
+                  <td colSpan={orderHeaders.length}>Choose a date and fetch that day's Shopify orders.</td>
                 </tr>}
               </tbody>
             </table>
           </div>
-          <p className="supplements-note"><span /> Available from September 1, 2026 onward. Fetching also saves the rows to Supabase.</p>
+          <p className="supplements-note"><span /> One day at a time, available from September 1, 2026 onward. Fetching also saves the rows to Supabase.</p>
         </section> : <section className="supplements-progress" aria-labelledby="supplements-progress-title">
           <div className="supplements-progress-icon" aria-hidden="true">{activeView.short}</div>
           <p>Coming soon</p>
