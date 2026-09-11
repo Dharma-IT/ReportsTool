@@ -273,16 +273,11 @@ function facebookBudgetApi(token: string): Plugin {
             access_token: token,
           })
 
-          // The detail table remains SMG-only, while the headline/Finance spend
-          // reconciles to every campaign Meta currently reports as active.
+          // Current status is only appropriate for the live budget figure. A campaign
+          // can be switched off after reportDate and still have spend/results for that
+          // day, so historical totals and rows must be driven by dated insights.
           const activeCampaigns = (campaigns.data ?? []).filter(
             (campaign) => campaign.effective_status === 'ACTIVE',
-          )
-          const activeSmgCampaigns = activeCampaigns.filter((campaign) =>
-            isSmgCampaign(campaign.name),
-          )
-          const activeJobCampaigns = activeCampaigns.filter(
-            (campaign) => isJobCampaign(campaign.name) && !isSmgCampaign(campaign.name),
           )
 
           const insights = await graphGet<GraphList<GraphInsight>>(`${ACCOUNT_ID}/insights`, {
@@ -296,6 +291,16 @@ function facebookBudgetApi(token: string): Plugin {
           const insightsByCampaign = new Map(
             (insights.data ?? []).map((insight) => [insight.campaign_id, insight]),
           )
+          const reportCampaigns = (campaigns.data ?? []).filter(
+            (campaign) =>
+              campaign.effective_status === 'ACTIVE' || insightsByCampaign.has(campaign.id),
+          )
+          const reportSmgCampaigns = reportCampaigns.filter((campaign) =>
+            isSmgCampaign(campaign.name),
+          )
+          const reportJobCampaigns = reportCampaigns.filter(
+            (campaign) => isJobCampaign(campaign.name) && !isSmgCampaign(campaign.name),
+          )
 
           sendJson(response, 200, {
             reportDate,
@@ -306,11 +311,13 @@ function facebookBudgetApi(token: string): Plugin {
             currency: 'USD',
             metaTotalDailyBudget: activeCampaigns.reduce((total, campaign) =>
               total + (centsToDollars(campaign.daily_budget) ?? 0), 0),
-            metaTotalSpending: activeCampaigns.reduce((total, campaign) =>
-              total + (decimalStringToNumber(insightsByCampaign.get(campaign.id)?.spend) ?? 0), 0),
+            metaTotalSpending: (insights.data ?? []).reduce(
+              (total, insight) => total + (decimalStringToNumber(insight.spend) ?? 0),
+              0,
+            ),
             // Keep job campaigns in the saved breakdown so the sheet can subtract
             // their spend without changing the all-campaign dashboard total.
-            campaigns: [...activeSmgCampaigns, ...activeJobCampaigns].map((campaign) => {
+            campaigns: [...reportSmgCampaigns, ...reportJobCampaigns].map((campaign) => {
               const insight = insightsByCampaign.get(campaign.id)
 
               return {
