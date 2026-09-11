@@ -1,5 +1,26 @@
 import { useState } from 'react'
 
+const earliestShopifyDate = '2026-09-01'
+const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+
+function getApiUrl(path: string) {
+  return configuredApiBaseUrl ? `${configuredApiBaseUrl}${path}` : path
+}
+
+type ShopifyOrderRow = {
+  shopify_order_id: string
+  shopify_lineitem_id: string
+  name: string
+  email: string | null
+  financial_status: string
+  paid_at: string | null
+  lineitem_quantity: number
+  lineitem_name: string
+  lineitem_price: number
+  lineitem_compare_at_price: number | null
+  lineitem_sku: string | null
+}
+
 const dailyExpenses = [
   'Meta Ads',
   'TikTok Ads',
@@ -9,6 +30,18 @@ const dailyExpenses = [
   'Processing Fee (Supliful)',
   'Processing Fee (Shopify)',
   'Cost of Goods Sold',
+]
+
+const orderHeaders = [
+  'Name',
+  'Email',
+  'Financial Status',
+  'Paid at',
+  'Lineitem quantity',
+  'Lineitem name',
+  'Lineitem price',
+  'Lineitem compare at price',
+  'Lineitem SKU',
 ]
 
 type SupplementsView = 'daily' | 'ads' | 'cogs' | 'shopify' | 'orders' | 'sales'
@@ -36,7 +69,49 @@ export default function Supplements() {
   const [dateInput, setDateInput] = useState(getToday())
   const [reportDate, setReportDate] = useState(getToday())
   const [view, setView] = useState<SupplementsView>('daily')
+  const [ordersFrom, setOrdersFrom] = useState(earliestShopifyDate)
+  const [ordersTo, setOrdersTo] = useState(getToday())
+  const [orderRows, setOrderRows] = useState<ShopifyOrderRow[]>([])
+  const [ordersLoading, setOrdersLoading] = useState(false)
+  const [ordersError, setOrdersError] = useState('')
+  const [ordersMessage, setOrdersMessage] = useState('')
   const activeView = supplementViews.find((item) => item.key === view) ?? supplementViews[0]
+
+  async function fetchOrders() {
+    setOrdersLoading(true)
+    setOrdersError('')
+    setOrdersMessage('')
+    try {
+      const response = await fetch(getApiUrl('/api/shopify/orders'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: ordersFrom, to: ordersTo }),
+      })
+      const responseText = await response.text()
+      let payload: { rows?: ShopifyOrderRow[]; message?: string } = {}
+      if (responseText) {
+        try {
+          payload = JSON.parse(responseText) as typeof payload
+        } catch {
+          throw new Error(`The Shopify endpoint returned an invalid response (${response.status}).`)
+        }
+      }
+      if (!response.ok) {
+        const deploymentHint = response.status === 404
+          ? ' The Shopify backend route has not been deployed yet.'
+          : ''
+        throw new Error(payload.message || `Unable to fetch Shopify orders (${response.status}).${deploymentHint}`)
+      }
+      if (!responseText) throw new Error('The Shopify endpoint returned an empty response.')
+      const rows = payload.rows ?? []
+      setOrderRows(rows)
+      setOrdersMessage(`${rows.length} line item${rows.length === 1 ? '' : 's'} fetched and saved.`)
+    } catch (error) {
+      setOrdersError(error instanceof Error ? error.message : 'Unable to fetch Shopify orders.')
+    } finally {
+      setOrdersLoading(false)
+    }
+  }
 
   return (
     <main className="dashboard-shell supplements-page supplements-layout">
@@ -88,7 +163,45 @@ export default function Supplements() {
             </table>
           </div>
           <p className="supplements-note"><span /> No supplement data has been connected yet. Values will appear here once a source is available.</p>
-        </div></> : <section className="supplements-progress" aria-labelledby="supplements-progress-title">
+        </div></> : view === 'orders' ? <section className="supplements-content" aria-labelledby="supplements-orders-title">
+          <div className="supplements-table-heading">
+            <div><span>Shopify export</span><h2 id="supplements-orders-title">Orders</h2></div>
+          </div>
+          <form className="supplements-orders-filter" onSubmit={(event) => { event.preventDefault(); void fetchOrders() }}>
+            <label htmlFor="shopify-orders-from">From
+              <input id="shopify-orders-from" type="date" min={earliestShopifyDate} max={ordersTo} value={ordersFrom} onChange={(event) => setOrdersFrom(event.target.value)} />
+            </label>
+            <label htmlFor="shopify-orders-to">To
+              <input id="shopify-orders-to" type="date" min={ordersFrom || earliestShopifyDate} max={getToday()} value={ordersTo} onChange={(event) => setOrdersTo(event.target.value)} />
+            </label>
+            <button type="submit" disabled={ordersLoading || !ordersFrom || !ordersTo || ordersFrom < earliestShopifyDate || ordersFrom > ordersTo}>
+              {ordersLoading ? 'Fetching…' : 'Fetch orders'}
+            </button>
+          </form>
+          {ordersError ? <p className="supplements-orders-feedback error" role="alert">{ordersError}</p> : null}
+          {ordersMessage ? <p className="supplements-orders-feedback success" role="status">{ordersMessage}</p> : null}
+          <div className="supplements-table-wrap">
+            <table className="supplements-table supplements-orders-table">
+              <thead><tr>{orderHeaders.map((header) => <th scope="col" key={header}>{header}</th>)}</tr></thead>
+              <tbody>
+                {orderRows.length ? orderRows.map((row) => <tr key={`${row.shopify_order_id}-${row.shopify_lineitem_id}`}>
+                  <td>{row.name}</td>
+                  <td>{row.email || '—'}</td>
+                  <td>{row.financial_status.replaceAll('_', ' ')}</td>
+                  <td>{row.paid_at ? new Date(row.paid_at).toLocaleString() : '—'}</td>
+                  <td>{row.lineitem_quantity}</td>
+                  <td>{row.lineitem_name}</td>
+                  <td>{row.lineitem_price.toFixed(2)}</td>
+                  <td>{row.lineitem_compare_at_price?.toFixed(2) ?? '—'}</td>
+                  <td>{row.lineitem_sku || '—'}</td>
+                </tr>) : <tr className="supplements-placeholder-row">
+                  <td colSpan={orderHeaders.length}>Choose a date range and fetch Shopify orders.</td>
+                </tr>}
+              </tbody>
+            </table>
+          </div>
+          <p className="supplements-note"><span /> Available from September 1, 2026 onward. Fetching also saves the rows to Supabase.</p>
+        </section> : <section className="supplements-progress" aria-labelledby="supplements-progress-title">
           <div className="supplements-progress-icon" aria-hidden="true">{activeView.short}</div>
           <p>Coming soon</p>
           <h2 id="supplements-progress-title">{activeView.label}</h2>

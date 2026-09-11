@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { syncShopifyOrders } from './api/_lib/shopify-orders.js'
 
 const execFileAsync = promisify(execFile)
 const ACCOUNT_ID = 'act_653630476536860'
@@ -3126,6 +3127,37 @@ function acAutomationApi(stripeSecretKey: string): Plugin {
   }
 }
 
+function shopifyOrdersApi(env: Record<string, string>): Plugin {
+  return {
+    name: 'shopify-orders-api',
+    configureServer(server) {
+      server.middlewares.use('/api/shopify/orders', async (request, response) => {
+        if (request.method !== 'POST') {
+          response.setHeader('Allow', 'POST')
+          return sendJson(response, 405, { message: 'Method not allowed' })
+        }
+
+        try {
+          process.env.SHOPIFY_STORE_DOMAIN = env.SHOPIFY_STORE_DOMAIN ?? ''
+          process.env.SHOPIFY_CLIENT_ID = env.SHOPIFY_CLIENT_ID ?? ''
+          process.env.SHOPIFY_CLIENT_SECRET = env.SHOPIFY_CLIENT_SECRET ?? ''
+          process.env.SHOPIFY_API_VERSION = env.SHOPIFY_API_VERSION ?? ''
+          process.env.VITE_SUPABASE_URL = env.VITE_SUPABASE_URL ?? ''
+          process.env.SUPABASE_SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY ?? ''
+          const body = await readJsonRequest<{ from?: string; to?: string }>(request)
+          const result = await syncShopifyOrders(body.from ?? '', body.to ?? '')
+          response.setHeader('Cache-Control', 'no-store')
+          return sendJson(response, 200, result)
+        } catch (error) {
+          return sendJson(response, 502, {
+            message: error instanceof Error ? error.message : 'Unable to sync Shopify orders.',
+          })
+        }
+      })
+    },
+  }
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
@@ -3138,6 +3170,7 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       react(),
+      shopifyOrdersApi(env),
       acAutomationApi(env.STRIPE_SECRET_KEY ?? ''),
       botReportsApi(env.HUBSPOT_ACCESS_TOKEN ?? ''),
       facebookBudgetApi(env.FACEBOOK_SYSTEM_ACCESS_TOKEN ?? ''),
