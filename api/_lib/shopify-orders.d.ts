@@ -1,6 +1,7 @@
 export type ShopifyOrderLineItem = {
   shopify_order_id: string
   shopify_lineitem_id: string
+  order_date: string
   name: string
   email: string | null
   financial_status: string
@@ -17,5 +18,10 @@ export function syncShopifyOrders(from: string, to: string): Promise<{
   from: string
   to: string
   fetchedAt: string
+  rows: ShopifyOrderLineItem[]
+}>
+
+export function getSavedShopifyOrders(date: string): Promise<{
+  date: string
   rows: ShopifyOrderLineItem[]
 }>

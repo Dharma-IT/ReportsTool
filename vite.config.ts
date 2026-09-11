@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import { syncShopifyOrders } from './api/_lib/shopify-orders.js'
+import { getSavedShopifyOrders, syncShopifyOrders } from './api/_lib/shopify-orders.js'
 
 const execFileAsync = promisify(execFile)
 const ACCOUNT_ID = 'act_653630476536860'
@@ -3132,8 +3132,8 @@ function shopifyOrdersApi(env: Record<string, string>): Plugin {
     name: 'shopify-orders-api',
     configureServer(server) {
       server.middlewares.use('/api/shopify/orders', async (request, response) => {
-        if (request.method !== 'POST') {
-          response.setHeader('Allow', 'POST')
+        if (!['GET', 'POST'].includes(request.method ?? '')) {
+          response.setHeader('Allow', 'GET, POST')
           return sendJson(response, 405, { message: 'Method not allowed' })
         }
 
@@ -3144,8 +3144,13 @@ function shopifyOrdersApi(env: Record<string, string>): Plugin {
           process.env.SHOPIFY_API_VERSION = env.SHOPIFY_API_VERSION ?? ''
           process.env.VITE_SUPABASE_URL = env.VITE_SUPABASE_URL ?? ''
           process.env.SUPABASE_SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY ?? ''
-          const body = await readJsonRequest<{ date?: string }>(request)
-          const result = await syncShopifyOrders(body.date ?? '', body.date ?? '')
+          const result = request.method === 'GET'
+            ? await getSavedShopifyOrders(
+              new URL(request.url ?? '', 'http://localhost').searchParams.get('date') ?? '',
+            )
+            : await readJsonRequest<{ date?: string }>(request).then((body) =>
+              syncShopifyOrders(body.date ?? '', body.date ?? ''),
+            )
           response.setHeader('Cache-Control', 'no-store')
           return sendJson(response, 200, result)
         } catch (error) {

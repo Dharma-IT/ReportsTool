@@ -10,6 +10,7 @@ function getApiUrl(path: string) {
 type ShopifyOrderRow = {
   shopify_order_id: string
   shopify_lineitem_id: string
+  order_date: string
   name: string
   email: string | null
   financial_status: string
@@ -70,6 +71,7 @@ export default function Supplements() {
   const [reportDate, setReportDate] = useState(getToday())
   const [view, setView] = useState<SupplementsView>('daily')
   const [ordersDate, setOrdersDate] = useState(getToday())
+  const [historyDate, setHistoryDate] = useState(getToday())
   const [orderRows, setOrderRows] = useState<ShopifyOrderRow[]>([])
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError] = useState('')
@@ -107,6 +109,34 @@ export default function Supplements() {
       setOrdersMessage(`${rows.length} line item${rows.length === 1 ? '' : 's'} fetched and saved.`)
     } catch (error) {
       setOrdersError(error instanceof Error ? error.message : 'Unable to fetch Shopify orders.')
+    } finally {
+      setOrdersLoading(false)
+    }
+  }
+
+  async function viewSavedOrders() {
+    setOrdersLoading(true)
+    setOrdersError('')
+    setOrdersMessage('')
+    try {
+      const response = await fetch(getApiUrl(`/api/shopify/orders?date=${encodeURIComponent(historyDate)}`))
+      const responseText = await response.text()
+      let payload: { rows?: ShopifyOrderRow[]; message?: string } = {}
+      if (responseText) {
+        try {
+          payload = JSON.parse(responseText) as typeof payload
+        } catch {
+          throw new Error(`The order history endpoint returned an invalid response (${response.status}).`)
+        }
+      }
+      if (!response.ok) throw new Error(payload.message || `Unable to view saved orders (${response.status}).`)
+      const rows = payload.rows ?? []
+      setOrderRows(rows)
+      setOrdersMessage(rows.length
+        ? `${rows.length} saved line item${rows.length === 1 ? '' : 's'} loaded for ${historyDate}.`
+        : `No saved Shopify data exists for ${historyDate}.`)
+    } catch (error) {
+      setOrdersError(error instanceof Error ? error.message : 'Unable to view saved orders.')
     } finally {
       setOrdersLoading(false)
     }
@@ -166,19 +196,22 @@ export default function Supplements() {
           <div className="supplements-table-heading">
             <div><span>Shopify export</span><h2 id="supplements-orders-title">Orders</h2></div>
           </div>
-          <form className="supplements-orders-filter" onSubmit={(event) => { event.preventDefault(); void fetchOrders() }}>
-            <label htmlFor="shopify-orders-date">Order date
-              <input id="shopify-orders-date" type="date" min={earliestShopifyDate} max={getToday()} value={ordersDate} onChange={(event) => {
-                setOrdersDate(event.target.value)
-                setOrderRows([])
-                setOrdersMessage('')
-                setOrdersError('')
-              }} />
-            </label>
-            <button type="submit" disabled={ordersLoading || !ordersDate || ordersDate < earliestShopifyDate || ordersDate > getToday()}>
-              {ordersLoading ? 'Fetching…' : 'Fetch orders'}
-            </button>
-          </form>
+          <div className="supplements-orders-actions">
+            <form className="supplements-orders-filter" onSubmit={(event) => { event.preventDefault(); void fetchOrders() }}>
+              <label htmlFor="shopify-orders-date">Fetch from Shopify
+                <input id="shopify-orders-date" type="date" min={earliestShopifyDate} max={getToday()} value={ordersDate} onChange={(event) => setOrdersDate(event.target.value)} />
+              </label>
+              <button type="submit" disabled={ordersLoading || !ordersDate || ordersDate < earliestShopifyDate || ordersDate > getToday()}>
+                {ordersLoading ? 'Working…' : 'Fetch orders'}
+              </button>
+            </form>
+            <form className="supplements-orders-filter historical" onSubmit={(event) => { event.preventDefault(); void viewSavedOrders() }}>
+              <label htmlFor="shopify-history-date">View saved history
+                <input id="shopify-history-date" type="date" min={earliestShopifyDate} max={getToday()} value={historyDate} onChange={(event) => setHistoryDate(event.target.value)} />
+              </label>
+              <button type="submit" disabled={ordersLoading || !historyDate || historyDate < earliestShopifyDate || historyDate > getToday()}>View</button>
+            </form>
+          </div>
           {ordersError ? <p className="supplements-orders-feedback error" role="alert">{ordersError}</p> : null}
           {ordersMessage ? <p className="supplements-orders-feedback success" role="status">{ordersMessage}</p> : null}
           <div className="supplements-table-wrap">
@@ -201,7 +234,7 @@ export default function Supplements() {
               </tbody>
             </table>
           </div>
-          <p className="supplements-note"><span /> One day at a time, available from September 1, 2026 onward. Fetching also saves the rows to Supabase.</p>
+          <p className="supplements-note"><span /> Fetch replaces that date's saved snapshot. View loads historical data without contacting Shopify.</p>
         </section> : <section className="supplements-progress" aria-labelledby="supplements-progress-title">
           <div className="supplements-progress-icon" aria-hidden="true">{activeView.short}</div>
           <p>Coming soon</p>

@@ -79,6 +79,7 @@ export async function fetchShopifyOrderLineItems(from, to) {
         rows.push({
           shopify_order_id: order.legacyResourceId,
           shopify_lineitem_id: lineitem.id.split('/').at(-1),
+          order_date: from,
           name: order.name,
           email: order.email || null,
           financial_status: order.displayFinancialStatus,
@@ -107,9 +108,26 @@ function supabaseRestUrl() {
   return normalized.endsWith('/rest/v1') ? normalized : `${normalized}/rest/v1`
 }
 
-export async function saveShopifyOrderLineItems(rows) {
+export async function saveShopifyOrderLineItems(rows, orderDate) {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
   if (!serviceRoleKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY is not configured')
+
+  const deleteResponse = await fetch(
+    `${supabaseRestUrl()}/shopify_order_line_items?order_date=eq.${encodeURIComponent(orderDate)}`,
+    {
+      method: 'DELETE',
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+        Prefer: 'return=minimal',
+      },
+    },
+  )
+  if (!deleteResponse.ok) {
+    const payload = await deleteResponse.json().catch(() => ({}))
+    throw new Error(payload.message || `Supabase replacement failed with ${deleteResponse.status}`)
+  }
+
   if (!rows.length) return
 
   for (let index = 0; index < rows.length; index += 500) {
@@ -136,6 +154,23 @@ export async function saveShopifyOrderLineItems(rows) {
 export async function syncShopifyOrders(from, to) {
   validateRange(from, to)
   const rows = await fetchShopifyOrderLineItems(from, to)
-  await saveShopifyOrderLineItems(rows)
+  await saveShopifyOrderLineItems(rows, from)
   return { from, to, fetchedAt: new Date().toISOString(), rows }
+}
+
+export async function getSavedShopifyOrders(date) {
+  validateRange(date, date)
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+  if (!serviceRoleKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY is not configured')
+  const params = new URLSearchParams({
+    select: '*',
+    order_date: `eq.${date}`,
+    order: 'paid_at.asc.nullslast,name.asc',
+  })
+  const response = await fetch(`${supabaseRestUrl()}/shopify_order_line_items?${params}`, {
+    headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
+  })
+  const payload = await response.json().catch(() => [])
+  if (!response.ok) throw new Error(payload.message || `Supabase history failed with ${response.status}`)
+  return { date, rows: payload }
 }
