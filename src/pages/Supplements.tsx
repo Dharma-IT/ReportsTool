@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 const earliestShopifyDate = '2026-09-01'
 const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
@@ -66,17 +66,55 @@ function EmptyAmount() {
   return <span className="supplements-empty" aria-label="No data">—</span>
 }
 
+function OrderCalendar({ selected, savedDates, onSelect }: { selected: string; savedDates: Set<string>; onSelect: (date: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [month, setMonth] = useState(() => new Date(`${selected}T12:00:00`))
+  const year = month.getFullYear()
+  const monthIndex = month.getMonth()
+  const firstWeekday = new Date(year, monthIndex, 1).getDay()
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate()
+  const cells = [...Array(firstWeekday).fill(null), ...Array.from({ length: daysInMonth }, (_, index) => index + 1)]
+  const currentMonth = `${year}-${String(monthIndex + 1).padStart(2, '0')}`
+  const makeDate = (day: number) => `${currentMonth}-${String(day).padStart(2, '0')}`
+
+  return <div className="shopify-calendar">
+    <button className={`shopify-calendar-trigger${savedDates.has(selected) ? ' saved' : ''}`} type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+      {new Date(`${selected}T12:00:00`).toLocaleDateString('en-US')}<span aria-hidden="true">▾</span>
+    </button>
+    {open ? <div className="shopify-calendar-popover">
+      <header><strong>{month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</strong><span>
+        <button type="button" disabled={currentMonth <= earliestShopifyDate.slice(0, 7)} onClick={() => setMonth(new Date(year, monthIndex - 1, 1))} aria-label="Previous month">‹</button>
+        <button type="button" disabled={currentMonth >= getToday().slice(0, 7)} onClick={() => setMonth(new Date(year, monthIndex + 1, 1))} aria-label="Next month">›</button>
+      </span></header>
+      <div className="shopify-calendar-weekdays">{['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((day) => <b key={day}>{day}</b>)}</div>
+      <div className="shopify-calendar-days">{cells.map((day, index) => day === null ? <i key={`blank-${index}`} /> : (() => {
+        const date = makeDate(day)
+        return <button className={`${date === selected ? 'selected ' : ''}${savedDates.has(date) ? 'saved' : ''}`} type="button" key={date} disabled={date < earliestShopifyDate || date > getToday()} onClick={() => { onSelect(date); setOpen(false) }}>{day}</button>
+      })())}</div>
+      <small><i /> Gold dates have saved data</small>
+    </div> : null}
+  </div>
+}
+
 export default function Supplements() {
   const [dateInput, setDateInput] = useState(getToday())
   const [reportDate, setReportDate] = useState(getToday())
   const [view, setView] = useState<SupplementsView>('daily')
   const [ordersDate, setOrdersDate] = useState(getToday())
-  const [historyDate, setHistoryDate] = useState(getToday())
+  const [savedOrderDates, setSavedOrderDates] = useState<Set<string>>(new Set())
   const [orderRows, setOrderRows] = useState<ShopifyOrderRow[]>([])
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError] = useState('')
   const [ordersMessage, setOrdersMessage] = useState('')
   const activeView = supplementViews.find((item) => item.key === view) ?? supplementViews[0]
+
+  useEffect(() => {
+    if (view !== 'orders') return
+    void fetch(getApiUrl('/api/shopify/orders?dates=1'))
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to load saved dates')))
+      .then((payload: { dates?: string[] }) => setSavedOrderDates(new Set(payload.dates ?? [])))
+      .catch(() => undefined)
+  }, [view])
 
   async function fetchOrders() {
     setOrdersLoading(true)
@@ -106,6 +144,7 @@ export default function Supplements() {
       if (!responseText) throw new Error('The Shopify endpoint returned an empty response.')
       const rows = payload.rows ?? []
       setOrderRows(rows)
+      setSavedOrderDates((dates) => new Set(dates).add(ordersDate))
       setOrdersMessage(`${rows.length} line item${rows.length === 1 ? '' : 's'} fetched and saved.`)
     } catch (error) {
       setOrdersError(error instanceof Error ? error.message : 'Unable to fetch Shopify orders.')
@@ -119,7 +158,7 @@ export default function Supplements() {
     setOrdersError('')
     setOrdersMessage('')
     try {
-      const response = await fetch(getApiUrl(`/api/shopify/orders?date=${encodeURIComponent(historyDate)}`))
+      const response = await fetch(getApiUrl(`/api/shopify/orders?date=${encodeURIComponent(ordersDate)}`))
       const responseText = await response.text()
       let payload: { rows?: ShopifyOrderRow[]; message?: string } = {}
       if (responseText) {
@@ -133,8 +172,8 @@ export default function Supplements() {
       const rows = payload.rows ?? []
       setOrderRows(rows)
       setOrdersMessage(rows.length
-        ? `${rows.length} saved line item${rows.length === 1 ? '' : 's'} loaded for ${historyDate}.`
-        : `No saved Shopify data exists for ${historyDate}.`)
+        ? `${rows.length} saved line item${rows.length === 1 ? '' : 's'} loaded for ${ordersDate}.`
+        : `No saved Shopify data exists for ${ordersDate}.`)
     } catch (error) {
       setOrdersError(error instanceof Error ? error.message : 'Unable to view saved orders.')
     } finally {
@@ -196,22 +235,18 @@ export default function Supplements() {
           <div className="supplements-table-heading">
             <div><span>Shopify export</span><h2 id="supplements-orders-title">Orders</h2></div>
           </div>
-          <div className="supplements-orders-actions">
-            <form className="supplements-orders-filter" onSubmit={(event) => { event.preventDefault(); void fetchOrders() }}>
-              <label htmlFor="shopify-orders-date">Fetch from Shopify
-                <input id="shopify-orders-date" type="date" min={earliestShopifyDate} max={getToday()} value={ordersDate} onChange={(event) => setOrdersDate(event.target.value)} />
-              </label>
-              <button type="submit" disabled={ordersLoading || !ordersDate || ordersDate < earliestShopifyDate || ordersDate > getToday()}>
-                {ordersLoading ? 'Working…' : 'Fetch orders'}
-              </button>
-            </form>
-            <form className="supplements-orders-filter historical" onSubmit={(event) => { event.preventDefault(); void viewSavedOrders() }}>
-              <label htmlFor="shopify-history-date">View saved history
-                <input id="shopify-history-date" type="date" min={earliestShopifyDate} max={getToday()} value={historyDate} onChange={(event) => setHistoryDate(event.target.value)} />
-              </label>
-              <button type="submit" disabled={ordersLoading || !historyDate || historyDate < earliestShopifyDate || historyDate > getToday()}>View</button>
-            </form>
-          </div>
+          <form className="supplements-orders-filter" onSubmit={(event) => event.preventDefault()}>
+            <div className="supplements-orders-date-control"><span>Order date</span>
+              <OrderCalendar selected={ordersDate} savedDates={savedOrderDates} onSelect={(date) => {
+                setOrdersDate(date)
+                setOrderRows([])
+                setOrdersMessage('')
+                setOrdersError('')
+              }} />
+            </div>
+            <button type="button" onClick={() => void fetchOrders()} disabled={ordersLoading}>{ordersLoading ? 'Working…' : 'Fetch orders'}</button>
+            <button className="view" type="button" onClick={() => void viewSavedOrders()} disabled={ordersLoading}>View</button>
+          </form>
           {ordersError ? <p className="supplements-orders-feedback error" role="alert">{ordersError}</p> : null}
           {ordersMessage ? <p className="supplements-orders-feedback success" role="status">{ordersMessage}</p> : null}
           <div className="supplements-table-wrap">

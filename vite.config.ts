@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import { getSavedShopifyOrders, syncShopifyOrders } from './api/_lib/shopify-orders.js'
+import { getSavedShopifyOrderDates, getSavedShopifyOrders, syncShopifyOrders } from './api/_lib/shopify-orders.js'
 
 const execFileAsync = promisify(execFile)
 const ACCOUNT_ID = 'act_653630476536860'
@@ -3144,10 +3144,11 @@ function shopifyOrdersApi(env: Record<string, string>): Plugin {
           process.env.SHOPIFY_API_VERSION = env.SHOPIFY_API_VERSION ?? ''
           process.env.VITE_SUPABASE_URL = env.VITE_SUPABASE_URL ?? ''
           process.env.SUPABASE_SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY ?? ''
+          const requestUrl = new URL(request.url ?? '', 'http://localhost')
           const result = request.method === 'GET'
-            ? await getSavedShopifyOrders(
-              new URL(request.url ?? '', 'http://localhost').searchParams.get('date') ?? '',
-            )
+            ? requestUrl.searchParams.get('dates') === '1'
+              ? await getSavedShopifyOrderDates()
+              : await getSavedShopifyOrders(requestUrl.searchParams.get('date') ?? '')
             : await readJsonRequest<{ date?: string }>(request).then((body) =>
               syncShopifyOrders(body.date ?? '', body.date ?? ''),
             )

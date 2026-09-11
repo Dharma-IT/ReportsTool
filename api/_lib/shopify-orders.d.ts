@@ -25,3 +25,5 @@ export function getSavedShopifyOrders(date: string): Promise<{
   date: string
   rows: ShopifyOrderLineItem[]
 }>
+
+export function getSavedShopifyOrderDates(): Promise<{ dates: string[] }>

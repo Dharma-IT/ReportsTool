@@ -174,3 +174,20 @@ export async function getSavedShopifyOrders(date) {
   if (!response.ok) throw new Error(payload.message || `Supabase history failed with ${response.status}`)
   return { date, rows: payload }
 }
+
+export async function getSavedShopifyOrderDates() {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+  if (!serviceRoleKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY is not configured')
+  const params = new URLSearchParams({
+    select: 'order_date',
+    order: 'order_date.asc',
+    order_date: 'not.is.null',
+    limit: '10000',
+  })
+  const response = await fetch(`${supabaseRestUrl()}/shopify_order_line_items?${params}`, {
+    headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
+  })
+  const payload = await response.json().catch(() => [])
+  if (!response.ok) throw new Error(payload.message || `Supabase history failed with ${response.status}`)
+  return { dates: [...new Set(payload.map((row) => row.order_date).filter(Boolean))] }
+}
