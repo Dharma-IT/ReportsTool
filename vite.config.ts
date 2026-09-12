@@ -2980,7 +2980,7 @@ function canonicalClientEmail(value: string) {
   return local && domain ? `${local}@${domain}` : ''
 }
 
-const STRIPE_STATUSES = new Set(['succeeded', 'failed', 'expired', 'incomplete'])
+const STRIPE_RECOVERY_STATUSES = new Set(['failed', 'expired', 'incomplete'])
 
 async function stripeGet(secretKey: string, path: string, params: URLSearchParams = new URLSearchParams()) {
   const upstream = await fetch(`https://api.stripe.com/v1/${path}${params.size ? `?${params}` : ''}`, {
@@ -3072,8 +3072,8 @@ function acAutomationApi(stripeSecretKey: string): Plugin {
           if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) {
             return sendJson(response, 400, { message: 'Choose a valid EST date.' })
           }
-          const selectedStatuses = (url.searchParams.get('statuses') ?? 'succeeded,failed,expired,incomplete')
-            .split(',').map((status) => status.trim().toLowerCase()).filter((status) => STRIPE_STATUSES.has(status))
+          const selectedStatuses = (url.searchParams.get('statuses') ?? 'failed,expired,incomplete')
+            .split(',').map((status) => status.trim().toLowerCase()).filter((status) => STRIPE_RECOVERY_STATUSES.has(status))
           if (!selectedStatuses.length) return sendJson(response, 400, { message: 'Select at least one Stripe status.' })
           const selected = new Set(selectedStatuses)
           const nextDate = new Date(`${selectedDate}T12:00:00Z`)
@@ -3085,13 +3085,13 @@ function acAutomationApi(stripeSecretKey: string): Plugin {
             listStripeCharges(stripeSecretKey, start, end),
             listStripeObjects(stripeSecretKey, 'checkout/sessions', start, end, ['data.customer', 'data.payment_intent']),
           ])
-          type Candidate = { source: StripeObject; customerId: string; paymentIntentId: string; session?: StripeObject }
+          type Candidate = { source: StripeObject; status: string; customerId: string; paymentIntentId: string; session?: StripeObject }
           const candidates: Candidate[] = []
           const addCandidate = (source: StripeObject, status: string, session?: StripeObject) => {
-            if (!selected.has(status)) return
+            if (status !== 'succeeded' && !selected.has(status)) return
             const customerValue = session?.customer ?? source.customer
             const intentValue = session?.payment_intent ?? source.payment_intent ?? (source.object === 'payment_intent' ? source.id : '')
-            candidates.push({ source, session, customerId: String(typeof customerValue === 'object' ? customerValue?.id ?? '' : customerValue ?? ''), paymentIntentId: String(typeof intentValue === 'object' ? intentValue?.id ?? '' : intentValue ?? '') })
+            candidates.push({ source, status, session, customerId: String(typeof customerValue === 'object' ? customerValue?.id ?? '' : customerValue ?? ''), paymentIntentId: String(typeof intentValue === 'object' ? intentValue?.id ?? '' : intentValue ?? '') })
           }
           for (const charge of charges) addCandidate(charge, charge.status === 'succeeded' ? 'succeeded' : 'failed')
           for (const intent of paymentIntents) {
@@ -3148,7 +3148,7 @@ function acAutomationApi(stripeSecretKey: string): Plugin {
             return sessionDetailCache.get(id)!
           }
           const closestSession = (options: StripeObject[], created: number) => options.toSorted((left, right) => Math.abs(Number(left.created ?? 0) - created) - Math.abs(Number(right.created ?? 0) - created))[0]
-          const resolved: Array<ReturnType<typeof stripeContact> & { customerId: string; phoneSource: string }> = []
+          const resolved: Array<ReturnType<typeof stripeContact> & { status: string; customerId: string; phoneSource: string }> = []
           for (const candidate of candidates) {
             let customer: StripeObject = candidate.source.customer && typeof candidate.source.customer === 'object' ? candidate.source.customer : {}
             if (candidate.customerId) {
@@ -3179,15 +3179,21 @@ function acAutomationApi(stripeSecretKey: string): Plugin {
             const phone = checkout.phone || customerPhone || customerShippingPhone || chargePhone || failedPhone || paymentMethodPhone || metadataPhone
             const phoneSource = checkout.phone ? 'checkout_session' : customerPhone ? 'customer' : customerShippingPhone ? 'customer_shipping' : chargePhone ? 'charge' : failedPhone ? 'failed_payment' : paymentMethodPhone ? 'payment_method' : metadataPhone ? 'metadata' : 'unavailable'
             const enriched = stripeContact({ ...candidate.source, customer: { ...customer, name: customer.name || checkout.name, email: customer.email || checkout.email, phone } })
-            resolved.push({ ...enriched, customerId: candidate.customerId, phoneSource })
+            resolved.push({ ...enriched, status: candidate.status, customerId: candidate.customerId, phoneSource })
           }
 
           const contacts: Array<ReturnType<typeof stripeContact> & { customerId: string; phoneSource: string }> = []
           const aliases = new Map<string, number>()
-          for (const contact of resolved) {
+          const identityKeys = (contact: ReturnType<typeof stripeContact> & { customerId: string }) => {
             const email = canonicalClientEmail(contact.email)
             const name = `${contact.firstName} ${contact.lastName}`.trim().toLowerCase().replace(/\s+/g, ' ')
-            const keys = [contact.customerId && `cus:${contact.customerId}`, email && `email:${email}`, contact.phone && `phone:${contact.phone}`, name && (email || contact.phone) && `name:${name}|${email || contact.phone}`].filter(Boolean) as string[]
+            return [contact.customerId && `cus:${contact.customerId}`, email && `email:${email}`, contact.phone && `phone:${contact.phone}`, name && (email || contact.phone) && `name:${name}|${email || contact.phone}`].filter(Boolean) as string[]
+          }
+          const succeededKeys = new Set(resolved.filter((contact) => contact.status === 'succeeded').flatMap(identityKeys))
+          for (const contact of resolved) {
+            if (contact.status === 'succeeded') continue
+            const keys = identityKeys(contact)
+            if (keys.some((key) => succeededKeys.has(key))) continue
             let index = keys.map((key) => aliases.get(key)).find((value) => value !== undefined)
             if (index === undefined) { index = contacts.length; contacts.push(contact) }
             else contacts[index] = { customerId: contacts[index].customerId || contact.customerId, email: contacts[index].email || contact.email, phone: contacts[index].phone || contact.phone, firstName: contacts[index].firstName || contact.firstName, lastName: contacts[index].lastName || contact.lastName, phoneSource: contacts[index].phone ? contacts[index].phoneSource : contact.phoneSource }

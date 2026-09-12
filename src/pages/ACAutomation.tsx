@@ -3,8 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 type Column = { key: string; label: string; width: number; dropdown?: boolean }
 type StripeContact = { phone: string; email: string; firstName: string; lastName: string }
 type AcResponse = { contacts?: StripeContact[]; message?: string; unavailablePhones?: number; phoneRecovery?: Record<string, number> }
-type StripeStatus = 'succeeded' | 'failed' | 'expired' | 'incomplete'
-const stripeStatuses: StripeStatus[] = ['succeeded', 'failed', 'expired', 'incomplete']
+type StripeStatus = 'failed' | 'expired' | 'incomplete'
+const stripeStatuses: StripeStatus[] = ['failed', 'expired', 'incomplete']
 
 const columns: Column[] = [
   { key: 'email', label: 'Email', width: 230 }, { key: 'firstName', label: 'First Name', width: 125 },
