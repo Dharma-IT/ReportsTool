@@ -2962,6 +2962,8 @@ function botReportsApi(hubSpotToken: string): Plugin {
   }
 }
 
+// Stripe responses are heterogeneous and include expandable objects.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type StripeObject = Record<string, any>
 
 function stripePhone(value: unknown) {
@@ -2978,15 +2980,41 @@ function canonicalClientEmail(value: string) {
   return local && domain ? `${local}@${domain}` : ''
 }
 
+const STRIPE_STATUSES = new Set(['succeeded', 'failed', 'expired', 'incomplete'])
+
+async function stripeGet(secretKey: string, path: string, params: URLSearchParams = new URLSearchParams()) {
+  const upstream = await fetch(`https://api.stripe.com/v1/${path}${params.size ? `?${params}` : ''}`, {
+    headers: { Authorization: `Bearer ${secretKey}` },
+  })
+  const payload = await upstream.json() as StripeObject
+  if (!upstream.ok) throw new Error(payload.error?.message || `Stripe request failed (${upstream.status}).`)
+  return payload
+}
+
+async function listStripeObjects(secretKey: string, path: string, start: number, end: number, expands: string[] = []) {
+  const objects: StripeObject[] = []
+  let startingAfter = ''
+  do {
+    const params = new URLSearchParams({ limit: '100', 'created[gte]': String(start), 'created[lt]': String(end) })
+    for (const expand of expands) params.append('expand[]', expand)
+    if (startingAfter) params.set('starting_after', startingAfter)
+    const payload = await stripeGet(secretKey, path, params) as { data?: StripeObject[]; has_more?: boolean }
+    objects.push(...(payload.data ?? []))
+    startingAfter = payload.has_more && payload.data?.length ? String(payload.data.at(-1)?.id ?? '') : ''
+  } while (startingAfter)
+  return objects
+}
+
 function stripeContact(payment: StripeObject) {
   const customer = payment.customer && typeof payment.customer === 'object' ? payment.customer : {}
   const charge = payment.object === 'charge' ? payment : payment.latest_charge && typeof payment.latest_charge === 'object' ? payment.latest_charge : {}
   const billing = charge.billing_details && typeof charge.billing_details === 'object' ? charge.billing_details : {}
   const failedBilling = payment.last_payment_error?.payment_method?.billing_details ?? {}
   const shipping = payment.shipping && typeof payment.shipping === 'object' ? payment.shipping : {}
-  const fullName = String(customer.name || billing.name || failedBilling.name || shipping.name || payment.metadata?.name || '').trim()
+  const customerShipping = customer.shipping && typeof customer.shipping === 'object' ? customer.shipping : {}
+  const fullName = String(customer.name || customerShipping.name || billing.name || failedBilling.name || shipping.name || payment.metadata?.name || '').trim()
   const nameIsPhone = !/[a-z]/i.test(fullName) ? stripePhone(fullName) : ''
-  const phone = stripePhone(customer.phone || billing.phone || failedBilling.phone || shipping.phone || payment.metadata?.phone) || nameIsPhone
+  const phone = stripePhone(customer.phone || customerShipping.phone || billing.phone || failedBilling.phone || shipping.phone || payment.metadata?.phone) || nameIsPhone
   const email = String(customer.email || billing.email || failedBilling.email || payment.receipt_email || '').trim().toLowerCase()
   const pieces = fullName.split(/\s+/).filter(Boolean)
   return {
@@ -3039,86 +3067,137 @@ function acAutomationApi(stripeSecretKey: string): Plugin {
       server.middlewares.use('/api/ac-automation', async (request, response) => {
         try {
           const url = new URL(request.url ?? '', 'http://localhost')
-          if (url.searchParams.get('action') === 'stripe-login') {
-            const stdout = openSync('stripe-login.out.log', 'a')
-            const stderr = openSync('stripe-login.err.log', 'a')
-            const child = spawnNodeScript(['stripe-login.mjs'], { cwd: getAppRoot(), detached: true, stdio: ['ignore', stdout, stderr] })
-            child.unref()
-            return sendJson(response, 202, { message: 'Stripe login opened. Sign in, then click Save Stripe session & close.' })
-          }
           if (!stripeSecretKey) return sendJson(response, 500, { message: 'STRIPE_SECRET_KEY is not configured.' })
-          const fromDate = url.searchParams.get('from') ?? ''
-          const toDate = url.searchParams.get('to') ?? fromDate
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(toDate) || fromDate > toDate) {
-            return sendJson(response, 400, { message: 'Choose a valid EST date range.' })
+          const selectedDate = url.searchParams.get('date') ?? ''
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) {
+            return sendJson(response, 400, { message: 'Choose a valid EST date.' })
           }
-          // AC deal dates are assigned to the previous day: a 9/2 deal sheet is
-          // built from the Stripe Dashboard's 9/3 Eastern transaction day.
-          const sourceStartDate = new Date(`${fromDate}T12:00:00Z`)
-          sourceStartDate.setUTCDate(sourceStartDate.getUTCDate() + 1)
-          const stripeFromDate = sourceStartDate.toISOString().slice(0, 10)
-          const sourceEndDate = new Date(`${toDate}T12:00:00Z`)
-          sourceEndDate.setUTCDate(sourceEndDate.getUTCDate() + 2)
-          const endDate = sourceEndDate.toISOString().slice(0, 10)
-          const start = Math.floor(zonedTimeToUtc(stripeFromDate, 0, 0, 0, 'America/New_York').getTime() / 1000)
-          const end = Math.floor(zonedTimeToUtc(endDate, 0, 0, 0, 'America/New_York').getTime() / 1000)
-          const [paymentIntents, charges] = await Promise.all([
+          const selectedStatuses = (url.searchParams.get('statuses') ?? 'succeeded,failed,expired,incomplete')
+            .split(',').map((status) => status.trim().toLowerCase()).filter((status) => STRIPE_STATUSES.has(status))
+          if (!selectedStatuses.length) return sendJson(response, 400, { message: 'Select at least one Stripe status.' })
+          const selected = new Set(selectedStatuses)
+          const nextDate = new Date(`${selectedDate}T12:00:00Z`)
+          nextDate.setUTCDate(nextDate.getUTCDate() + 1)
+          const start = Math.floor(zonedTimeToUtc(selectedDate, 0, 0, 0, 'America/New_York').getTime() / 1000)
+          const end = Math.floor(zonedTimeToUtc(nextDate.toISOString().slice(0, 10), 0, 0, 0, 'America/New_York').getTime() / 1000)
+          const [paymentIntents, charges, sessions] = await Promise.all([
             listStripePaymentIntents(stripeSecretKey, start, end),
             listStripeCharges(stripeSecretKey, start, end),
+            listStripeObjects(stripeSecretKey, 'checkout/sessions', start, end, ['data.customer', 'data.payment_intent']),
           ])
-          // Stripe's Dashboard lists individual charge attempts. PaymentIntents alone
-          // hide earlier failed attempts after a retry and often omit their contact data.
-          const payments = [...charges, ...paymentIntents.filter((payment) =>
-            payment.status === 'canceled' || (!payment.latest_charge && payment.status !== 'succeeded'),
-          )]
-          const stripeContacts = payments.map((payment) => ({ payment, contact: stripeContact(payment) }))
-          const dashboardIds = [...new Set(stripeContacts
-            .map(({ payment }) => String(payment.payment_intent || payment.id || ''))
-            .filter((id) => id.startsWith('pi_')))]
-          let dashboardPhones: Record<string, string> = {}
-          if (dashboardIds.length) {
-            if (process.env.RENDER) throw new Error('Stripe Dashboard phone lookup requires the local saved browser session.')
-            const { stdout } = await execNodeScript(['stripe-phones.mjs', `--ids=${dashboardIds.join(',')}`], { cwd: getAppRoot(), timeout: 300_000 })
-            dashboardPhones = (JSON.parse(String(stdout)) as { phones?: Record<string, string> }).phones ?? {}
+          type Candidate = { source: StripeObject; customerId: string; paymentIntentId: string; session?: StripeObject }
+          const candidates: Candidate[] = []
+          const addCandidate = (source: StripeObject, status: string, session?: StripeObject) => {
+            if (!selected.has(status)) return
+            const customerValue = session?.customer ?? source.customer
+            const intentValue = session?.payment_intent ?? source.payment_intent ?? (source.object === 'payment_intent' ? source.id : '')
+            candidates.push({ source, session, customerId: String(typeof customerValue === 'object' ? customerValue?.id ?? '' : customerValue ?? ''), paymentIntentId: String(typeof intentValue === 'object' ? intentValue?.id ?? '' : intentValue ?? '') })
           }
-          for (const entry of stripeContacts) {
-            const dashboardId = String(entry.payment.payment_intent || entry.payment.id || '')
-            entry.contact.phone ||= stripePhone(dashboardPhones[dashboardId])
+          for (const charge of charges) addCandidate(charge, charge.status === 'succeeded' ? 'succeeded' : 'failed')
+          for (const intent of paymentIntents) {
+            if (intent.status === 'succeeded') addCandidate(intent, 'succeeded')
+            else if (intent.last_payment_error) addCandidate(intent, 'failed')
+            else addCandidate(intent, 'incomplete')
           }
-          const stripeIdentityByEmail = new Map<string, ReturnType<typeof stripeContact>>()
-          for (const { contact } of stripeContacts) {
-            if (!contact.email) continue
-            const current = stripeIdentityByEmail.get(contact.email)
-            stripeIdentityByEmail.set(contact.email, {
-              email: contact.email,
-              phone: current?.phone || contact.phone,
-              firstName: current?.firstName || contact.firstName,
-              lastName: current?.lastName || contact.lastName,
-            })
+          for (const session of sessions) {
+            if (session.status === 'expired') addCandidate(session, 'expired', session)
+            else if (session.payment_status === 'paid') addCandidate(session, 'succeeded', session)
+            else addCandidate(session, 'incomplete', session)
           }
-          const resolved = stripeContacts.map(({ payment, contact }) => {
-            const stripeIdentity = stripeIdentityByEmail.get(contact.email)
-            return { payment, contact: { phone: stripeIdentity?.phone || contact.phone, email: contact.email, firstName: stripeIdentity?.firstName || contact.firstName, lastName: stripeIdentity?.lastName || contact.lastName } }
-          })
-          const succeeded = resolved.filter(({ payment }) => payment.object === 'charge' && payment.status === 'succeeded')
-          const succeededEmails = new Set(succeeded.map(({ contact }) => canonicalClientEmail(contact.email)).filter(Boolean))
-          const succeededPhones = new Set(succeeded.map(({ contact }) => contact.phone).filter(Boolean))
-          const contacts = new Map<string, ReturnType<typeof stripeContact>>()
-          for (const { payment, contact } of resolved) {
-            if (payment.object === 'charge' && payment.status === 'succeeded') continue
-            const clientKey = contact.phone || contact.email
-            const clientEmail = canonicalClientEmail(contact.email)
-            const alsoSucceeded = succeededPhones.has(contact.phone)
-              || Boolean(clientEmail && succeededEmails.has(clientEmail))
-            if (!contact.phone || alsoSucceeded || contacts.has(clientKey)) continue
-            const charge = payment.object === 'charge' ? payment : payment.latest_charge && typeof payment.latest_charge === 'object' ? payment.latest_charge : {}
-            const isBlocked = charge.outcome?.type === 'blocked'
-            const isCanceled = payment.object === 'payment_intent' && payment.status === 'canceled'
-            const isFailed = payment.object === 'charge' ? payment.status === 'failed' : Boolean(payment.last_payment_error || charge.status === 'failed')
-            const isIncomplete = ['requires_payment_method', 'requires_confirmation', 'requires_action', 'processing', 'requires_capture'].includes(payment.status)
-            if (isBlocked || isCanceled || isFailed || isIncomplete) contacts.set(clientKey, contact)
+
+          const objectId = (value: unknown) => String(value && typeof value === 'object' ? (value as StripeObject).id ?? '' : value ?? '')
+          const sessionContact = (session: StripeObject | undefined) => {
+            const details = session?.customer_details ?? {}
+            const shipping = session?.shipping_details ?? session?.collected_information?.shipping_details ?? {}
+            const customPhone = Array.isArray(session?.custom_fields)
+              ? session.custom_fields.find((field: StripeObject) => /phone|mobile|telephone/i.test(`${field.key ?? ''} ${field.label?.custom ?? ''}`))?.text?.value
+              : ''
+            return {
+              phone: stripePhone(details.phone || shipping.phone || session?.metadata?.phone || session?.metadata?.phone_number || customPhone),
+              email: String(details.email || session?.customer_email || '').trim().toLowerCase(),
+              name: String(details.name || shipping.name || '').trim(),
+            }
           }
-          sendJson(response, 200, { fromDate, toDate, timezone: 'America/New_York', contacts: [...contacts.values()] })
+          const customerCache = new Map<string, Promise<StripeObject>>()
+          const paymentMethodCache = new Map<string, Promise<StripeObject>>()
+          const sessionDetailCache = new Map<string, Promise<StripeObject>>()
+          const sessionByIntent = new Map<string, StripeObject>()
+          const sessionsByCustomer = new Map<string, StripeObject[]>()
+          const sessionsByEmail = new Map<string, StripeObject[]>()
+          for (const session of sessions) {
+            const intent = objectId(session.payment_intent)
+            if (intent) sessionByIntent.set(String(intent), session)
+            const customerId = objectId(session.customer)
+            if (customerId) sessionsByCustomer.set(customerId, [...(sessionsByCustomer.get(customerId) ?? []), session])
+            const email = canonicalClientEmail(sessionContact(session).email)
+            if (email) sessionsByEmail.set(email, [...(sessionsByEmail.get(email) ?? []), session])
+          }
+          const failures: string[] = []
+          const fetchCustomer = (id: string) => {
+            if (!customerCache.has(id)) customerCache.set(id, stripeGet(stripeSecretKey, `customers/${encodeURIComponent(id)}`))
+            return customerCache.get(id)!
+          }
+          const fetchPaymentMethod = (id: string) => {
+            if (!paymentMethodCache.has(id)) paymentMethodCache.set(id, stripeGet(stripeSecretKey, `payment_methods/${encodeURIComponent(id)}`))
+            return paymentMethodCache.get(id)!
+          }
+          const fetchSessionDetails = (session: StripeObject) => {
+            const id = objectId(session)
+            if (!id) return Promise.resolve(session)
+            if (!sessionDetailCache.has(id)) sessionDetailCache.set(id, stripeGet(stripeSecretKey, `checkout/sessions/${encodeURIComponent(id)}`))
+            return sessionDetailCache.get(id)!
+          }
+          const closestSession = (options: StripeObject[], created: number) => options.toSorted((left, right) => Math.abs(Number(left.created ?? 0) - created) - Math.abs(Number(right.created ?? 0) - created))[0]
+          const resolved: Array<ReturnType<typeof stripeContact> & { customerId: string; phoneSource: string }> = []
+          for (const candidate of candidates) {
+            let customer: StripeObject = candidate.source.customer && typeof candidate.source.customer === 'object' ? candidate.source.customer : {}
+            if (candidate.customerId) {
+              try { customer = await fetchCustomer(candidate.customerId) } catch (error) { failures.push(`customer ${candidate.customerId}: ${error instanceof Error ? error.message : 'lookup failed'}`) }
+            }
+            let session = candidate.session || sessionByIntent.get(candidate.paymentIntentId)
+            const base = stripeContact({ ...candidate.source, customer })
+            if (!session && candidate.customerId) session = closestSession(sessionsByCustomer.get(candidate.customerId) ?? [], Number(candidate.source.created ?? 0))
+            if (!session && base.email) session = closestSession(sessionsByEmail.get(canonicalClientEmail(base.email)) ?? [], Number(candidate.source.created ?? 0))
+            if (session && !base.phone) {
+              try { session = await fetchSessionDetails(session) } catch (error) { failures.push(`checkout session ${objectId(session)}: ${error instanceof Error ? error.message : 'lookup failed'}`) }
+            }
+            const checkout = sessionContact(session)
+            const intent = candidate.source.object === 'payment_intent' ? candidate.source : candidate.source.payment_intent && typeof candidate.source.payment_intent === 'object' ? candidate.source.payment_intent : {}
+            const charge = candidate.source.object === 'charge' ? candidate.source : intent.latest_charge ?? {}
+            const customerPhone = stripePhone(customer.phone)
+            const customerShippingPhone = stripePhone(customer.shipping?.phone)
+            const chargePhone = stripePhone(charge.billing_details?.phone)
+            const failedPhone = stripePhone(intent.last_payment_error?.payment_method?.billing_details?.phone)
+            const paymentMethodValue = candidate.source.payment_method || intent.payment_method || charge.payment_method || intent.last_payment_error?.payment_method
+            let paymentMethod: StripeObject = paymentMethodValue && typeof paymentMethodValue === 'object' ? paymentMethodValue : {}
+            const paymentMethodId = objectId(paymentMethodValue)
+            if (!checkout.phone && !customerPhone && !customerShippingPhone && !chargePhone && !failedPhone && paymentMethodId) {
+              try { paymentMethod = await fetchPaymentMethod(paymentMethodId) } catch (error) { failures.push(`payment method ${paymentMethodId}: ${error instanceof Error ? error.message : 'lookup failed'}`) }
+            }
+            const paymentMethodPhone = stripePhone(paymentMethod.billing_details?.phone)
+            const metadataPhone = stripePhone(candidate.source.metadata?.phone || candidate.source.metadata?.phone_number || charge.metadata?.phone || charge.metadata?.phone_number || customer.metadata?.phone || customer.metadata?.phone_number)
+            const phone = checkout.phone || customerPhone || customerShippingPhone || chargePhone || failedPhone || paymentMethodPhone || metadataPhone
+            const phoneSource = checkout.phone ? 'checkout_session' : customerPhone ? 'customer' : customerShippingPhone ? 'customer_shipping' : chargePhone ? 'charge' : failedPhone ? 'failed_payment' : paymentMethodPhone ? 'payment_method' : metadataPhone ? 'metadata' : 'unavailable'
+            const enriched = stripeContact({ ...candidate.source, customer: { ...customer, name: customer.name || checkout.name, email: customer.email || checkout.email, phone } })
+            resolved.push({ ...enriched, customerId: candidate.customerId, phoneSource })
+          }
+
+          const contacts: Array<ReturnType<typeof stripeContact> & { customerId: string; phoneSource: string }> = []
+          const aliases = new Map<string, number>()
+          for (const contact of resolved) {
+            const email = canonicalClientEmail(contact.email)
+            const name = `${contact.firstName} ${contact.lastName}`.trim().toLowerCase().replace(/\s+/g, ' ')
+            const keys = [contact.customerId && `cus:${contact.customerId}`, email && `email:${email}`, contact.phone && `phone:${contact.phone}`, name && (email || contact.phone) && `name:${name}|${email || contact.phone}`].filter(Boolean) as string[]
+            let index = keys.map((key) => aliases.get(key)).find((value) => value !== undefined)
+            if (index === undefined) { index = contacts.length; contacts.push(contact) }
+            else contacts[index] = { customerId: contacts[index].customerId || contact.customerId, email: contacts[index].email || contact.email, phone: contacts[index].phone || contact.phone, firstName: contacts[index].firstName || contact.firstName, lastName: contacts[index].lastName || contact.lastName, phoneSource: contacts[index].phone ? contacts[index].phoneSource : contact.phoneSource }
+            for (const key of keys) aliases.set(key, index)
+          }
+          const output = contacts.map((contact) => ({ email: contact.email, phone: contact.phone, firstName: contact.firstName, lastName: contact.lastName }))
+          const unavailablePhones = output.filter((contact) => !contact.phone).length
+          const phoneRecovery = Object.fromEntries([...new Set(contacts.map((contact) => contact.phoneSource))].map((source) => [source, contacts.filter((contact) => contact.phoneSource === source).length]))
+          for (const failure of failures) console.warn(`[AC Automation] Stripe lookup failed: ${failure}`)
+          sendJson(response, 200, { date: selectedDate, timezone: 'America/New_York', statuses: selectedStatuses, contacts: output, unavailablePhones, phoneRecovery, lookupFailures: failures.length, message: `${output.length} unique contacts imported. ${unavailablePhones} phone numbers unavailable.` })
         } catch (error) {
           sendJson(response, 500, { message: error instanceof Error ? error.message : 'Unable to load Stripe abandoned carts.' })
         }
