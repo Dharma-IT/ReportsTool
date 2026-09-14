@@ -6,6 +6,7 @@ import { promisify } from 'node:util'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { getSavedShopifyOrderDates, getSavedShopifyOrders, syncShopifyOrders } from './api/_lib/shopify-orders.js'
+import { fetchShopifySales } from './api/_lib/shopify-sales.js'
 
 const execFileAsync = promisify(execFile)
 const ACCOUNT_ID = 'act_653630476536860'
@@ -3223,12 +3224,12 @@ function shopifyOrdersApi(env: Record<string, string>): Plugin {
         }
 
         try {
-          process.env.SHOPIFY_STORE_DOMAIN = env.SHOPIFY_STORE_DOMAIN ?? ''
-          process.env.SHOPIFY_CLIENT_ID = env.SHOPIFY_CLIENT_ID ?? ''
-          process.env.SHOPIFY_CLIENT_SECRET = env.SHOPIFY_CLIENT_SECRET ?? ''
-          process.env.SHOPIFY_API_VERSION = env.SHOPIFY_API_VERSION ?? ''
-          process.env.VITE_SUPABASE_URL = env.VITE_SUPABASE_URL ?? ''
-          process.env.SUPABASE_SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY ?? ''
+          process.env.SHOPIFY_STORE_DOMAIN = env.SHOPIFY_STORE_DOMAIN || process.env.SHOPIFY_STORE_DOMAIN || ''
+          process.env.SHOPIFY_CLIENT_ID = env.SHOPIFY_CLIENT_ID || process.env.SHOPIFY_CLIENT_ID || ''
+          process.env.SHOPIFY_CLIENT_SECRET = env.SHOPIFY_CLIENT_SECRET || process.env.SHOPIFY_CLIENT_SECRET || ''
+          process.env.SHOPIFY_API_VERSION = env.SHOPIFY_API_VERSION || process.env.SHOPIFY_API_VERSION || ''
+          process.env.VITE_SUPABASE_URL = env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
+          process.env.SUPABASE_SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
           const requestUrl = new URL(request.url ?? '', 'http://localhost')
           const result = request.method === 'GET'
             ? requestUrl.searchParams.get('dates') === '1'
@@ -3242,6 +3243,35 @@ function shopifyOrdersApi(env: Record<string, string>): Plugin {
         } catch (error) {
           return sendJson(response, 502, {
             message: error instanceof Error ? error.message : 'Unable to sync Shopify orders.',
+          })
+        }
+      })
+    },
+  }
+}
+
+function shopifySalesApi(env: Record<string, string>): Plugin {
+  return {
+    name: 'shopify-sales-api',
+    configureServer(server) {
+      server.middlewares.use('/api/shopify/sales', async (request, response) => {
+        if (request.method !== 'POST') {
+          response.setHeader('Allow', 'POST')
+          return sendJson(response, 405, { message: 'Method not allowed' })
+        }
+
+        try {
+          process.env.SHOPIFY_STORE_DOMAIN = env.SHOPIFY_STORE_DOMAIN || process.env.SHOPIFY_STORE_DOMAIN || ''
+          process.env.SHOPIFY_CLIENT_ID = env.SHOPIFY_CLIENT_ID || process.env.SHOPIFY_CLIENT_ID || ''
+          process.env.SHOPIFY_CLIENT_SECRET = env.SHOPIFY_CLIENT_SECRET || process.env.SHOPIFY_CLIENT_SECRET || ''
+          process.env.SHOPIFY_API_VERSION = env.SHOPIFY_API_VERSION || process.env.SHOPIFY_API_VERSION || ''
+          const body = await readJsonRequest<{ date?: string }>(request)
+          const result = await fetchShopifySales(body.date ?? '')
+          response.setHeader('Cache-Control', 'no-store')
+          return sendJson(response, 200, result)
+        } catch (error) {
+          return sendJson(response, 502, {
+            message: error instanceof Error ? error.message : 'Unable to fetch Shopify sales.',
           })
         }
       })
@@ -3264,6 +3294,7 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       react(),
+      shopifySalesApi(env),
       shopifyOrdersApi(env),
       acAutomationApi(env.STRIPE_SECRET_KEY ?? ''),
       botReportsApi(env.HUBSPOT_ACCESS_TOKEN ?? ''),

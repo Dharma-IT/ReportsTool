@@ -26,5 +26,13 @@ services:
         sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
+      - key: SHOPIFY_STORE_DOMAIN
+        sync: false
+      - key: SHOPIFY_CLIENT_ID
+        sync: false
+      - key: SHOPIFY_CLIENT_SECRET
+        sync: false
+      - key: SHOPIFY_API_VERSION
+        sync: false
       - key: AIRCALL_WEBHOOK_TOKEN
         sync: false

@@ -4,6 +4,7 @@ const earliestShopifyDate = '2026-09-01'
 const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 
 function getApiUrl(path: string) {
+  if (import.meta.env.DEV) return path
   return configuredApiBaseUrl ? `${configuredApiBaseUrl}${path}` : path
 }
 
@@ -20,6 +21,20 @@ type ShopifyOrderRow = {
   lineitem_price: number
   lineitem_compare_at_price: number | null
   lineitem_sku: string | null
+}
+
+type ShopifySalesRow = {
+  id: string
+  name: string
+  gross_sales: number | null
+  discounts: number | null
+  returns: number | null
+  net_sales: number | null
+  shipping_charges: number | null
+  total_sales: number | null
+  qty: number
+  sales: number
+  product_name: string
 }
 
 const dailyExpenses = [
@@ -43,6 +58,19 @@ const orderHeaders = [
   'Lineitem price',
   'Lineitem compare at price',
   'Lineitem SKU',
+]
+
+const shopifyHeaders = [
+  'Name',
+  'Gross sales',
+  'Discounts',
+  'Returns',
+  'Net sales',
+  'Shipping charges',
+  'Total sales',
+  'Qty',
+  'Sales',
+  'Product Name',
 ]
 
 type SupplementsView = 'daily' | 'ads' | 'cogs' | 'shopify' | 'orders' | 'sales'
@@ -106,6 +134,11 @@ export default function Supplements() {
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError] = useState('')
   const [ordersMessage, setOrdersMessage] = useState('')
+  const [shopifyDate, setShopifyDate] = useState(getToday())
+  const [shopifyRows, setShopifyRows] = useState<ShopifySalesRow[]>([])
+  const [shopifyLoading, setShopifyLoading] = useState(false)
+  const [shopifyError, setShopifyError] = useState('')
+  const [shopifyMessage, setShopifyMessage] = useState('')
   const activeView = supplementViews.find((item) => item.key === view) ?? supplementViews[0]
 
   useEffect(() => {
@@ -181,6 +214,46 @@ export default function Supplements() {
     }
   }
 
+  async function fetchShopifyReport() {
+    setShopifyLoading(true)
+    setShopifyError('')
+    setShopifyMessage('')
+    try {
+      const response = await fetch(getApiUrl('/api/shopify/sales'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: shopifyDate }),
+      })
+      const responseText = await response.text()
+      let payload: { rows?: ShopifySalesRow[]; message?: string } = {}
+      if (responseText) {
+        try {
+          payload = JSON.parse(responseText) as typeof payload
+        } catch {
+          throw new Error(`The Shopify sales endpoint returned an invalid response (${response.status}).`)
+        }
+      }
+      if (!response.ok) {
+        const deploymentHint = response.status === 404
+          ? ' The Shopify sales backend route has not been deployed yet.'
+          : ''
+        throw new Error(payload.message || `Unable to fetch Shopify sales (${response.status}).${deploymentHint}`)
+      }
+      if (!responseText) throw new Error('The Shopify sales endpoint returned an empty response.')
+      const rows = payload.rows ?? []
+      setShopifyRows(rows)
+      setShopifyMessage(`${rows.length} sales line item${rows.length === 1 ? '' : 's'} loaded.`)
+    } catch (error) {
+      setShopifyError(error instanceof Error ? error.message : 'Unable to fetch Shopify sales.')
+    } finally {
+      setShopifyLoading(false)
+    }
+  }
+
+  function formatShopifyAmount(value: number | null) {
+    return value == null ? '' : value.toFixed(2)
+  }
+
   return (
     <main className="dashboard-shell supplements-page supplements-layout">
       <aside className="supplements-sidebar" aria-label="Supplements report sections">
@@ -231,7 +304,41 @@ export default function Supplements() {
             </table>
           </div>
           <p className="supplements-note"><span /> No supplement data has been connected yet. Values will appear here once a source is available.</p>
-        </div></> : view === 'orders' ? <section className="supplements-content" aria-labelledby="supplements-orders-title">
+        </div></> : view === 'shopify' ? <section className="supplements-content" aria-labelledby="supplements-shopify-title">
+          <div className="supplements-table-heading">
+            <div><span>Shopify export</span><h2 id="supplements-shopify-title">Shopify</h2></div>
+          </div>
+          <form className="supplements-orders-filter" onSubmit={(event) => { event.preventDefault(); void fetchShopifyReport() }}>
+            <div className="supplements-orders-date-control"><span>Report date</span>
+              <OrderCalendar selected={shopifyDate} savedDates={new Set()} onSelect={(date) => {
+                setShopifyDate(date)
+                setShopifyRows([])
+                setShopifyMessage('')
+                setShopifyError('')
+              }} />
+            </div>
+            <button type="submit" disabled={shopifyLoading}>{shopifyLoading ? 'Working…' : 'Fetch Shopify'}</button>
+          </form>
+          {shopifyError ? <p className="supplements-orders-feedback error" role="alert">{shopifyError}</p> : null}
+          {shopifyMessage ? <p className="supplements-orders-feedback success" role="status">{shopifyMessage}</p> : null}
+          <div className="supplements-table-wrap">
+            <table className="supplements-table supplements-orders-table supplements-shopify-table">
+              <thead><tr>{shopifyHeaders.map((header) => <th scope="col" key={header}>{header}</th>)}</tr></thead>
+              <tbody>{shopifyRows.map((row) => <tr key={row.id}>
+                <td>{row.name}</td>
+                <td>{formatShopifyAmount(row.gross_sales)}</td>
+                <td>{formatShopifyAmount(row.discounts)}</td>
+                <td>{formatShopifyAmount(row.returns)}</td>
+                <td>{formatShopifyAmount(row.net_sales)}</td>
+                <td>{formatShopifyAmount(row.shipping_charges)}</td>
+                <td>{formatShopifyAmount(row.total_sales)}</td>
+                <td>{row.qty}</td>
+                <td>{formatShopifyAmount(row.sales)}</td>
+                <td title={row.product_name}>{row.product_name}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+        </section> : view === 'orders' ? <section className="supplements-content" aria-labelledby="supplements-orders-title">
           <div className="supplements-table-heading">
             <div><span>Shopify export</span><h2 id="supplements-orders-title">Orders</h2></div>
           </div>
