@@ -19,6 +19,7 @@ const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | unde
 const getApiUrl = (path: string) => `${['localhost', '127.0.0.1'].includes(window.location.hostname) ? '' : configuredApiBaseUrl}${path}`
 const easternToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 const displayDate = (date: string) => { const [year, month, day] = date.split('-'); return `${Number(month)}/${Number(day)}/${year}` }
+const formatSupplementPhone = (phone: string) => { const value = phone.trim(); return value ? (value.startsWith('+') ? value : `+1${value.replace(/\D/g, '')}`) : '' }
 const contactOwners = ['Alice F', 'Arles Martinez', 'Edmilson Velasquez', 'Brayam Zuluaga', 'Maria Roa']
 
 function downloadFile(contents: BlobPart, type: string, extension: string) {
@@ -80,12 +81,16 @@ function ACAutomation() {
       const response = await fetch(getApiUrl('/api/shopify/orders'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: supplementDate, mode: 'contacts' }) })
       const payload = await response.json() as { contacts?: ShopifyContact[]; message?: string }
       if (!response.ok) throw new Error(payload.message || 'Unable to load Shopify orders.')
-      setSupplementRows((payload.contacts ?? []).map((contact) => ({
-        email: '', firstName: contact.firstName, lastName: contact.lastName,
-        preference: 'es', phone: contact.billingPhone,
-        treatment: 'Slim Boost - Weight Loss Booster', source: 'Abandoned cart',
-        owner: 'Erika Vargas', dealDate: displayDate(supplementDate),
-      })))
+      setSupplementRows((payload.contacts ?? []).map((contact) => {
+        const phone = formatSupplementPhone(contact.billingPhone)
+        return {
+          email: phone ? `${phone.replace(/\D/g, '')}@dummy.com` : '',
+          firstName: contact.firstName, lastName: contact.lastName,
+          preference: 'es', phone,
+          treatment: 'Slim Boost - Weight Loss Booster', source: 'Abandoned cart',
+          owner: 'Erika Vargas', dealDate: displayDate(supplementDate),
+        }
+      }))
     } catch (caught) { setSupplementRows([]); setSupplementError(caught instanceof Error ? caught.message : 'Unable to load Shopify orders.') }
     finally { setSupplementLoading(false) }
   }
