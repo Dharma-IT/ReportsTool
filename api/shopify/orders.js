@@ -1,4 +1,4 @@
-import { getSavedShopifyOrderDates, getSavedShopifyOrders, syncShopifyOrders } from '../_lib/shopify-orders.js'
+import { fetchShopifySupplementContacts, getSavedShopifyOrderDates, getSavedShopifyOrders, syncShopifyOrders } from '../_lib/shopify-orders.js'
 
 export default async function handler(request, response) {
   if (!['GET', 'POST'].includes(request.method)) {
@@ -20,6 +20,11 @@ export default async function handler(request, response) {
     }
     const body = typeof request.body === 'string' ? JSON.parse(request.body) : request.body ?? {}
     const date = body.date
+    if (body.mode === 'contacts') {
+      const result = await fetchShopifySupplementContacts(date)
+      response.setHeader('Cache-Control', 'no-store')
+      return response.status(200).json(result)
+    }
     const result = await syncShopifyOrders(date, date)
     response.setHeader('Cache-Control', 'no-store')
     return response.status(200).json(result)

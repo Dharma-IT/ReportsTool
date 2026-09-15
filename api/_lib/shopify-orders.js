@@ -8,6 +8,8 @@ const ORDERS_QUERY = `query OrdersForSupplements($after: String, $search: String
       legacyResourceId
       name
       email
+      billingAddress { phone }
+      shippingAddress { name firstName lastName }
       displayFinancialStatus
       transactions { kind status processedAt }
       lineItems(first: 100) {
@@ -99,6 +101,45 @@ export async function fetchShopifyOrderLineItems(from, to) {
   } while (after)
 
   return rows
+}
+
+export async function fetchShopifySupplementContacts(date) {
+  validateRange(date, date)
+  const contacts = []
+  const aliases = new Set()
+  let after = null
+
+  do {
+    const data = await shopifyGraphql(ORDERS_QUERY, {
+      after,
+      search: `created_at:>=${date} created_at:<${nextDate(date)}`,
+    })
+    for (const order of data.orders.nodes) {
+      const shipping = order.shippingAddress ?? {}
+      const shippingName = String(shipping.name || `${shipping.firstName || ''} ${shipping.lastName || ''}`).trim()
+      const billingPhone = String(order.billingAddress?.phone || '').trim()
+      const email = String(order.email || '').trim()
+      const keys = [
+        billingPhone.replace(/\D/g, '') ? `phone:${billingPhone.replace(/\D/g, '')}` : '',
+        email ? `email:${email.toLowerCase()}` : '',
+        shippingName ? `name:${shippingName.toLowerCase().replace(/\s+/g, ' ')}` : '',
+      ].filter(Boolean)
+      if (keys.some((key) => aliases.has(key))) continue
+      keys.forEach((key) => aliases.add(key))
+      contacts.push({
+        orderId: String(order.legacyResourceId),
+        orderName: order.name,
+        email,
+        billingPhone,
+        shippingName,
+        firstName: shipping.firstName || shippingName.split(/\s+/)[0] || '',
+        lastName: shipping.lastName || shippingName.split(/\s+/).slice(1).join(' '),
+      })
+    }
+    after = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null
+  } while (after)
+
+  return { date, contacts }
 }
 
 function supabaseRestUrl() {

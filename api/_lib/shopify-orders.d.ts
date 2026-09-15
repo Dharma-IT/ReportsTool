@@ -27,3 +27,18 @@ export function getSavedShopifyOrders(date: string): Promise<{
 }>
 
 export function getSavedShopifyOrderDates(): Promise<{ dates: string[] }>
+
+export type ShopifySupplementContact = {
+  orderId: string
+  orderName: string
+  email: string
+  billingPhone: string
+  shippingName: string
+  firstName: string
+  lastName: string
+}
+
+export function fetchShopifySupplementContacts(date: string): Promise<{
+  date: string
+  contacts: ShopifySupplementContact[]
+}>

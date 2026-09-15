@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import { getSavedShopifyOrderDates, getSavedShopifyOrders, syncShopifyOrders } from './api/_lib/shopify-orders.js'
+import { fetchShopifySupplementContacts, getSavedShopifyOrderDates, getSavedShopifyOrders, syncShopifyOrders } from './api/_lib/shopify-orders.js'
 import { fetchShopifySales } from './api/_lib/shopify-sales.js'
 
 const execFileAsync = promisify(execFile)
@@ -3235,9 +3235,12 @@ function shopifyOrdersApi(env: Record<string, string>): Plugin {
             ? requestUrl.searchParams.get('dates') === '1'
               ? await getSavedShopifyOrderDates()
               : await getSavedShopifyOrders(requestUrl.searchParams.get('date') ?? '')
-            : await readJsonRequest<{ date?: string }>(request).then((body) =>
-              syncShopifyOrders(body.date ?? '', body.date ?? ''),
-            )
+            : await (async () => {
+              const body = await readJsonRequest<{ date?: string; mode?: string }>(request)
+              return body.mode === 'contacts'
+                ? await fetchShopifySupplementContacts(body.date ?? '')
+                : await syncShopifyOrders(body.date ?? '', body.date ?? '')
+            })()
           response.setHeader('Cache-Control', 'no-store')
           return sendJson(response, 200, result)
         } catch (error) {
