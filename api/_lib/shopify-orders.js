@@ -7,6 +7,7 @@ const ORDERS_QUERY = `query OrdersForSupplements($after: String, $search: String
     nodes {
       legacyResourceId
       name
+      createdAt
       email
       billingAddress { phone }
       shippingAddress { name firstName lastName }
@@ -57,6 +58,18 @@ function nextDate(value) {
   const date = new Date(`${value}T12:00:00Z`)
   date.setUTCDate(date.getUTCDate() + 1)
   return date.toISOString().slice(0, 10)
+}
+
+function previousDate(value) {
+  const date = new Date(`${value}T12:00:00Z`)
+  date.setUTCDate(date.getUTCDate() - 1)
+  return date.toISOString().slice(0, 10)
+}
+
+function easternDate(value) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(value))
 }
 
 function validateRange(from, to) {
@@ -112,9 +125,10 @@ export async function fetchShopifySupplementContacts(date) {
   do {
     const data = await shopifyGraphql(ORDERS_QUERY, {
       after,
-      search: `created_at:>=${date} created_at:<${nextDate(date)}`,
+      search: `created_at:>=${previousDate(date)} created_at:<${nextDate(nextDate(date))}`,
     })
     for (const order of data.orders.nodes) {
+      if (easternDate(order.createdAt) !== date) continue
       const shipping = order.shippingAddress ?? {}
       const shippingName = String(shipping.name || `${shipping.firstName || ''} ${shipping.lastName || ''}`).trim()
       const billingPhone = String(order.billingAddress?.phone || '').trim()
