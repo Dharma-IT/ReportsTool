@@ -120,19 +120,19 @@ export async function fetchShopifySupplementContacts(date) {
   validateRange(date, date)
   const contacts = []
   const aliases = new Set()
-  let after = null
+  const params = new URLSearchParams({ limit: '250', status: 'open', created_at_min: previousDate(date), created_at_max: nextDate(nextDate(date)) })
+  let path = `checkouts.json?${params}`
 
   do {
-    const data = await shopifyGraphql(ORDERS_QUERY, {
-      after,
-      search: `created_at:>=${previousDate(date)} created_at:<${nextDate(nextDate(date))}`,
-    })
-    for (const order of data.orders.nodes) {
-      if (easternDate(order.createdAt) !== date) continue
-      const shipping = order.shippingAddress ?? {}
-      const shippingName = String(shipping.name || `${shipping.firstName || ''} ${shipping.lastName || ''}`).trim()
-      const billingPhone = String(order.billingAddress?.phone || '').trim()
-      const email = String(order.email || '').trim()
+    const response = await shopifyAdminFetch(path)
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(`Shopify abandoned checkouts failed: ${payload.errors || response.status}`)
+    for (const checkout of payload.checkouts ?? []) {
+      if (easternDate(checkout.created_at) !== date) continue
+      const shipping = checkout.shipping_address ?? {}
+      const shippingName = String(shipping.name || `${shipping.first_name || ''} ${shipping.last_name || ''}`).trim()
+      const billingPhone = String(checkout.billing_address?.phone || '').trim()
+      const email = String(checkout.email || '').trim()
       const keys = [
         billingPhone.replace(/\D/g, '') ? `phone:${billingPhone.replace(/\D/g, '')}` : '',
         email ? `email:${email.toLowerCase()}` : '',
@@ -141,17 +141,18 @@ export async function fetchShopifySupplementContacts(date) {
       if (keys.some((key) => aliases.has(key))) continue
       keys.forEach((key) => aliases.add(key))
       contacts.push({
-        orderId: String(order.legacyResourceId),
-        orderName: order.name,
+        orderId: String(checkout.id),
+        orderName: checkout.name,
         email,
         billingPhone,
         shippingName,
-        firstName: shipping.firstName || shippingName.split(/\s+/)[0] || '',
-        lastName: shipping.lastName || shippingName.split(/\s+/).slice(1).join(' '),
+        firstName: shipping.first_name || shippingName.split(/\s+/)[0] || '',
+        lastName: shipping.last_name || shippingName.split(/\s+/).slice(1).join(' '),
       })
     }
-    after = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null
-  } while (after)
+    const nextLink = response.headers.get('link')?.split(',').find((link) => /rel="next"/.test(link))?.match(/<([^>]+)>/)?.[1]
+    path = nextLink ? nextLink.replace(/^.*\/admin\/api\/[^/]+\//, '') : ''
+  } while (path)
 
   return { date, contacts }
 }
