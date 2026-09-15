@@ -180,6 +180,9 @@ function BotReports() {
   const [error, setError] = useState('')
   const [startDate, setStartDate] = useState(initialDate)
   const [endDate, setEndDate] = useState(initialDate)
+  const [appliedStartDate, setAppliedStartDate] = useState(initialDate)
+  const [appliedEndDate, setAppliedEndDate] = useState(initialDate)
+  const [salesFetchRequest, setSalesFetchRequest] = useState(0)
   const [dateField, setDateField] = useState<DateField>('booked')
   const [sortOrder, setSortOrder] = useState<SortOrder>('booked-desc')
   const [view, setView] = useState<AppointmentView>('manual')
@@ -223,11 +226,10 @@ function BotReports() {
 
   useEffect(() => {
     if (view !== 'sales') return
-    if (!startDate || !endDate) { setSalesSummaries(null); setSalesError('Select a meeting date range.'); return }
+    if (!appliedStartDate || !appliedEndDate) return
     const controller = new AbortController()
-    setIsSalesLoading(true); setSalesError('')
     const fetchTeamSummary = async (team: 'sales' | 'cs') => {
-      const params = new URLSearchParams({ from: startDate, to: endDate, team, mode: 'sales-summary' })
+      const params = new URLSearchParams({ from: appliedStartDate, to: appliedEndDate, team, mode: 'sales-summary' })
       const response = await fetch(getApiUrl(`/api/daily-cs-report?${params}`), { signal: controller.signal })
       const contentType = response.headers.get('content-type') ?? ''
       if (!contentType.includes('application/json')) {
@@ -246,20 +248,20 @@ function BotReports() {
       })
       .finally(() => { if (!controller.signal.aborted) setIsSalesLoading(false) })
     return () => controller.abort()
-  }, [view, startDate, endDate])
+  }, [view, appliedStartDate, appliedEndDate, salesFetchRequest])
 
   const rows = useMemo(() => (view === 'manual' ? report?.manualRows ?? [] : [])
     .filter((booking) => {
       const value = dateField === 'meeting' ? booking.meeting_start_at : booking.booked_at
       const date = easternDateKey(value)
-      return (!startDate || date >= startDate) && (!endDate || date <= endDate)
+      return (!appliedStartDate || date >= appliedStartDate) && (!appliedEndDate || date <= appliedEndDate)
     })
     .sort((left, right) => {
       const [field, direction] = sortOrder.split('-') as ['booked' | 'meeting', 'asc' | 'desc']
       const leftValue = new Date(field === 'meeting' ? left.meeting_start_at : left.booked_at).getTime()
       const rightValue = new Date(field === 'meeting' ? right.meeting_start_at : right.booked_at).getTime()
       return direction === 'asc' ? leftValue - rightValue : rightValue - leftValue
-    }), [report, startDate, endDate, dateField, sortOrder, view])
+    }), [report, appliedStartDate, appliedEndDate, dateField, sortOrder, view])
 
   const sourceCounts = useMemo(() => rows.reduce((counts, booking) => {
     const source = getSource(booking)
@@ -272,16 +274,30 @@ function BotReports() {
     if (!report?.teamAppointments) return []
     return report.teamAppointments.filter((appointment) => {
       const date = easternDateKey(appointment.meeting_start_at)
-      return (!startDate || date >= startDate) && (!endDate || date <= endDate)
+      return (!appliedStartDate || date >= appliedStartDate) && (!appliedEndDate || date <= appliedEndDate)
     })
-  }, [report, startDate, endDate])
+  }, [report, appliedStartDate, appliedEndDate])
+
+  const fetchSelectedDates = () => {
+    setAppliedStartDate(startDate)
+    setAppliedEndDate(endDate)
+
+    if (view === 'sales') {
+      setIsSalesLoading(true)
+      setSalesError('')
+      setSalesFetchRequest((request) => request + 1)
+      return
+    }
+
+    void loadReport()
+  }
 
   return (
     <main className="dashboard-shell bot-reports-page appointment-reports-layout">
       <aside className="appointment-reports-sidebar" aria-label="Appointment sources">
         <span>Appointment type</span>
         <button className={view === 'manual' ? 'active' : ''} type="button" onClick={() => setView('manual')}><b>HM</b><span>Manual<small>Booked by humans</small></span></button>
-        <button className={view === 'sales' ? 'active' : ''} type="button" onClick={() => { const today = easternDateKey(new Date().toISOString()); if (!startDate) setStartDate(today); if (!endDate) setEndDate(today); setView('sales') }}><b>$</b><span>Appointment Sales<small>Lead conversion</small></span></button>
+        <button className={view === 'sales' ? 'active' : ''} type="button" onClick={() => { const today = easternDateKey(new Date().toISOString()); if (!startDate) setStartDate(today); if (!endDate) setEndDate(today); if (view !== 'sales') { setIsSalesLoading(true); setSalesError('') } setView('sales') }}><b>$</b><span>Appointment Sales<small>Lead conversion</small></span></button>
         <button className={view === 'team' ? 'active' : ''} type="button" onClick={() => setView('team')}><b>TM</b><span>Apt per Team<small>Team breakdown</small></span></button>
       </aside>
       <section className="bot-reports-panel" aria-labelledby="bot-reports-title">
@@ -306,8 +322,8 @@ function BotReports() {
             <label><span>Sort by</span><select value={sortOrder} onChange={(event) => setSortOrder(event.target.value as SortOrder)}><option value="booked-desc">Booked: newest</option><option value="booked-asc">Booked: oldest</option><option value="meeting-asc">Meeting: soonest</option><option value="meeting-desc">Meeting: latest</option></select></label>
             {hasDateFilter ? <button type="button" className="bot-clear-filter" onClick={() => { setStartDate(''); setEndDate('') }}>Clear</button> : null}
           </div>
-          <button type="button" className="bot-refresh-button" onClick={() => void loadReport()} disabled={isLoading}>
-            <span aria-hidden="true">↻</span>{isLoading ? 'Refreshing…' : 'Refresh data'}
+          <button type="button" className="bot-refresh-button" onClick={fetchSelectedDates} disabled={isLoading || !startDate || !endDate}>
+            {isLoading ? 'Fetching…' : 'Fetch'}
           </button>
         </div> : view === 'sales' || view === 'team' ? <div className="bot-reports-toolbar appointment-sales-toolbar">
           <div className="bot-date-controls" aria-label="Filter valid appointments by meeting date in Eastern Time">
@@ -316,6 +332,9 @@ function BotReports() {
             <label><span>Through</span><input type="date" value={endDate} min={startDate || undefined} onChange={(event) => setEndDate(event.target.value)} /></label>
             {hasDateFilter ? <button type="button" className="bot-clear-filter" onClick={() => { setStartDate(''); setEndDate('') }}>Clear</button> : null}
           </div>
+          <button type="button" className="bot-refresh-button" onClick={fetchSelectedDates} disabled={(view === 'sales' ? isSalesLoading : isLoading) || !startDate || !endDate}>
+            {view === 'sales' && isSalesLoading ? 'Fetching…' : view === 'team' && isLoading ? 'Fetching…' : 'Fetch'}
+          </button>
         </div> : null}
 
         {view !== 'sales' && view !== 'team' && error ? <div className="call-confirmation-message error">{error}</div> : null}
