@@ -1733,6 +1733,48 @@ function agentReportApi(
             }
           })
 
+          // A deployed live fetch cannot use the browser session that is available
+          // locally. If this date was already fetched locally, retain those saved
+          // message counts instead of replacing them with null values.
+          if (respondMessages === null) {
+            try {
+              const savedResponse = await supabaseRest(
+                supabaseUrl,
+                supabaseServiceRoleKey,
+                `agent_reports?report_date=eq.${encodeURIComponent(reportDate)}&select=report_data`,
+              )
+              const savedRows = (await savedResponse.json()) as Array<{
+                report_data?: {
+                  respondIoAvailable?: boolean
+                  staff?: Array<{ name?: string; messages?: number | null }>
+                }
+              }>
+              const savedReport = savedRows[0]?.report_data
+              if (savedReport?.respondIoAvailable && Array.isArray(savedReport.staff)) {
+                const savedMessages = new Map(
+                  savedReport.staff
+                    .filter(
+                      (row): row is { name: string; messages: number } =>
+                        typeof row.name === 'string' && typeof row.messages === 'number',
+                    )
+                    .map((row) => [row.name.toLowerCase(), row.messages]),
+                )
+                for (const row of staff) {
+                  const savedCount = savedMessages.get(row.name.toLowerCase())
+                  if (savedCount !== undefined) row.messages = savedCount
+                }
+                if (savedMessages.size > 0) {
+                  respondIoError = null
+                }
+              }
+            } catch {
+              // Continue with unavailable message values when no usable saved
+              // report exists; the rest of the live report is still valid.
+            }
+          }
+
+          const hasRespondMessages = staff.some((row) => row.messages !== null)
+
           const reportData = {
             reportDate,
             timezone: 'America/New_York',
@@ -1767,7 +1809,7 @@ function agentReportApi(
                   ? null
                   : staff.reduce((sum, row) => sum + (row.totalBookings ?? 0), 0),
             },
-            respondIoAvailable: respondMessages !== null,
+            respondIoAvailable: hasRespondMessages,
             respondIoError,
           }
           await supabaseRest(
