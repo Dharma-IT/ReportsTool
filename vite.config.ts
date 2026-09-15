@@ -1812,6 +1812,11 @@ async function fetchRespondStaffMessages(
     ]),
   )
   if (!analyticsToken) {
+    if (process.env.RENDER) {
+      throw new Error(
+        'respond.io message reporting needs RESPOND_IO_ANALYTICS_ACCESS_TOKEN in Render.',
+      )
+    }
     return runRespondIoSessionMessageReport(reportDate, usersById)
   }
   try {
@@ -1834,7 +1839,18 @@ async function fetchRespondStaffMessages(
       if (name) messages.set(name.toLowerCase(), row.outgoingMessageCount ?? 0)
     }
     return messages
-  } catch {
+  } catch (error) {
+    // A saved browser session is only available to local/desktop runs. On Render,
+    // preserve a concise analytics error instead of invoking Playwright and
+    // leaking its child-process command and stack trace into the report UI.
+    if (process.env.RENDER) {
+      throw new Error(
+        `respond.io analytics request failed: ${
+          error instanceof Error ? error.message : 'Unknown analytics error.'
+        }`,
+        { cause: error },
+      )
+    }
     return runRespondIoSessionMessageReport(reportDate, usersById)
   }
 }
@@ -1849,14 +1865,24 @@ async function runRespondIoSessionMessageReport(
     ),
   )
   const reportUsers = [...usersById].filter(([, name]) => reportNames.has(name.toLowerCase()))
-  const { stdout } = await execNodeScript(
-    [
-      'respond-message-report.mjs',
-      `--date=${reportDate}`,
-      `--user-ids=${JSON.stringify(reportUsers.map(([id]) => id))}`,
-    ],
-    { cwd: getAppRoot(), timeout: 120_000, maxBuffer: 1024 * 1024 },
-  )
+  let stdout: string | Buffer
+  try {
+    const result = await execNodeScript(
+      [
+        'respond-message-report.mjs',
+        `--date=${reportDate}`,
+        `--user-ids=${JSON.stringify(reportUsers.map(([id]) => id))}`,
+      ],
+      { cwd: getAppRoot(), timeout: 120_000, maxBuffer: 1024 * 1024 },
+    )
+    stdout = result.stdout
+  } catch (error) {
+    const message =
+      error && typeof error === 'object' && 'stderr' in error
+        ? parseRespondReportError(String(error.stderr))
+        : 'Unable to run saved-session respond.io message report.'
+    throw new Error(message, { cause: error })
+  }
   const payload = JSON.parse(String(stdout)) as { counts?: Record<string, number> }
   return new Map(
     reportUsers.map(([id, name]) => [name.toLowerCase(), payload.counts?.[String(id)] ?? 0]),

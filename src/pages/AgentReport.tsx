@@ -401,7 +401,6 @@ function AgentReport() {
                 {!report.respondIoAvailable ? (
                   <span title={report.respondIoError ?? undefined}>
                     respond.io message data unavailable
-                    {report.respondIoError ? `: ${report.respondIoError}` : ''}
                   </span>
                 ) : null}
               </div>
