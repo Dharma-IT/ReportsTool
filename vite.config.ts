@@ -1151,7 +1151,8 @@ function financeReportApi(
             searchAllHubSpotObjects<HubSpotDeal>('deals', {
               filterGroups: [{ filters: [
                 { propertyName: 'paid_date_all_pipelines', operator: 'BETWEEN', value: fromValue, highValue: toValue },
-                { propertyName: 'value_refund', operator: 'GT', value: '0' },
+                // HubSpot stores refunds as negative currency amounts.
+                { propertyName: 'value_refund', operator: 'LT', value: '0' },
               ] }],
               properties: ['dealname', 'amount', 'value_refund', 'refund_date_all_pipelines', 'paid_date_all_pipelines', 'hubspot_owner_id', 'type_refund', 'refund_notes', 'observation'],
             }, hubSpotToken),
@@ -1183,7 +1184,7 @@ function financeReportApi(
             const date = deal.properties.paid_date_all_pipelines?.slice(0, 10)
             if (date && new Date(`${date}T12:00:00Z`).getUTCDay() === 0) continue
             const week = date ? weeks.get(weekStart(date)) : undefined
-            if (week) week.refunds += finiteNumber(deal.properties.value_refund)
+            if (week) week.refunds += Math.abs(finiteNumber(deal.properties.value_refund))
           }
           const weekly = [...weeks.values()].map((week) => ({
             ...week,
@@ -1197,7 +1198,7 @@ function financeReportApi(
           }).map((deal) => {
             const paidDate = deal.properties.paid_date_all_pipelines?.slice(0, 10) || ''
             const saleAmount = ownerWeekSales.get(`${deal.properties.hubspot_owner_id ?? ''}|${weekStart(paidDate)}`) ?? 0
-            const refundAmount = finiteNumber(deal.properties.value_refund)
+            const refundAmount = Math.abs(finiteNumber(deal.properties.value_refund))
             return {
               id: deal.id,
               dealName: deal.properties.dealname || `Deal ${deal.id}`,
