@@ -12,6 +12,7 @@ const SALES_QUERY = `query SalesForSupplements($after: String, $search: String!)
         nodes {
           id
           name
+          product { title }
           quantity
           originalTotalSet { shopMoney { amount } }
           discountedTotalSet { shopMoney { amount } }
@@ -110,4 +111,114 @@ export async function fetchShopifySales(date) {
   } while (after)
 
   return { date, fetchedAt: new Date().toISOString(), rows }
+}
+
+export async function fetchHistoricalShopifyProductSales(toDate) {
+  validateDate(toDate)
+  const products = new Map()
+  let after = null
+
+  do {
+    const data = await shopifyGraphql(SALES_QUERY, {
+      after,
+      search: `created_at:<${nextDate(toDate)}`,
+    })
+    const orders = data.orders
+    for (const order of orders.nodes) {
+      const refunds = new Map()
+      for (const refund of order.refunds ?? []) {
+        for (const refundedItem of refund.refundLineItems?.nodes ?? []) {
+          const id = refundedItem.lineItem?.id
+          if (!id) continue
+          const current = refunds.get(id) ?? { quantity: 0, amount: 0 }
+          current.quantity += Number(refundedItem.quantity ?? 0)
+          current.amount += amount(refundedItem.subtotalSet)
+          refunds.set(id, current)
+        }
+      }
+      for (const item of order.lineItems.nodes) {
+        const productName = String(item.product?.title || item.name).trim()
+        const key = productName.toLowerCase()
+        const current = products.get(key) ?? { product: productName, qty: 0, sales_amount: 0 }
+        const returned = refunds.get(item.id) ?? { quantity: 0, amount: 0 }
+        current.qty += Math.max(0, Number(item.quantity) - returned.quantity)
+        current.sales_amount += amount(item.discountedTotalSet) - returned.amount
+        products.set(key, current)
+      }
+    }
+    after = orders.pageInfo.hasNextPage ? orders.pageInfo.endCursor : null
+  } while (after)
+
+  return [...products.values()]
+    .map((row) => ({ ...row, sales_amount: Math.round(row.sales_amount * 100) / 100 }))
+    .filter((row) => row.qty > 0 || Math.abs(row.sales_amount) >= 0.01)
+    .sort((left, right) => left.product.localeCompare(right.product))
+}
+
+function supabaseRestUrl() {
+  const configured = process.env.VITE_SUPABASE_URL?.trim()
+  if (!configured) throw new Error('VITE_SUPABASE_URL is not configured')
+  const normalized = configured.replace(/\/$/, '')
+  return normalized.endsWith('/rest/v1') ? normalized : `${normalized}/rest/v1`
+}
+
+function supabaseHeaders(extra = {}) {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+  if (!key) throw new Error('SUPABASE_SERVICE_ROLE_KEY is not configured')
+  return { apikey: key, Authorization: `Bearer ${key}`, ...extra }
+}
+
+export async function syncShopifySales(date) {
+  const report = await fetchShopifySales(date)
+  const response = await fetch(`${supabaseRestUrl()}/shopify_sales_reports?on_conflict=report_date`, {
+    method: 'POST',
+    headers: supabaseHeaders({ 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' }),
+    body: JSON.stringify({ report_date: date, report_data: report, fetched_at: report.fetchedAt }),
+  })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}))
+    throw new Error(payload.message || `Supabase save failed with ${response.status}`)
+  }
+  return report
+}
+
+export async function updateHistoricalShopifySales(toDate) {
+  validateDate(toDate)
+  const historicalRows = await fetchHistoricalShopifyProductSales(toDate)
+  const report = { throughDate: toDate, fetchedAt: new Date().toISOString(), historicalRows }
+  const response = await fetch(`${supabaseRestUrl()}/shopify_sales_history?on_conflict=report_key`, {
+    method: 'POST',
+    headers: supabaseHeaders({ 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' }),
+    body: JSON.stringify({ report_key: 'all-time', report_data: report, fetched_at: report.fetchedAt }),
+  })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}))
+    throw new Error(payload.message || `Supabase historical save failed with ${response.status}`)
+  }
+  return report
+}
+
+export async function getHistoricalShopifySales() {
+  const params = new URLSearchParams({ select: 'report_data', report_key: 'eq.all-time', limit: '1' })
+  const response = await fetch(`${supabaseRestUrl()}/shopify_sales_history?${params}`, { headers: supabaseHeaders() })
+  const payload = await response.json().catch(() => [])
+  if (!response.ok) throw new Error(payload.message || `Supabase historical report failed with ${response.status}`)
+  return payload[0]?.report_data ?? { historicalRows: [] }
+}
+
+export async function getSavedShopifySales(date) {
+  validateDate(date)
+  const params = new URLSearchParams({ select: 'report_data', report_date: `eq.${date}`, limit: '1' })
+  const response = await fetch(`${supabaseRestUrl()}/shopify_sales_reports?${params}`, { headers: supabaseHeaders() })
+  const payload = await response.json().catch(() => [])
+  if (!response.ok) throw new Error(payload.message || `Supabase history failed with ${response.status}`)
+  return payload[0]?.report_data ?? { date, rows: [] }
+}
+
+export async function getSavedShopifySalesDates() {
+  const params = new URLSearchParams({ select: 'report_date', order: 'report_date.asc', limit: '10000' })
+  const response = await fetch(`${supabaseRestUrl()}/shopify_sales_reports?${params}`, { headers: supabaseHeaders() })
+  const payload = await response.json().catch(() => [])
+  if (!response.ok) throw new Error(payload.message || `Supabase history failed with ${response.status}`)
+  return { dates: payload.map((row) => row.report_date).filter(Boolean) }
 }

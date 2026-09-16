@@ -37,6 +37,22 @@ type ShopifySalesRow = {
   product_name: string
 }
 
+type ShopifyHistoricalProductRow = {
+  product: string
+  qty: number
+  sales_amount: number
+}
+
+type AdsSummaryRow = Record<'meta' | 'google' | 'tiktok' | 'cogs' | 'shipping' | 'fulfillment' | 'processing', string> & { date: string }
+type AdsOrderRow = Record<'date' | 'order' | 'product' | 'qty' | 'unitPrice' | 'subtotal' | 'shipping' | 'fulfillment' | 'supliful' | 'shopify' | 'total' | 'status', string> & { id: string }
+
+const emptyAdsSummary = (date: string): AdsSummaryRow => ({ date, meta: '', google: '', tiktok: '', cogs: '', shipping: '', fulfillment: '', processing: '' })
+const emptyAdsOrder = (): AdsOrderRow => ({ id: crypto.randomUUID(), date: getToday(), order: '', product: '', qty: '', unitPrice: '', subtotal: '', shipping: '', fulfillment: '', supliful: '', shopify: '', total: '', status: '' })
+
+function readStoredRows<T>(key: string): T[] {
+  try { return JSON.parse(localStorage.getItem(key) ?? '[]') as T[] } catch { return [] }
+}
+
 const dailyExpenses = [
   'Meta Ads',
   'TikTok Ads',
@@ -71,6 +87,32 @@ const shopifyHeaders = [
   'Qty',
   'Sales',
   'Product Name',
+]
+
+const adsSummaryHeaders = [
+  'Date',
+  'Meta',
+  'Google',
+  'TikTok',
+  'COGS',
+  'Shipping',
+  'Fulfillment',
+  'Processing',
+]
+
+const adsOrderHeaders = [
+  'Date',
+  'Order',
+  'Product',
+  'Qty',
+  'Unit Price',
+  'Subtotal',
+  'Shipping',
+  'Fulfillment',
+  'Process. (Supliful)',
+  'Process. (Shopify)',
+  'Total',
+  'Status',
 ]
 
 type SupplementsView = 'daily' | 'ads' | 'cogs' | 'shopify' | 'orders' | 'sales'
@@ -135,10 +177,20 @@ export default function Supplements() {
   const [ordersError, setOrdersError] = useState('')
   const [ordersMessage, setOrdersMessage] = useState('')
   const [shopifyDate, setShopifyDate] = useState(getToday())
+  const [savedShopifyDates, setSavedShopifyDates] = useState<Set<string>>(new Set())
   const [shopifyRows, setShopifyRows] = useState<ShopifySalesRow[]>([])
+  const [shopifyHistoricalRows, setShopifyHistoricalRows] = useState<ShopifyHistoricalProductRow[]>([])
+  const [shopifyHistoryLoading, setShopifyHistoryLoading] = useState(false)
+  const [shopifyHistoryUpdatedAt, setShopifyHistoryUpdatedAt] = useState('')
   const [shopifyLoading, setShopifyLoading] = useState(false)
   const [shopifyError, setShopifyError] = useState('')
   const [shopifyMessage, setShopifyMessage] = useState('')
+  const [adsDate, setAdsDate] = useState(getToday())
+  const [adsRows, setAdsRows] = useState<AdsSummaryRow[]>(() => readStoredRows<AdsSummaryRow>('supplements-ads-summary'))
+  const [adsOrderRows, setAdsOrderRows] = useState<AdsOrderRow[]>(() => readStoredRows<AdsOrderRow>('supplements-ads-orders'))
+  const [adsCostsLoading, setAdsCostsLoading] = useState(false)
+  const [adsFeedback, setAdsFeedback] = useState('')
+  const [adsError, setAdsError] = useState('')
   const activeView = supplementViews.find((item) => item.key === view) ?? supplementViews[0]
 
   useEffect(() => {
@@ -148,6 +200,53 @@ export default function Supplements() {
       .then((payload: { dates?: string[] }) => setSavedOrderDates(new Set(payload.dates ?? [])))
       .catch(() => undefined)
   }, [view])
+
+  useEffect(() => {
+    if (view !== 'shopify') return
+    void Promise.all([
+      fetch(getApiUrl('/api/shopify/sales?dates=1')).then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to load saved dates'))),
+      fetch(getApiUrl('/api/shopify/sales?history=1')).then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to load historical sales'))),
+    ]).then(([dates, history]: [{ dates?: string[] }, { historicalRows?: ShopifyHistoricalProductRow[]; fetchedAt?: string }]) => {
+      setSavedShopifyDates(new Set(dates.dates ?? []))
+      setShopifyHistoricalRows(history.historicalRows ?? [])
+      setShopifyHistoryUpdatedAt(history.fetchedAt ?? '')
+    }).catch(() => undefined)
+  }, [view])
+
+  useEffect(() => { localStorage.setItem('supplements-ads-summary', JSON.stringify(adsRows)) }, [adsRows])
+  useEffect(() => { localStorage.setItem('supplements-ads-orders', JSON.stringify(adsOrderRows)) }, [adsOrderRows])
+
+  function updateAdsRow(date: string, field: keyof AdsSummaryRow, value: string) {
+    setAdsRows((rows) => {
+      const exists = rows.some((row) => row.date === date)
+      const next = exists ? rows : [...rows, emptyAdsSummary(date)]
+      return next.map((row) => row.date === date ? { ...row, [field]: value } : row).sort((a, b) => a.date.localeCompare(b.date))
+    })
+  }
+
+  async function fetchAdsCosts() {
+    setAdsCostsLoading(true); setAdsError(''); setAdsFeedback('')
+    const sources = [
+      { name: 'Meta', field: 'meta' as const, path: '/api/meta-ads/cost' },
+      { name: 'Google', field: 'google' as const, path: '/api/google-ads/cost' },
+    ]
+    const results = await Promise.all(sources.map(async (source) => {
+      const response = await fetch(getApiUrl(`${source.path}?date=${encodeURIComponent(adsDate)}`))
+      const payload = await response.json() as { cost?: number; message?: string }
+      if (!response.ok) throw new Error(`${source.name}: ${payload.message || `request failed (${response.status})`}`)
+      updateAdsRow(adsDate, source.field, Number(payload.cost ?? 0).toFixed(2))
+      return source.name
+    }).map((request) => request.then((name) => ({ name, error: '' })).catch((error: unknown) => ({ name: '', error: error instanceof Error ? error.message : 'Ad cost fetch failed.' }))))
+    const fetched = results.flatMap((result) => result.name ? [result.name] : [])
+    const errors = results.flatMap((result) => result.error ? [result.error] : [])
+    if (fetched.length) setAdsFeedback(`${fetched.join(' and ')} Ads cost for ${adsDate} was fetched and saved.`)
+    if (errors.length) setAdsError(errors.join(' '))
+    setAdsCostsLoading(false)
+  }
+
+  function updateAdsOrder(id: string, field: keyof AdsOrderRow, value: string) {
+    setAdsOrderRows((rows) => rows.map((row) => row.id === id ? { ...row, [field]: value } : row))
+  }
 
   async function fetchOrders() {
     setOrdersLoading(true)
@@ -225,7 +324,7 @@ export default function Supplements() {
         body: JSON.stringify({ date: shopifyDate }),
       })
       const responseText = await response.text()
-      let payload: { rows?: ShopifySalesRow[]; message?: string } = {}
+      let payload: { rows?: ShopifySalesRow[]; historicalRows?: ShopifyHistoricalProductRow[]; message?: string } = {}
       if (responseText) {
         try {
           payload = JSON.parse(responseText) as typeof payload
@@ -242,11 +341,54 @@ export default function Supplements() {
       if (!responseText) throw new Error('The Shopify sales endpoint returned an empty response.')
       const rows = payload.rows ?? []
       setShopifyRows(rows)
-      setShopifyMessage(`${rows.length} sales line item${rows.length === 1 ? '' : 's'} loaded.`)
+      setSavedShopifyDates((dates) => new Set(dates).add(shopifyDate))
+      setShopifyMessage(`${rows.length} sales line item${rows.length === 1 ? '' : 's'} fetched and saved.`)
     } catch (error) {
       setShopifyError(error instanceof Error ? error.message : 'Unable to fetch Shopify sales.')
     } finally {
       setShopifyLoading(false)
+    }
+  }
+
+  async function viewSavedShopifyReport() {
+    setShopifyLoading(true)
+    setShopifyError('')
+    setShopifyMessage('')
+    try {
+      const response = await fetch(getApiUrl(`/api/shopify/sales?date=${encodeURIComponent(shopifyDate)}`))
+      const payload = await response.json() as { rows?: ShopifySalesRow[]; historicalRows?: ShopifyHistoricalProductRow[]; message?: string }
+      if (!response.ok) throw new Error(payload.message || `Unable to view saved Shopify sales (${response.status}).`)
+      const rows = payload.rows ?? []
+      setShopifyRows(rows)
+      setShopifyMessage(rows.length
+        ? `${rows.length} saved sales line item${rows.length === 1 ? '' : 's'} loaded.`
+        : `Saved snapshot for ${shopifyDate} contains no sales.`)
+    } catch (error) {
+      setShopifyError(error instanceof Error ? error.message : 'Unable to view saved Shopify sales.')
+    } finally {
+      setShopifyLoading(false)
+    }
+  }
+
+  async function updateShopifyHistory() {
+    setShopifyHistoryLoading(true)
+    setShopifyError('')
+    setShopifyMessage('')
+    try {
+      const throughDate = getToday()
+      const response = await fetch(getApiUrl('/api/shopify/sales'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'history', date: throughDate }),
+      })
+      const payload = await response.json() as { historicalRows?: ShopifyHistoricalProductRow[]; fetchedAt?: string; message?: string }
+      if (!response.ok) throw new Error(payload.message || `Unable to update historical Shopify sales (${response.status}).`)
+      setShopifyHistoricalRows(payload.historicalRows ?? [])
+      setShopifyHistoryUpdatedAt(payload.fetchedAt ?? new Date().toISOString())
+      setShopifyMessage(`All Shopify product sales were updated through ${throughDate}.`)
+    } catch (error) {
+      setShopifyError(error instanceof Error ? error.message : 'Unable to update historical Shopify sales.')
+    } finally {
+      setShopifyHistoryLoading(false)
     }
   }
 
@@ -304,13 +446,60 @@ export default function Supplements() {
             </table>
           </div>
           <p className="supplements-note"><span /> No supplement data has been connected yet. Values will appear here once a source is available.</p>
-        </div></> : view === 'shopify' ? <section className="supplements-content" aria-labelledby="supplements-shopify-title">
+        </div></> : view === 'ads' ? <section className="supplements-content" aria-labelledby="supplements-ads-title">
+          <div className="supplements-table-heading">
+            <div><span>Advertising spend</span><h2 id="supplements-ads-title">ADS</h2></div>
+          </div>
+          <form className="supplements-ads-controls" onSubmit={(event) => { event.preventDefault(); void fetchAdsCosts() }}>
+            <label>Report date<input type="date" value={adsDate} onChange={(event) => setAdsDate(event.target.value)} /></label>
+            <button type="submit" disabled={adsCostsLoading || !adsDate}>{adsCostsLoading ? 'Fetching…' : 'Fetch ad costs'}</button>
+          </form>
+          {adsError ? <p className="supplements-orders-feedback error" role="alert">{adsError}</p> : null}
+          {adsFeedback ? <p className="supplements-orders-feedback success" role="status">{adsFeedback}</p> : null}
+          <div className="supplements-table-wrap">
+            <table className="supplements-ads-sheet supplements-ads-summary-table">
+              <caption>Advertising &amp; Cost Sheet</caption>
+              <thead><tr>{adsSummaryHeaders.map((header) => <th scope="col" key={header}>{header}</th>)}</tr></thead>
+              <tbody>{adsRows.length ? adsRows.map((row) => <tr key={row.date}>
+                <th scope="row">{new Date(`${row.date}T12:00:00`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' })}</th>
+                {(['meta', 'google', 'tiktok', 'cogs', 'shipping', 'fulfillment', 'processing'] as const).map((field) => <td key={field}><input aria-label={`${adsSummaryHeaders[(['meta', 'google', 'tiktok', 'cogs', 'shipping', 'fulfillment', 'processing'] as const).indexOf(field) + 1]} ${row.date}`} inputMode="decimal" value={row[field]} onChange={(event) => updateAdsRow(row.date, field, event.target.value)} placeholder="0.00" /></td>)}
+              </tr>) : <tr><td className="supplements-ads-empty" colSpan={adsSummaryHeaders.length}>Select a date and fetch Google cost to begin the report.</td></tr>}</tbody>
+            </table>
+          </div>
+          <div className="supplements-table-heading supplements-ads-detail-heading">
+            <div><span>Order costs</span><h2>Order-level breakdown</h2></div>
+            <button className="supplements-add-row" type="button" onClick={() => setAdsOrderRows((rows) => [...rows, emptyAdsOrder()])}>+ Add row</button>
+          </div>
+          <div className="supplements-table-wrap">
+            <table className="supplements-ads-sheet supplements-ads-orders-table">
+              <caption>Order Cost Detail</caption>
+              <thead><tr>{adsOrderHeaders.map((header) => <th scope="col" key={header}>{header}</th>)}<th aria-label="Actions" /></tr></thead>
+              <tbody>{adsOrderRows.length ? adsOrderRows.map((row) => <tr key={row.id}>{(['date', 'order', 'product', 'qty', 'unitPrice', 'subtotal', 'shipping', 'fulfillment', 'supliful', 'shopify', 'total', 'status'] as const).map((field, index) => <td key={field}><input aria-label={`${adsOrderHeaders[index]} row`} type={field === 'date' ? 'date' : 'text'} inputMode={['qty', 'unitPrice', 'subtotal', 'shipping', 'fulfillment', 'supliful', 'shopify', 'total'].includes(field) ? 'decimal' : undefined} value={row[field]} onChange={(event) => updateAdsOrder(row.id, field, event.target.value)} /></td>)}<td className="supplements-delete-cell"><button type="button" aria-label="Delete order row" onClick={() => setAdsOrderRows((rows) => rows.filter((item) => item.id !== row.id))}>×</button></td></tr>) : <tr><td className="supplements-ads-empty" colSpan={adsOrderHeaders.length + 1}>Add a row to enter order costs.</td></tr>}</tbody>
+            </table>
+          </div>
+        </section> : view === 'shopify' ? <section className="supplements-content" aria-labelledby="supplements-shopify-title">
           <div className="supplements-table-heading">
             <div><span>Shopify export</span><h2 id="supplements-shopify-title">Shopify</h2></div>
           </div>
+          <div className="supplements-shopify-history-actions">
+            <div><strong>All-time product sales</strong><small>{shopifyHistoryUpdatedAt ? `Last updated ${new Date(shopifyHistoryUpdatedAt).toLocaleString()}` : 'No saved update yet'}</small></div>
+            <button type="button" onClick={() => void updateShopifyHistory()} disabled={shopifyHistoryLoading}>{shopifyHistoryLoading ? 'Updating…' : 'Update'}</button>
+          </div>
+          {shopifyError ? <p className="supplements-orders-feedback error" role="alert">{shopifyError}</p> : null}
+          {shopifyMessage ? <p className="supplements-orders-feedback success" role="status">{shopifyMessage}</p> : null}
+          <div className="supplements-table-wrap supplements-shopify-history-wrap">
+            <table className="supplements-shopify-history-table">
+              <caption>Dharma Shopify Sales</caption>
+              <thead><tr><th scope="col">Product</th><th scope="col">Qty.</th><th scope="col">Sales Amount</th></tr></thead>
+              <tbody>{shopifyHistoricalRows.length ? shopifyHistoricalRows.map((row) => <tr key={row.product}>
+                <td>{row.product}</td><td>{row.qty}</td><td>{row.sales_amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</td>
+              </tr>) : <tr><td className="supplements-ads-empty" colSpan={3}>Select Update to import all historical Shopify product sales.</td></tr>}</tbody>
+            </table>
+          </div>
+          <div className="supplements-table-heading supplements-shopify-detail-heading"><div><span>Selected date</span><h2>Daily Shopify detail</h2></div></div>
           <form className="supplements-orders-filter" onSubmit={(event) => { event.preventDefault(); void fetchShopifyReport() }}>
             <div className="supplements-orders-date-control"><span>Report date</span>
-              <OrderCalendar selected={shopifyDate} savedDates={new Set()} onSelect={(date) => {
+              <OrderCalendar selected={shopifyDate} savedDates={savedShopifyDates} onSelect={(date) => {
                 setShopifyDate(date)
                 setShopifyRows([])
                 setShopifyMessage('')
@@ -318,9 +507,8 @@ export default function Supplements() {
               }} />
             </div>
             <button type="submit" disabled={shopifyLoading}>{shopifyLoading ? 'Working…' : 'Fetch Shopify'}</button>
+            <button className="view" type="button" onClick={() => void viewSavedShopifyReport()} disabled={shopifyLoading}>View</button>
           </form>
-          {shopifyError ? <p className="supplements-orders-feedback error" role="alert">{shopifyError}</p> : null}
-          {shopifyMessage ? <p className="supplements-orders-feedback success" role="status">{shopifyMessage}</p> : null}
           <div className="supplements-table-wrap">
             <table className="supplements-table supplements-orders-table supplements-shopify-table">
               <thead><tr>{shopifyHeaders.map((header) => <th scope="col" key={header}>{header}</th>)}</tr></thead>

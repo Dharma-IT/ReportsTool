@@ -88,6 +88,25 @@ create table if not exists public.refund_reports (
   constraint refund_reports_data_is_object check (jsonb_typeof(report_data) = 'object')
 );
 
+create table if not exists public.shopify_sales_reports (
+  report_date date primary key,
+  report_data jsonb not null,
+  fetched_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint shopify_sales_reports_data_is_object check (jsonb_typeof(report_data) = 'object')
+);
+
+create table if not exists public.shopify_sales_history (
+  report_key text primary key default 'all-time',
+  report_data jsonb not null,
+  fetched_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint shopify_sales_history_singleton check (report_key = 'all-time'),
+  constraint shopify_sales_history_data_is_object check (jsonb_typeof(report_data) = 'object')
+);
+
 create index if not exists aircall_call_events_call_timeline_idx
 on public.aircall_call_events (call_id, event_timestamp desc);
 
@@ -137,6 +156,22 @@ create trigger set_refund_reports_updated_at
 before update on public.refund_reports
 for each row
 execute function public.set_updated_at();
+
+drop trigger if exists set_shopify_sales_reports_updated_at on public.shopify_sales_reports;
+create trigger set_shopify_sales_reports_updated_at
+before update on public.shopify_sales_reports
+for each row
+execute function public.set_updated_at();
+
+alter table public.shopify_sales_reports enable row level security;
+
+drop trigger if exists set_shopify_sales_history_updated_at on public.shopify_sales_history;
+create trigger set_shopify_sales_history_updated_at
+before update on public.shopify_sales_history
+for each row
+execute function public.set_updated_at();
+
+alter table public.shopify_sales_history enable row level security;
 
 -- Refund snapshots are server-only because they contain deal-level data.
 

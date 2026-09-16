@@ -6,7 +6,9 @@ import { promisify } from 'node:util'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { fetchShopifySupplementContacts, getSavedShopifyOrderDates, getSavedShopifyOrders, syncShopifyOrders } from './api/_lib/shopify-orders.js'
-import { fetchShopifySales } from './api/_lib/shopify-sales.js'
+import { getHistoricalShopifySales, getSavedShopifySales, getSavedShopifySalesDates, syncShopifySales, updateHistoricalShopifySales } from './api/_lib/shopify-sales.js'
+import { fetchGoogleAdsCost } from './api/_lib/google-ads.js'
+import { fetchMetaAdsCost } from './api/_lib/meta-ads.js'
 
 const execFileAsync = promisify(execFile)
 const ACCOUNT_ID = 'act_653630476536860'
@@ -3326,8 +3328,8 @@ function shopifySalesApi(env: Record<string, string>): Plugin {
     name: 'shopify-sales-api',
     configureServer(server) {
       server.middlewares.use('/api/shopify/sales', async (request, response) => {
-        if (request.method !== 'POST') {
-          response.setHeader('Allow', 'POST')
+        if (!['GET', 'POST'].includes(request.method ?? '')) {
+          response.setHeader('Allow', 'GET, POST')
           return sendJson(response, 405, { message: 'Method not allowed' })
         }
 
@@ -3336,14 +3338,77 @@ function shopifySalesApi(env: Record<string, string>): Plugin {
           process.env.SHOPIFY_CLIENT_ID = env.SHOPIFY_CLIENT_ID || process.env.SHOPIFY_CLIENT_ID || ''
           process.env.SHOPIFY_CLIENT_SECRET = env.SHOPIFY_CLIENT_SECRET || process.env.SHOPIFY_CLIENT_SECRET || ''
           process.env.SHOPIFY_API_VERSION = env.SHOPIFY_API_VERSION || process.env.SHOPIFY_API_VERSION || ''
-          const body = await readJsonRequest<{ date?: string }>(request)
-          const result = await fetchShopifySales(body.date ?? '')
+          process.env.VITE_SUPABASE_URL = env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
+          process.env.SUPABASE_SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+          const requestUrl = new URL(request.url ?? '', 'http://localhost')
+          const result = request.method === 'GET'
+            ? requestUrl.searchParams.get('history') === '1'
+              ? await getHistoricalShopifySales()
+              : requestUrl.searchParams.get('dates') === '1'
+              ? await getSavedShopifySalesDates()
+              : await getSavedShopifySales(requestUrl.searchParams.get('date') ?? '')
+            : await (async () => {
+              const body = await readJsonRequest<{ date?: string; mode?: string }>(request)
+              return body.mode === 'history'
+                ? await updateHistoricalShopifySales(body.date ?? '')
+                : await syncShopifySales(body.date ?? '')
+            })()
           response.setHeader('Cache-Control', 'no-store')
           return sendJson(response, 200, result)
         } catch (error) {
           return sendJson(response, 502, {
             message: error instanceof Error ? error.message : 'Unable to fetch Shopify sales.',
           })
+        }
+      })
+    },
+  }
+}
+
+function googleAdsCostApi(env: Record<string, string>): Plugin {
+  return {
+    name: 'google-ads-cost-api',
+    configureServer(server) {
+      server.middlewares.use('/api/google-ads/cost', async (request, response) => {
+        if (request.method !== 'GET') {
+          response.setHeader('Allow', 'GET')
+          return sendJson(response, 405, { message: 'Method not allowed' })
+        }
+        try {
+          for (const name of ['GOOGLE_ADS_CLIENT_ID', 'GOOGLE_ADS_CLIENT_SECRET', 'GOOGLE_ADS_REFRESH_TOKEN', 'GOOGLE_ADS_CUSTOMER_ID', 'GOOGLE_ADS_DEVELOPER_TOKEN', 'GOOGLE_ADS_LOGIN_CUSTOMER_ID']) {
+            process.env[name] = env[name] || process.env[name] || ''
+          }
+          const requestUrl = new URL(request.url ?? '', 'http://localhost')
+          const result = await fetchGoogleAdsCost(requestUrl.searchParams.get('date') ?? '')
+          response.setHeader('Cache-Control', 'no-store')
+          return sendJson(response, 200, result)
+        } catch (error) {
+          return sendJson(response, 502, { message: error instanceof Error ? error.message : 'Unable to fetch Google Ads cost.' })
+        }
+      })
+    },
+  }
+}
+
+function metaAdsCostApi(env: Record<string, string>): Plugin {
+  return {
+    name: 'supplements-meta-ads-cost-api',
+    configureServer(server) {
+      server.middlewares.use('/api/meta-ads/cost', async (request, response) => {
+        if (request.method !== 'GET') {
+          response.setHeader('Allow', 'GET')
+          return sendJson(response, 405, { message: 'Method not allowed' })
+        }
+        try {
+          process.env.META_USER_TOKEN = env.META_USER_TOKEN || process.env.META_USER_TOKEN || ''
+          process.env.META_APP_ID = env.META_APP_ID || process.env.META_APP_ID || ''
+          process.env.AD_ACCOUNT_ID = env.AD_ACCOUNT_ID || process.env.AD_ACCOUNT_ID || ''
+          const requestUrl = new URL(request.url ?? '', 'http://localhost')
+          const result = await fetchMetaAdsCost(requestUrl.searchParams.get('date') ?? '')
+          response.setHeader('Cache-Control', 'no-store')
+          return sendJson(response, 200, result)
+        } catch (error) {
+          return sendJson(response, 502, { message: error instanceof Error ? error.message : 'Unable to fetch Meta Ads cost.' })
         }
       })
     },
@@ -3365,6 +3430,8 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       react(),
+      metaAdsCostApi(env),
+      googleAdsCostApi(env),
       shopifySalesApi(env),
       shopifyOrdersApi(env),
       acAutomationApi(env.STRIPE_SECRET_KEY ?? ''),
