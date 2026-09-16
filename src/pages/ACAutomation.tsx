@@ -8,11 +8,11 @@ type StripeStatus = 'failed' | 'expired' | 'incomplete'
 const stripeStatuses: StripeStatus[] = ['failed', 'expired', 'incomplete']
 
 const columns: Column[] = [
-  { key: 'email', label: 'Email', width: 230 }, { key: 'firstName', label: 'First Name', width: 125 },
-  { key: 'lastName', label: 'Last Name', width: 125 }, { key: 'preference', label: 'Preference', width: 118, dropdown: true },
-  { key: 'phone', label: 'Phone Number', width: 155 }, { key: 'treatment', label: 'Desired Treatment', width: 245, dropdown: true },
-  { key: 'source', label: 'Imported Source', width: 200, dropdown: true }, { key: 'owner', label: 'Contact owner', width: 190 },
-  { key: 'dealDate', label: 'Date for Deal', width: 145 },
+  { key: 'email', label: 'Email', width: 190 }, { key: 'firstName', label: 'First Name', width: 100 },
+  { key: 'lastName', label: 'Last Name', width: 110 }, { key: 'preference', label: 'Preference', width: 80, dropdown: true },
+  { key: 'phone', label: 'Phone Number', width: 125 }, { key: 'treatment', label: 'Desired Treatment', width: 175, dropdown: true },
+  { key: 'source', label: 'Imported Source', width: 145, dropdown: true }, { key: 'owner', label: 'Contact owner', width: 145 },
+  { key: 'dealDate', label: 'Date for Deal', width: 100 },
 ]
 const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
 const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
@@ -46,7 +46,6 @@ function ACAutomation() {
   const [statuses, setStatuses] = useState<StripeStatus[]>(stripeStatuses)
   const exportMenu = useRef<HTMLDivElement>(null)
   const filteredRows = useMemo(() => { const term = query.trim().toLowerCase(); return term ? rows.filter((row) => Object.values(row).some((value) => value.toLowerCase().includes(term))) : rows }, [query, rows])
-  const visibleRowCount = Math.max(17, filteredRows.length)
 
   useEffect(() => { const close = (event: MouseEvent) => { if (!exportMenu.current?.contains(event.target as Node)) setExportOpen(false) }; document.addEventListener('mousedown', close); return () => document.removeEventListener('mousedown', close) }, [])
 
@@ -60,8 +59,8 @@ function ACAutomation() {
       if (!response.ok) throw new Error(payload.message || 'Unable to load abandoned carts.')
       setRows((payload.contacts ?? []).map((contact, index) => ({
         email: contact.email, firstName: contact.firstName, lastName: contact.lastName,
-        preference: '', phone: contact.phone ? `+${contact.phone}` : '', treatment: '',
-        source: 'Stripe', owner: contactOwners[index % contactOwners.length], dealDate: displayDate(date),
+        preference: 'es', phone: contact.phone ? `+${contact.phone}` : '', treatment: 'Compounded Tirzepatide/B12/Gycine',
+        source: 'Abandoned Cart', owner: contactOwners[index % contactOwners.length], dealDate: displayDate(date),
       })))
       const recovered = Object.entries(payload.phoneRecovery ?? {}).filter(([source]) => source !== 'unavailable').map(([source, count]) => `${count} via ${source.replaceAll('_', ' ')}`).join(', ')
       setSummary(`${payload.message || `${payload.contacts?.length ?? 0} unique contacts imported. ${payload.unavailablePhones ?? 0} phone numbers unavailable.`}${recovered ? ` Phone recovery: ${recovered}.` : ''}`)
@@ -119,18 +118,18 @@ function ACAutomation() {
       </div></div>
       {summary ? <div className="ac-sheet-notice" role="status">{summary}</div> : null}
       {error ? <div className="ac-sheet-error" role="alert">{error}</div> : null}
-      <div className="ac-spreadsheet-wrap"><table className="ac-spreadsheet" style={{ minWidth: columns.reduce((sum, column) => sum + column.width, 42) }}><colgroup><col style={{ width: 42 }} />{columns.map((column) => <col key={column.key} style={{ width: column.width }} />)}</colgroup><thead><tr className="ac-letter-row"><th />{columns.map((column, index) => <th key={column.key}>{letters[index]}</th>)}</tr><tr className="ac-heading-row"><th>1</th>{columns.map((column) => <th key={column.key}><span>{column.label}</span><button type="button" onClick={() => setFiltering(true)}><FilterIcon /></button></th>)}</tr></thead><tbody>{Array.from({ length: visibleRowCount }, (_, index) => { const row = filteredRows[index]; return <tr key={index}><th>{index + 2}</th>{columns.map((column) => <td key={column.key}>{row?.[column.key] ?? (!row && column.dropdown ? <span className="ac-dropdown-cell"><i /></span> : '')}</td>)}</tr> })}</tbody></table>
+      <div className="ac-spreadsheet-wrap"><table className="ac-spreadsheet" style={{ minWidth: columns.reduce((sum, column) => sum + column.width, 38) }}><colgroup><col style={{ width: 38 }} />{columns.map((column) => <col key={column.key} style={{ width: column.width }} />)}</colgroup><thead><tr className="ac-letter-row"><th />{columns.map((column, index) => <th key={column.key}>{letters[index]}</th>)}</tr><tr className="ac-heading-row"><th>1</th>{columns.map((column) => <th key={column.key}><span>{column.label}</span><button type="button" onClick={() => setFiltering(true)}><FilterIcon /></button></th>)}</tr></thead><tbody>{filteredRows.map((row, index) => <tr key={`${row.email}-${index}`}><th>{index + 2}</th>{columns.map((column) => <td key={column.key}>{row[column.key] ?? ''}</td>)}</tr>)}</tbody></table>
         {!loading && !filteredRows.length ? <div className="ac-sheet-empty"><strong>{query ? 'No matching contacts' : 'No contacts'}</strong><p>{query ? `No contacts match “${query}”.` : error ? 'Correct the issue above and apply the date filter again.' : 'Choose an EST date and click Apply.'}</p></div> : null}
-      </div><footer className="ac-sheet-footer"><span><i /> {loading ? 'Syncing Stripe' : 'Sheet ready'}</span><small>{filteredRows.length} records · 9 columns</small></footer>
+      </div>
     </section>
     </> : <>
       <header className="ac-sheet-hero"><div><span className="ac-eyebrow"><i /> Customer recovery</span><h1>CS Supplements</h1><p>Supplement abandoned checkouts, ready for follow-up.</p></div><div className="ac-sheet-summary"><div><span>Total contacts</span><strong>{supplementRows.length}</strong></div><div><span>Source</span><strong>Shopify</strong></div><i /><small>{supplementLoading ? 'Loading checkouts...' : 'Billing phone · shipping name'}</small></div></header>
       <section className="ac-sheet-card" aria-labelledby="ac-supplements-title">
         <div className="ac-sheet-toolbar"><div><span>SHOPIFY ABANDONED CHECKOUTS</span><h2 id="ac-supplements-title">Supplement recovery contacts</h2></div><div className="ac-sheet-actions"><label className="ac-date-field">Date equals <input type="date" value={supplementDate} onChange={(event) => setSupplementDate(event.target.value)} /></label><button type="button" onClick={loadSupplementContacts} disabled={supplementLoading || !supplementDate}>{supplementLoading ? 'Loading...' : 'Apply'}</button><div className="ac-export-menu" ref={exportMenu}><button type="button" disabled={!supplementRows.length} aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)}>Export <span>⌄</span></button>{exportOpen ? <div className="ac-export-options" role="menu"><button type="button" onClick={exportSupplementCsv}><b>CSV</b><span>.csv</span><small>Comma-separated values</small></button><button type="button" onClick={exportSupplementExcel}><b>Excel</b><span>.xls</span><small>Microsoft Excel workbook</small></button></div> : null}</div></div></div>
         {supplementError ? <div className="ac-sheet-error" role="alert">{supplementError}</div> : null}
-        <div className="ac-spreadsheet-wrap"><table className="ac-spreadsheet" style={{ minWidth: columns.reduce((sum, column) => sum + column.width, 42) }}><colgroup><col style={{ width: 42 }} />{columns.map((column) => <col key={column.key} style={{ width: column.width }} />)}</colgroup><thead><tr className="ac-letter-row"><th />{columns.map((column, index) => <th key={column.key}>{letters[index]}</th>)}</tr><tr className="ac-heading-row"><th>1</th>{columns.map((column) => <th key={column.key}><span>{column.label}</span><button type="button" aria-label={`Filter ${column.label}`}><FilterIcon /></button></th>)}</tr></thead><tbody>{Array.from({ length: Math.max(17, supplementRows.length) }, (_, index) => { const row = supplementRows[index]; return <tr key={index}><th>{index + 2}</th>{columns.map((column) => <td key={column.key}>{row?.[column.key] ?? (!row && column.dropdown ? <span className="ac-dropdown-cell"><i /></span> : '')}</td>)}</tr> })}</tbody></table>
+        <div className="ac-spreadsheet-wrap"><table className="ac-spreadsheet" style={{ minWidth: columns.reduce((sum, column) => sum + column.width, 38) }}><colgroup><col style={{ width: 38 }} />{columns.map((column) => <col key={column.key} style={{ width: column.width }} />)}</colgroup><thead><tr className="ac-letter-row"><th />{columns.map((column, index) => <th key={column.key}>{letters[index]}</th>)}</tr><tr className="ac-heading-row"><th>1</th>{columns.map((column) => <th key={column.key}><span>{column.label}</span><button type="button" aria-label={`Filter ${column.label}`}><FilterIcon /></button></th>)}</tr></thead><tbody>{supplementRows.map((row, index) => <tr key={`${row.email}-${index}`}><th>{index + 2}</th>{columns.map((column) => <td key={column.key}>{row[column.key] ?? ''}</td>)}</tr>)}</tbody></table>
           {!supplementLoading && !supplementRows.length ? <div className="ac-sheet-empty"><strong>No contacts</strong><p>Select a date and click Apply to load Shopify orders.</p></div> : null}
-        </div><footer className="ac-sheet-footer"><span><i /> {supplementLoading ? 'Syncing Shopify' : 'Sheet ready'}</span><small>{supplementRows.length} records · 9 columns</small></footer>
+        </div>
       </section>
     </>}
     </section>
