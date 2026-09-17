@@ -54,7 +54,7 @@ type SavedDailyReport = {
 
 const teamStaff: Record<DailySection, string[]> = {
   CS: ['Arles Martinez', 'Aline Strelow', 'Brayam Zuluaga', 'Edmilson Morales'],
-  Sales: ['Andres Castro', 'Maria Claudia', 'Erika Vargas', 'Meribet Yazziet', 'Ailin Isabel'],
+  Sales: ['Maria Claudia', 'Erika Vargas', 'Meribet Yazziet'],
 }
 
 function emptyRows(team: DailySection): DailyRow[] {
@@ -219,7 +219,7 @@ function Daily() {
         if (cached) {
           const saved = JSON.parse(cached) as SavedDailyReport
           if (saved.team === activeSection && saved.fromDate === fromDate && saved.toDate === toDate && Array.isArray(saved.rows)) {
-            setRows(saved.rows); setSourceWarning(saved.sourceWarning ?? ''); setHasLiveData(true); setReportSource('saved'); setError(''); return
+            setRows(saved.rows.filter((row) => teamStaff[activeSection].includes(row.staff))); setSourceWarning(saved.sourceWarning ?? ''); setHasLiveData(true); setReportSource('saved'); setError(''); return
           }
         }
       } catch { /* No browser cache is available. */ }
