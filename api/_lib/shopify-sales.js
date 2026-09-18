@@ -5,8 +5,11 @@ const EARLIEST_DATE = '2026-09-01'
 const SALES_QUERY = `query SalesForSupplements($after: String, $search: String!) {
   orders(first: 100, after: $after, sortKey: CREATED_AT, query: $search) {
     nodes {
+      legacyResourceId
       name
+      createdAt
       currentTotalPriceSet { shopMoney { amount } }
+      currentTotalTaxSet { shopMoney { amount } }
       totalShippingPriceSet { shopMoney { amount } }
       lineItems(first: 100) {
         nodes {
@@ -19,6 +22,7 @@ const SALES_QUERY = `query SalesForSupplements($after: String, $search: String!)
         }
       }
       refunds {
+        totalRefundedSet { shopMoney { amount } }
         refundLineItems(first: 100) {
           nodes {
             quantity
@@ -90,10 +94,30 @@ export async function fetchShopifySales(date) {
       const grossSales = order.lineItems.nodes.reduce((sum, item) => sum + amount(item.originalTotalSet), 0)
       const discountedSales = order.lineItems.nodes.reduce((sum, item) => sum + amount(item.discountedTotalSet), 0)
       const returns = [...refundByLineItem.values()].reduce((sum, value) => sum + value, 0)
+      const totalRefunded = (order.refunds ?? []).reduce((sum, refund) => sum + amount(refund.totalRefundedSet), 0)
+      const returnFees = Math.max(0, totalRefunded - returns)
 
       order.lineItems.nodes.forEach((item, index) => {
+        const lineGross = amount(item.originalTotalSet)
+        const lineDiscounted = amount(item.discountedTotalSet)
+        const lineReturns = refundByLineItem.get(item.id) ?? 0
+        const shipping = index === 0 ? amount(order.totalShippingPriceSet) : 0
+        const taxes = index === 0 ? amount(order.currentTotalTaxSet) : 0
+        const lineReturnFees = index === 0 ? returnFees : 0
         rows.push({
           id: `${order.name}-${item.id}`,
+          day: order.createdAt.slice(0, 10),
+          sale_id: String(order.legacyResourceId),
+          order_name: order.name,
+          product_title: item.product?.title || item.name,
+          line_gross_sales: lineGross,
+          line_discounts: -(lineGross - lineDiscounted),
+          line_returns: -lineReturns,
+          line_net_sales: lineDiscounted - lineReturns,
+          line_shipping_charges: shipping,
+          line_return_fees: -lineReturnFees,
+          line_taxes: taxes,
+          line_total_sales: lineDiscounted - lineReturns + shipping - lineReturnFees + taxes,
           name: index === 0 ? order.name : '',
           gross_sales: index === 0 ? grossSales : null,
           discounts: index === 0 ? -(grossSales - discountedSales) : null,

@@ -1,5 +1,17 @@
 export type ShopifySalesRow = {
   id: string
+  day: string
+  sale_id: string
+  order_name: string
+  product_title: string
+  line_gross_sales: number
+  line_discounts: number
+  line_returns: number
+  line_net_sales: number
+  line_shipping_charges: number
+  line_return_fees: number
+  line_taxes: number
+  line_total_sales: number
   name: string
   gross_sales: number | null
   discounts: number | null

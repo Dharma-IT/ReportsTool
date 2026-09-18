@@ -25,6 +25,18 @@ type ShopifyOrderRow = {
 
 type ShopifySalesRow = {
   id: string
+  day: string
+  sale_id: string
+  order_name: string
+  product_title: string
+  line_gross_sales: number
+  line_discounts: number
+  line_returns: number
+  line_net_sales: number
+  line_shipping_charges: number
+  line_return_fees: number
+  line_taxes: number
+  line_total_sales: number
   name: string
   gross_sales: number | null
   discounts: number | null
@@ -50,7 +62,7 @@ type ShopifyCogsRow = {
   product: string
   qty: number
   unit_price: number | null
-  subtotal: number
+  subtotal: number | null
   shipping: number
   fulfillment_supliful: number
   processing_supliful: number
@@ -102,6 +114,8 @@ const shopifyHeaders = [
   'Sales',
   'Product Name',
 ]
+
+const totalSalesHeaders = ['Day', 'Sale ID', 'Order name', 'Product title', 'Gross sales', 'Discounts', 'Returns', 'Net sales', 'Shipping charges', 'Return fees', 'Taxes', 'Total sales']
 
 const adsSummaryHeaders = [
   'Date',
@@ -187,6 +201,11 @@ export default function Supplements() {
   const [shopifyLoading, setShopifyLoading] = useState(false)
   const [shopifyError, setShopifyError] = useState('')
   const [shopifyMessage, setShopifyMessage] = useState('')
+  const [totalSalesDate, setTotalSalesDate] = useState(getToday())
+  const [totalSalesRows, setTotalSalesRows] = useState<ShopifySalesRow[]>([])
+  const [totalSalesLoading, setTotalSalesLoading] = useState(false)
+  const [totalSalesMessage, setTotalSalesMessage] = useState('')
+  const [totalSalesError, setTotalSalesError] = useState('')
   const [adsDate, setAdsDate] = useState(getToday())
   const [adsRows, setAdsRows] = useState<AdsSummaryRow[]>(() => readStoredRows<AdsSummaryRow>('supplements-ads-summary'))
   const [adsCostsLoading, setAdsCostsLoading] = useState(false)
@@ -209,7 +228,7 @@ export default function Supplements() {
   }, [view])
 
   useEffect(() => {
-    if (view !== 'shopify') return
+    if (view !== 'shopify' && view !== 'sales') return
     void Promise.all([
       fetch(getApiUrl('/api/shopify/sales?dates=1')).then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to load saved dates'))),
       fetch(getApiUrl('/api/shopify/sales?history=1')).then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to load historical sales'))),
@@ -273,9 +292,13 @@ export default function Supplements() {
     setCogsRows((rows) => rows.map((row) => {
       if (row.id !== id) return row
       const numericField = cogsNumericFields.includes(field as typeof cogsNumericFields[number])
-      const next = { ...row, [field]: numericField ? (field === 'unit_price' && value === '' ? null : Number(value) || 0) : value }
+      const nullableCostField = field === 'unit_price' || field === 'subtotal'
+      const next = { ...row, [field]: numericField ? (nullableCostField && value === '' ? null : Number(value) || 0) : value }
+      if (field === 'unit_price' || field === 'qty') {
+        next.subtotal = next.unit_price == null ? null : Math.round(next.unit_price * next.qty * 100) / 100
+      }
       if (field !== 'total' && cogsNumericFields.includes(field as typeof cogsNumericFields[number])) {
-        next.total = Math.round((next.subtotal + next.shipping + next.fulfillment_supliful + next.processing_supliful + next.processing_shopify) * 100) / 100
+        next.total = Math.round(((next.subtotal ?? 0) + next.shipping + next.fulfillment_supliful + next.processing_supliful + next.processing_shopify) * 100) / 100
       }
       return next
     }))
@@ -424,6 +447,23 @@ export default function Supplements() {
     }
   }
 
+  async function requestTotalSales(mode: 'fetch' | 'view') {
+    setTotalSalesLoading(true); setTotalSalesError(''); setTotalSalesMessage('')
+    try {
+      const response = await fetch(getApiUrl(mode === 'fetch' ? '/api/shopify/sales' : `/api/shopify/sales?date=${encodeURIComponent(totalSalesDate)}`), mode === 'fetch' ? {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: totalSalesDate }),
+      } : undefined)
+      const payload = await response.json() as { rows?: ShopifySalesRow[]; message?: string }
+      if (!response.ok) throw new Error(payload.message || `Unable to ${mode} total sales (${response.status}).`)
+      const rows = payload.rows ?? []
+      setTotalSalesRows(rows)
+      if (mode === 'fetch') setSavedShopifyDates((dates) => new Set(dates).add(totalSalesDate))
+      setTotalSalesMessage(rows.length ? `${rows.length} sales line items ${mode === 'fetch' ? 'fetched and saved' : 'loaded'}.` : `No saved Shopify sales exist for ${totalSalesDate}.`)
+    } catch (error) {
+      setTotalSalesError(error instanceof Error ? error.message : 'Unable to load total sales by order.')
+    } finally { setTotalSalesLoading(false) }
+  }
+
   async function updateShopifyHistory() {
     setShopifyHistoryLoading(true)
     setShopifyError('')
@@ -542,7 +582,7 @@ export default function Supplements() {
                 <td><input aria-label="Date" type="date" value={row.date} onChange={(event) => updateCogsRow(row.id, 'date', event.target.value)} /></td>
                 <td><input aria-label="Order" value={row.order} onChange={(event) => updateCogsRow(row.id, 'order', event.target.value)} /></td>
                 <td><input aria-label="Product" value={row.product} onChange={(event) => updateCogsRow(row.id, 'product', event.target.value)} /></td>
-                {cogsNumericFields.map((field) => <td key={field}><input aria-label={cogsHeaders[cogsNumericFields.indexOf(field) + 3]} type="number" inputMode="decimal" step={field === 'qty' ? '1' : '0.01'} value={row[field] ?? ''} onChange={(event) => updateCogsRow(row.id, field, event.target.value)} /></td>)}
+                {cogsNumericFields.map((field) => <td key={field}><input aria-label={cogsHeaders[cogsNumericFields.indexOf(field) + 3]} type="number" inputMode="decimal" step={field === 'qty' ? '1' : '0.01'} value={row[field] ?? ''} readOnly={field === 'subtotal'} onChange={(event) => updateCogsRow(row.id, field, event.target.value)} /></td>)}
               </tr>) : <tr><td className="supplements-ads-empty" colSpan={cogsHeaders.length}>Choose a date and fetch Shopify orders, or view a saved date.</td></tr>}</tbody>
             </table>
           </div>
@@ -635,6 +675,33 @@ export default function Supplements() {
             </table>
           </div>
           <p className="supplements-note"><span /> Fetch replaces that date's saved snapshot. View loads historical data without contacting Shopify.</p>
+        </section> : view === 'sales' ? <section className="supplements-content" aria-labelledby="supplements-total-sales-title">
+          <div className="supplements-table-heading">
+            <div><span>Shopify orders</span><h2 id="supplements-total-sales-title">Total sales by order</h2></div>
+          </div>
+          <form className="supplements-orders-filter" onSubmit={(event) => { event.preventDefault(); void requestTotalSales('fetch') }}>
+            <div className="supplements-orders-date-control"><span>Order date</span>
+              <OrderCalendar selected={totalSalesDate} savedDates={savedShopifyDates} onSelect={(date) => { setTotalSalesDate(date); setTotalSalesRows([]); setTotalSalesMessage(''); setTotalSalesError('') }} />
+            </div>
+            <button type="submit" disabled={totalSalesLoading}>{totalSalesLoading ? 'Working…' : 'Fetch Shopify'}</button>
+            <button className="view" type="button" onClick={() => void requestTotalSales('view')} disabled={totalSalesLoading}>View</button>
+          </form>
+          {totalSalesError ? <p className="supplements-orders-feedback error" role="alert">{totalSalesError}</p> : null}
+          {totalSalesMessage ? <p className="supplements-orders-feedback success" role="status">{totalSalesMessage}</p> : null}
+          <div className="supplements-table-wrap">
+            <table className="supplements-table supplements-orders-table supplements-total-sales-table">
+              <thead><tr>{totalSalesHeaders.map((header) => <th scope="col" key={header}>{header}</th>)}</tr></thead>
+              <tbody>{totalSalesRows.length ? totalSalesRows.map((row) => <tr key={row.id}>
+                <td>{row.day ? new Date(`${row.day}T12:00:00`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : ''}</td>
+                <td>{row.sale_id}</td><td>{row.order_name}</td><td title={row.product_title}>{row.product_title}</td>
+                <td>{formatShopifyAmount(row.line_gross_sales ?? 0)}</td><td>{formatShopifyAmount(row.line_discounts ?? 0)}</td>
+                <td>{formatShopifyAmount(row.line_returns ?? 0)}</td><td>{formatShopifyAmount(row.line_net_sales ?? 0)}</td>
+                <td>{formatShopifyAmount(row.line_shipping_charges ?? 0)}</td><td>{formatShopifyAmount(row.line_return_fees ?? 0)}</td>
+                <td>{formatShopifyAmount(row.line_taxes ?? 0)}</td><td>{formatShopifyAmount(row.line_total_sales ?? 0)}</td>
+              </tr>) : <tr className="supplements-placeholder-row"><td colSpan={totalSalesHeaders.length}>Choose a date and fetch that day's Shopify sales.</td></tr>}</tbody>
+            </table>
+          </div>
+          <p className="supplements-note"><span /> Values come from Shopify orders and refunds. Fetch replaces the saved snapshot for the selected date.</p>
         </section> : <section className="supplements-progress" aria-labelledby="supplements-progress-title">
           <div className="supplements-progress-icon" aria-hidden="true">{activeView.short}</div>
           <p>Coming soon</p>

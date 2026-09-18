@@ -88,7 +88,6 @@ export async function syncShopifyCogs(date) {
   const assignedFees = new Set()
   const rows = report.rows.map((item) => {
     if (item.name) currentOrder = item.name
-    const subtotal = Number(item.sales || 0)
     const qty = Number(item.qty || 0)
     const shipping = Number(item.shipping_charges || 0)
     const row = {
@@ -98,7 +97,7 @@ export async function syncShopifyCogs(date) {
       product: item.product_name,
       qty,
       unit_price: null,
-      subtotal,
+      subtotal: null,
       shipping,
       fulfillment_supliful: 0,
       processing_supliful: 0,
@@ -107,7 +106,7 @@ export async function syncShopifyCogs(date) {
       total: 0,
     }
     assignedFees.add(currentOrder)
-    row.total = Math.round((row.subtotal + row.shipping + row.processing_shopify) * 100) / 100
+    row.total = Math.round((row.shipping + row.processing_shopify) * 100) / 100
     return row
   })
   await saveShopifyCogs(date, rows)
