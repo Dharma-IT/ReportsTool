@@ -15,6 +15,7 @@ type DailyRow = {
   doxyTotal: string
   injections: number
   nad: number
+  lipoMino: number
   plan: number
   peptides: number
   sales: number
@@ -32,6 +33,7 @@ type DailyResponse = {
     totalTalkSeconds: number
     injections: number
     nad: number
+    lipoMino: number
     plan: number
     peptides: number
     sales: number
@@ -68,7 +70,7 @@ function emptyRows(team: DailySection): DailyRow[] {
   return teamStaff[team].map((staff) => ({
     staff, called: 0, intents: 0, valid: 0, average: '', aircall: '', doxyCalls: 0,
     doxyValid: 0, doxyAverage: '', doxyTotal: '', injections: 0,
-    nad: 0, plan: 0, peptides: 0, sales: 0, balance: 0, observation: '',
+    nad: 0, lipoMino: 0, plan: 0, peptides: 0, sales: 0, balance: 0, observation: '',
   }))
 }
 
@@ -129,7 +131,7 @@ function rowsFromDailyResponse(team: DailySection, payload: DailyResponse) {
       called: safeNumber(agent.numbersCalled), intents: safeNumber(agent.totalIntents), valid: safeNumber(agent.validCalls),
       average: safeNumber(agent.validCalls) ? formatDuration(safeNumber(agent.averageCallSeconds)) : '—',
       aircall: formatDuration(safeNumber(agent.totalTalkSeconds)), injections: safeNumber(agent.injections), nad: safeNumber(agent.nad),
-      plan: safeNumber(agent.plan), peptides: safeNumber(agent.peptides), sales: safeNumber(agent.sales), balance: safeNumber(agent.balance),
+      lipoMino: safeNumber(agent.lipoMino), plan: safeNumber(agent.plan), peptides: safeNumber(agent.peptides), sales: safeNumber(agent.sales), balance: safeNumber(agent.balance),
     } : row
   })
 }
@@ -340,6 +342,7 @@ function Daily() {
           aircall: formatDuration(safeNumber(agent.totalTalkSeconds)),
           injections: safeNumber(agent.injections),
           nad: safeNumber(agent.nad),
+          lipoMino: safeNumber(agent.lipoMino),
           plan: safeNumber(agent.plan),
           peptides: safeNumber(agent.peptides),
           sales: safeNumber(agent.sales),
@@ -399,11 +402,12 @@ function Daily() {
     doxyWeightedValid: summary.doxyWeightedValid + durationSeconds(row.doxyAverage) * safeNumber(row.doxyValid),
     injections: summary.injections + row.injections,
     nad: summary.nad + row.nad,
+    lipoMino: summary.lipoMino + row.lipoMino,
     plan: summary.plan + row.plan,
     peptides: summary.peptides + row.peptides,
     sales: summary.sales + row.sales,
     balance: summary.balance + row.balance,
-  }), { called: 0, intents: 0, valid: 0, talk: 0, weightedValid: 0, doxyCalls: 0, doxyValid: 0, doxyTalk: 0, doxyWeightedValid: 0, injections: 0, nad: 0, plan: 0, peptides: 0, sales: 0, balance: 0 })
+  }), { called: 0, intents: 0, valid: 0, talk: 0, weightedValid: 0, doxyCalls: 0, doxyValid: 0, doxyTalk: 0, doxyWeightedValid: 0, injections: 0, nad: 0, lipoMino: 0, plan: 0, peptides: 0, sales: 0, balance: 0 })
 
   const isSales = activeSection === 'Sales'
   const averageTotal = totals.valid ? formatDuration(Math.round(totals.weightedValid / totals.valid)) : '—'
@@ -469,23 +473,23 @@ function Daily() {
                     <th rowSpan={2}>Staff</th><th colSpan={5}>Aircall</th>
                     {isSales && <th colSpan={4}>Doxy</th>}
                     {isSales && <th rowSpan={2}>Total time in call <small>Doxy + Aircall</small></th>}
-                    <th colSpan={4}>Products sold</th><th colSpan={2}>Revenue</th><th rowSpan={2}>Observations</th>
+                    <th colSpan={5}>Products sold</th><th colSpan={2}>Revenue</th><th rowSpan={2}>Observations</th>
                   </tr>
                   <tr>
                     <th>Numbers called</th><th>Total intents</th><th>Valid calls</th><th>Average call time <small>over 1 min</small></th><th>Total time</th>
                     {isSales && <><th>Video calls</th><th>Valid video calls</th><th>Average call time <small>over 1 min</small></th><th>Total Doxy time</th></>}
-                    <th>Injections</th><th>NAD+</th><th>Nutritional plan</th><th>Peptides</th><th>Total sales</th><th>Balance <small>after refunds</small></th>
+                    <th>Injections</th><th>NAD+</th><th>Lipo Mino</th><th>Nutritional plan</th><th>Peptides</th><th>Total sales</th><th>Balance <small>after refunds</small></th>
                   </tr>
                 </thead>
                 <tbody>{rows.map((row) => <tr key={row.staff}>
                   <th scope="row"><span className="daily-avatar">{row.staff.split(' ').map((name) => name[0]).join('')}</span>{row.staff}</th>
                   <td>{row.called}</td><td>{row.intents}</td><td>{row.valid}</td><td>{row.average}</td><td>{row.aircall}</td>
                   {isSales && <><td>{row.doxyCalls ?? 0}</td><td>{row.doxyValid ?? 0}</td><td>{row.doxyAverage || '—'}</td><td>{row.doxyTotal || '0:00:00'}</td><td>{formatDuration(durationSeconds(row.aircall) + durationSeconds(row.doxyTotal))}</td></>}
-                  <td>{row.injections}</td><td>{row.nad}</td><td>{row.plan}</td><td>{row.peptides}</td><td className="daily-money">{money.format(row.sales)}</td><td className="daily-money">{money.format(row.balance)}</td><td>{row.observation}</td>
+                  <td>{row.injections}</td><td>{row.nad}</td><td>{row.lipoMino}</td><td>{row.plan}</td><td>{row.peptides}</td><td className="daily-money">{money.format(row.sales)}</td><td className="daily-money">{money.format(row.balance)}</td><td>{row.observation}</td>
                 </tr>)}</tbody>
                 <tfoot><tr><th>Total</th><td>{totals.called}</td><td>{totals.intents}</td><td>{totals.valid}</td><td>{averageTotal}</td><td>{formatDuration(totals.talk)}</td>
                   {isSales && <><td>{totals.doxyCalls}</td><td>{totals.doxyValid}</td><td>{doxyAverageTotal}</td><td>{formatDuration(totals.doxyTalk)}</td><td>{formatDuration(totals.talk + totals.doxyTalk)}</td></>}
-                  <td>{totals.injections}</td><td>{totals.nad}</td><td>{totals.plan}</td><td>{totals.peptides}</td><td>{money.format(totals.sales)}</td><td>{money.format(totals.balance)}</td><td /></tr></tfoot>
+                  <td>{totals.injections}</td><td>{totals.nad}</td><td>{totals.lipoMino}</td><td>{totals.plan}</td><td>{totals.peptides}</td><td>{money.format(totals.sales)}</td><td>{money.format(totals.balance)}</td><td /></tr></tfoot>
               </table>
             </div>
             <section className="daily-supplements" aria-labelledby="daily-supplements-title">

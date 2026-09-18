@@ -867,6 +867,7 @@ function callConfirmationApi(hubSpotToken: string, apiId: string, apiToken: stri
 type DailyCsHubSpotMetrics = {
   injections: number
   nad: number
+  lipoMino: number
   plan: number
   peptides: number
   sales: number
@@ -876,7 +877,7 @@ type DailyCsHubSpotMetrics = {
 }
 
 function emptyDailyCsHubSpotMetrics(): DailyCsHubSpotMetrics {
-  return { injections: 0, nad: 0, plan: 0, peptides: 0, sales: 0, refunds: 0, balance: 0, productSales: {} }
+  return { injections: 0, nad: 0, lipoMino: 0, plan: 0, peptides: 0, sales: 0, refunds: 0, balance: 0, productSales: {} }
 }
 
 function addDailyProductSale(metrics: DailyCsHubSpotMetrics, name: string, quantity: number) {
@@ -896,12 +897,14 @@ function isDailySupplementProduct(name: string) {
   ]
   if (glpNames.some((term) => product.includes(term))) return false
   if ((product.includes('nad+') || /\bnad\b/.test(product)) && product.includes('injection')) return false
+  if (/\blipo[\s-]*mino\b/.test(product)) return false
   if (['consultation', 'shipping', 'delivery fee', 'membership'].some((term) => product.includes(term))) return false
   return product.trim().length > 0
 }
 
 function classifyDailyCsProduct(name: string) {
   const product = name.toLowerCase()
+  if (/\blipo[\s-]*mino\b/.test(product)) return 'lipoMino'
   const isNad = product.includes('nad+') || /\bnad\b/.test(product)
   if (isNad && product.includes('injection')) return 'nad'
   if (isNad) return null
