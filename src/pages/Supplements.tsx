@@ -254,8 +254,7 @@ export default function Supplements() {
     void fetch(getApiUrl(`/api/shopify/cogs?date=${encodeURIComponent(adsDate)}`))
       .then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to load COGS total')))
       .then((payload: { rows?: ShopifyCogsRow[] }) => {
-        const cogsValue = (payload.rows ?? []).reduce((sum, row) => sum + (Number(row.total) || 0) - (Number(row.payout_received) || 0), 0)
-        updateAdsRow(adsDate, 'cogs', cogsValue.toFixed(2))
+        updateAdsCostBreakdown(adsDate, payload.rows ?? [])
       })
       .catch(() => undefined)
   }, [view, adsDate])
@@ -265,6 +264,21 @@ export default function Supplements() {
       const exists = rows.some((row) => row.date === date)
       const next = exists ? rows : [...rows, emptyAdsSummary(date)]
       return next.map((row) => row.date === date ? { ...row, [field]: value } : row).sort((a, b) => a.date.localeCompare(b.date))
+    })
+  }
+
+  function updateAdsCostBreakdown(date: string, rows: ShopifyCogsRow[]) {
+    const total = (field: keyof ShopifyCogsRow) => rows.reduce((sum, row) => sum + (Number(row[field]) || 0), 0).toFixed(2)
+    setAdsRows((currentRows) => {
+      const existing = currentRows.find((row) => row.date === date) ?? emptyAdsSummary(date)
+      const updated = {
+        ...existing,
+        cogs: total('subtotal'),
+        shipping: total('shipping'),
+        fulfillment: total('fulfillment_supliful'),
+        processing: rows.reduce((sum, row) => sum + (Number(row.processing_supliful) || 0) + (Number(row.processing_shopify) || 0), 0).toFixed(2),
+      }
+      return [...currentRows.filter((row) => row.date !== date), updated].sort((a, b) => a.date.localeCompare(b.date))
     })
   }
 
@@ -316,8 +330,7 @@ export default function Supplements() {
       if (!response.ok) throw new Error(payload.message || `Unable to ${method === 'POST' ? 'fetch' : 'save'} COGS data (${response.status}).`)
       const rows = payload.rows ?? []
       setCogsRows(rows)
-      const dailyCogs = rows.reduce((sum, row) => sum + (Number(row.total) || 0) - (Number(row.payout_received) || 0), 0)
-      updateAdsRow(cogsDate, 'cogs', dailyCogs.toFixed(2))
+      updateAdsCostBreakdown(cogsDate, rows)
       if (method !== 'GET') setSavedCogsDates((dates) => new Set(dates).add(cogsDate))
       setCogsMessage(method === 'POST' ? `${payload.rows?.length ?? 0} Shopify line items fetched and saved.` : method === 'PUT' ? 'COGS & Fee edits saved.' : (payload.rows?.length ? 'Saved COGS & Fee data loaded.' : 'No saved COGS & Fee data exists for this date.'))
     } catch (error) {

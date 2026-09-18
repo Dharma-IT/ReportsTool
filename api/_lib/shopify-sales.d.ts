@@ -22,6 +22,11 @@ export type ShopifySalesRow = {
   qty: number
   sales: number
   product_name: string
+  unit_weight: number
+  weight_unit: 'GRAMS' | 'KILOGRAMS' | 'OUNCES' | 'POUNDS' | null
+  shipping_country: string | null
+  shipping_province: string | null
+  shipping_service: string | null
 }
 
 export type ShopifyHistoricalProductRow = {

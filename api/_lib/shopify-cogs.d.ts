@@ -8,3 +8,5 @@ export function syncShopifyCogs(date: string): Promise<{ date: string; fetchedAt
 export function saveShopifyCogs(date: string, rows: ShopifyCogsRow[]): Promise<{ date: string; rows: ShopifyCogsRow[] }>
 export function getSavedShopifyCogs(date: string): Promise<{ date: string; fetchedAt: string | null; rows: ShopifyCogsRow[] }>
 export function getSavedShopifyCogsDates(): Promise<{ dates: string[] }>
+export function suplifulShippingCost(weightLbs: number, country: string | null, province: string | null, service: string | null): number | null
+export function suplifulFulfillmentFee(quantity: number): number

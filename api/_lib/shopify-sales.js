@@ -11,12 +11,15 @@ const SALES_QUERY = `query SalesForSupplements($after: String, $search: String!)
       currentTotalPriceSet { shopMoney { amount } }
       currentTotalTaxSet { shopMoney { amount } }
       totalShippingPriceSet { shopMoney { amount } }
+      shippingAddress { countryCodeV2 provinceCode }
+      shippingLine { code title }
       lineItems(first: 100) {
         nodes {
           id
           name
           product { title }
           quantity
+          variant { inventoryItem { measurement { weight { value unit } } } }
           originalTotalSet { shopMoney { amount } }
           discountedTotalSet { shopMoney { amount } }
         }
@@ -128,6 +131,11 @@ export async function fetchShopifySales(date) {
           qty: item.quantity,
           sales: amount(item.discountedTotalSet) - (refundByLineItem.get(item.id) ?? 0),
           product_name: item.name,
+          unit_weight: Number(item.variant?.inventoryItem?.measurement?.weight?.value ?? 0),
+          weight_unit: item.variant?.inventoryItem?.measurement?.weight?.unit ?? null,
+          shipping_country: order.shippingAddress?.countryCodeV2 ?? null,
+          shipping_province: order.shippingAddress?.provinceCode ?? null,
+          shipping_service: order.shippingLine?.code || order.shippingLine?.title || null,
         })
       })
     }
