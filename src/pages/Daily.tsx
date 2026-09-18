@@ -493,7 +493,7 @@ function Daily() {
               </table>
             </div>
             <section className="daily-supplements" aria-labelledby="daily-supplements-title">
-              <div className="daily-supplements-heading"><div><span>HubSpot items report</span><h2 id="daily-supplements-title">Supplements sold by staff</h2></div><small>Selected paid-date range · GLP products excluded</small></div>
+              <div className="daily-supplements-heading"><div><span>HubSpot items report</span><h2 id="daily-supplements-title">Supplements sold by staff</h2></div><small>Selected paid-date range · GLP medications excluded</small></div>
               {supplements?.products.length ? <div className="daily-supplements-scroll"><table className="daily-supplements-table">
                 <thead><tr><th>Staff</th>{supplements.products.map((product) => <th key={product.key}>{product.name}</th>)}<th>Total</th></tr></thead>
                 <tbody>{rows.map((staffRow) => {

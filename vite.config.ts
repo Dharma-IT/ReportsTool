@@ -891,6 +891,9 @@ function addDailyProductSale(metrics: DailyCsHubSpotMetrics, name: string, quant
 
 function isDailySupplementProduct(name: string) {
   const product = name.toLowerCase()
+  // GLP-1 Support is a supplement product, not a GLP-1 medication. Keep it in
+  // the supplements report even though its product name contains "GLP-1".
+  if (/\bglp[\s-]*1\s+support\b/.test(product)) return true
   const glpNames = [
     'glp-1', 'glp 1', 'semaglutide', 'tirzepatide', 'liraglutide', 'retatrutide',
     'ozempic', 'wegovy', 'mounjaro', 'zepbound', 'rybelsus', 'saxenda', 'victoza',
