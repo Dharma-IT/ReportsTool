@@ -3,6 +3,52 @@ import { shopify2AdminFetch } from './shopify.js'
 
 const EARLIEST_DATE = '2026-09-01'
 
+const PRODUCT_UNIT_COSTS = [
+  ['advanced 100 whey protein isolate vanilla', 39.95],
+  ['advanced 100 whey protein isolate chocolate', 39.95],
+  ['grass fed collagen creamer vanilla', 20.05],
+  ['grass fed collagen peptides powder chocolate', 17.45],
+  ['grass fed hydrolyzed collagen peptides', 15.29],
+  ['hydration powder passion fruit', 11.25],
+  ['hydration powder peach mango', 11.29],
+  ['hydration powder lemonade', 11.29],
+  ['hydration powder lychee', 11.45],
+  ['plant protein chocolate', 26.55],
+  ['plant protein vanilla', 27.45],
+  ['probiotic 40 billion with prebiotics', 8.15],
+  ['omega 3 epa 180mg dha 120mg', 8.85],
+  ['hair skin and nails essentials', 5.79],
+  ['complete multivitamin', 5.69],
+  ['apple cider vinegar capsules', 4.55],
+  ['digestive enzyme pro blend', 5.29],
+  ['vitamin d3 2 000 iu', 7.45],
+  ['creatine monohydrate', 10.95],
+  ['magnesium glycinate', 6.59],
+  ['brain and focus formula', 4.85],
+  ['colon gentle cleanse', 15.55],
+  ['diet drops ultra 1 oz', 4.85],
+  ['bone and heart support', 5.29],
+  ['max detox acai detox', 5.75],
+  ['fat burner with mct', 7.59],
+  ['glp 1 support', 6.65],
+  ['sleep formula', 5.25],
+  ['energy strips', 8.19],
+  ['sleep strips', 7.55],
+  ['berberine', 5.55],
+  ['maca plus', 5.75],
+  ['nad', 9.25],
+]
+
+function normalizedProductName(value) {
+  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/\bsubscription\b/g, ' ').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function productUnitCost(name) {
+  const normalized = normalizedProductName(name)
+  return PRODUCT_UNIT_COSTS.find(([product]) => normalized.includes(product))?.[1] ?? null
+}
+
 function validateDate(date) {
   if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Choose a valid report date')
   if (date < EARLIEST_DATE) throw new Error(`Shopify data starts on ${EARLIEST_DATE}`)
@@ -90,14 +136,15 @@ export async function syncShopifyCogs(date) {
     if (item.name) currentOrder = item.name
     const qty = Number(item.qty || 0)
     const shipping = Number(item.shipping_charges || 0)
+    const unitPrice = productUnitCost(item.product_name)
     const row = {
       id: item.id,
       date,
       order: currentOrder,
       product: item.product_name,
       qty,
-      unit_price: null,
-      subtotal: null,
+      unit_price: unitPrice,
+      subtotal: unitPrice == null ? null : Math.round(unitPrice * qty * 100) / 100,
       shipping,
       fulfillment_supliful: 0,
       processing_supliful: 0,
@@ -106,7 +153,7 @@ export async function syncShopifyCogs(date) {
       total: 0,
     }
     assignedFees.add(currentOrder)
-    row.total = Math.round((row.shipping + row.processing_shopify) * 100) / 100
+    row.total = Math.round(((row.subtotal ?? 0) + row.shipping + row.processing_shopify) * 100) / 100
     return row
   })
   await saveShopifyCogs(date, rows)
