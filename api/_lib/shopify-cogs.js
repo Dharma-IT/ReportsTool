@@ -97,7 +97,7 @@ export async function syncShopifyCogs(date) {
       order: currentOrder,
       product: item.product_name,
       qty,
-      unit_price: Math.round(Number(item.unit_price || 0) * 100) / 100,
+      unit_price: null,
       subtotal,
       shipping,
       fulfillment_supliful: 0,

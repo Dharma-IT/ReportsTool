@@ -1,6 +1,6 @@
 export type ShopifyCogsRow = {
   id: string; date: string; order: string; product: string; qty: number
-  unit_price: number; subtotal: number; shipping: number; fulfillment_supliful: number
+  unit_price: number | null; subtotal: number; shipping: number; fulfillment_supliful: number
   processing_supliful: number; processing_shopify: number; total: number
   payout_received: number
 }

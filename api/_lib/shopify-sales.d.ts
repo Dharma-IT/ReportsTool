@@ -8,7 +8,6 @@ export type ShopifySalesRow = {
   shipping_charges: number | null
   total_sales: number | null
   qty: number
-  unit_price: number
   sales: number
   product_name: string
 }

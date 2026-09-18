@@ -49,7 +49,7 @@ type ShopifyCogsRow = {
   order: string
   product: string
   qty: number
-  unit_price: number
+  unit_price: number | null
   subtotal: number
   shipping: number
   fulfillment_supliful: number
@@ -272,7 +272,8 @@ export default function Supplements() {
   function updateCogsRow(id: string, field: keyof ShopifyCogsRow, value: string) {
     setCogsRows((rows) => rows.map((row) => {
       if (row.id !== id) return row
-      const next = { ...row, [field]: cogsNumericFields.includes(field as typeof cogsNumericFields[number]) ? Number(value) || 0 : value }
+      const numericField = cogsNumericFields.includes(field as typeof cogsNumericFields[number])
+      const next = { ...row, [field]: numericField ? (field === 'unit_price' && value === '' ? null : Number(value) || 0) : value }
       if (field !== 'total' && cogsNumericFields.includes(field as typeof cogsNumericFields[number])) {
         next.total = Math.round((next.subtotal + next.shipping + next.fulfillment_supliful + next.processing_supliful + next.processing_shopify) * 100) / 100
       }
@@ -541,7 +542,7 @@ export default function Supplements() {
                 <td><input aria-label="Date" type="date" value={row.date} onChange={(event) => updateCogsRow(row.id, 'date', event.target.value)} /></td>
                 <td><input aria-label="Order" value={row.order} onChange={(event) => updateCogsRow(row.id, 'order', event.target.value)} /></td>
                 <td><input aria-label="Product" value={row.product} onChange={(event) => updateCogsRow(row.id, 'product', event.target.value)} /></td>
-                {cogsNumericFields.map((field) => <td key={field}><input aria-label={cogsHeaders[cogsNumericFields.indexOf(field) + 3]} type="number" inputMode="decimal" step={field === 'qty' ? '1' : '0.01'} value={row[field]} onChange={(event) => updateCogsRow(row.id, field, event.target.value)} /></td>)}
+                {cogsNumericFields.map((field) => <td key={field}><input aria-label={cogsHeaders[cogsNumericFields.indexOf(field) + 3]} type="number" inputMode="decimal" step={field === 'qty' ? '1' : '0.01'} value={row[field] ?? ''} onChange={(event) => updateCogsRow(row.id, field, event.target.value)} /></td>)}
               </tr>) : <tr><td className="supplements-ads-empty" colSpan={cogsHeaders.length}>Choose a date and fetch Shopify orders, or view a saved date.</td></tr>}</tbody>
             </table>
           </div>
