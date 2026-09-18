@@ -1,4 +1,5 @@
 let cachedToken = null
+let cachedShopify2Token = null
 
 function requiredEnvironment(name) {
   const value = process.env[name]?.trim()
@@ -68,5 +69,31 @@ export async function shopifyAdminFetch(path, options = {}) {
   if (response.status === 401) {
     response = await makeRequest(await getShopifyAccessToken({ forceRefresh: true }))
   }
+  return response
+}
+
+export async function shopify2AdminFetch(path, options = {}) {
+  const clientId = requiredEnvironment('SHOPIFY2_CLIENT_ID')
+  const clientSecret = requiredEnvironment('SHOPIFY2_CLIENT_SECRET')
+  const getToken = async (forceRefresh = false) => {
+    if (!forceRefresh && cachedShopify2Token?.expiresAt > Date.now()) return cachedShopify2Token.value
+    const response = await fetch(`https://${shopifyStoreDomain()}/admin/oauth/access_token`, {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret }),
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok || !payload.access_token) throw new Error(`Shopify payouts authentication failed (${response.status}): ${payload.error_description || payload.error || 'credential exchange failed'}`)
+    const expiresIn = Number(payload.expires_in) || 86400
+    cachedShopify2Token = { value: payload.access_token, expiresAt: Date.now() + Math.max(0, expiresIn - 60) * 1000 }
+    return cachedShopify2Token.value
+  }
+  const version = requiredEnvironment('SHOPIFY_API_VERSION')
+  const normalizedPath = String(path).replace(/^\//, '')
+  const makeRequest = (token) => fetch(`https://${shopifyStoreDomain()}/admin/api/${version}/${normalizedPath}`, {
+    ...options,
+    headers: { Accept: 'application/json', 'X-Shopify-Access-Token': token, ...options.headers },
+  })
+  let response = await makeRequest(await getToken())
+  if (response.status === 401) response = await makeRequest(await getToken(true))
   return response
 }

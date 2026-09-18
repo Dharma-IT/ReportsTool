@@ -43,11 +43,25 @@ type ShopifyHistoricalProductRow = {
   sales_amount: number
 }
 
+type ShopifyCogsRow = {
+  id: string
+  date: string
+  order: string
+  product: string
+  qty: number
+  unit_price: number
+  subtotal: number
+  shipping: number
+  fulfillment_supliful: number
+  processing_supliful: number
+  processing_shopify: number
+  payout_received?: number
+  total: number
+}
+
 type AdsSummaryRow = Record<'meta' | 'google' | 'tiktok' | 'cogs' | 'shipping' | 'fulfillment' | 'processing', string> & { date: string }
-type AdsOrderRow = Record<'date' | 'order' | 'product' | 'qty' | 'unitPrice' | 'subtotal' | 'shipping' | 'fulfillment' | 'supliful' | 'shopify' | 'total' | 'status', string> & { id: string }
 
 const emptyAdsSummary = (date: string): AdsSummaryRow => ({ date, meta: '', google: '', tiktok: '', cogs: '', shipping: '', fulfillment: '', processing: '' })
-const emptyAdsOrder = (): AdsOrderRow => ({ id: crypto.randomUUID(), date: getToday(), order: '', product: '', qty: '', unitPrice: '', subtotal: '', shipping: '', fulfillment: '', supliful: '', shopify: '', total: '', status: '' })
 
 function readStoredRows<T>(key: string): T[] {
   try { return JSON.parse(localStorage.getItem(key) ?? '[]') as T[] } catch { return [] }
@@ -100,20 +114,8 @@ const adsSummaryHeaders = [
   'Processing',
 ]
 
-const adsOrderHeaders = [
-  'Date',
-  'Order',
-  'Product',
-  'Qty',
-  'Unit Price',
-  'Subtotal',
-  'Shipping',
-  'Fulfillment',
-  'Process. (Supliful)',
-  'Process. (Shopify)',
-  'Total',
-  'Status',
-]
+const cogsHeaders = ['Date', 'Order', 'Product', 'Qty', 'Unit Price', 'Subtotal', 'Shipping', 'Fulfillment (Supliful)', 'Process. (Supliful)', 'Process. (Shopify)', 'Total']
+const cogsNumericFields = ['qty', 'unit_price', 'subtotal', 'shipping', 'fulfillment_supliful', 'processing_supliful', 'processing_shopify', 'total'] as const
 
 type SupplementsView = 'daily' | 'ads' | 'cogs' | 'shopify' | 'orders' | 'sales'
 
@@ -187,10 +189,15 @@ export default function Supplements() {
   const [shopifyMessage, setShopifyMessage] = useState('')
   const [adsDate, setAdsDate] = useState(getToday())
   const [adsRows, setAdsRows] = useState<AdsSummaryRow[]>(() => readStoredRows<AdsSummaryRow>('supplements-ads-summary'))
-  const [adsOrderRows, setAdsOrderRows] = useState<AdsOrderRow[]>(() => readStoredRows<AdsOrderRow>('supplements-ads-orders'))
   const [adsCostsLoading, setAdsCostsLoading] = useState(false)
   const [adsFeedback, setAdsFeedback] = useState('')
   const [adsError, setAdsError] = useState('')
+  const [cogsDate, setCogsDate] = useState(getToday())
+  const [savedCogsDates, setSavedCogsDates] = useState<Set<string>>(new Set())
+  const [cogsRows, setCogsRows] = useState<ShopifyCogsRow[]>([])
+  const [cogsLoading, setCogsLoading] = useState(false)
+  const [cogsMessage, setCogsMessage] = useState('')
+  const [cogsError, setCogsError] = useState('')
   const activeView = supplementViews.find((item) => item.key === view) ?? supplementViews[0]
 
   useEffect(() => {
@@ -214,7 +221,25 @@ export default function Supplements() {
   }, [view])
 
   useEffect(() => { localStorage.setItem('supplements-ads-summary', JSON.stringify(adsRows)) }, [adsRows])
-  useEffect(() => { localStorage.setItem('supplements-ads-orders', JSON.stringify(adsOrderRows)) }, [adsOrderRows])
+
+  useEffect(() => {
+    if (view !== 'cogs') return
+    void fetch(getApiUrl('/api/shopify/cogs?dates=1'))
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to load saved COGS dates')))
+      .then((payload: { dates?: string[] }) => setSavedCogsDates(new Set(payload.dates ?? [])))
+      .catch(() => undefined)
+  }, [view])
+
+  useEffect(() => {
+    if (view !== 'ads' || !adsDate) return
+    void fetch(getApiUrl(`/api/shopify/cogs?date=${encodeURIComponent(adsDate)}`))
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to load COGS total')))
+      .then((payload: { rows?: ShopifyCogsRow[] }) => {
+        const cogsValue = (payload.rows ?? []).reduce((sum, row) => sum + (Number(row.total) || 0) - (Number(row.payout_received) || 0), 0)
+        updateAdsRow(adsDate, 'cogs', cogsValue.toFixed(2))
+      })
+      .catch(() => undefined)
+  }, [view, adsDate])
 
   function updateAdsRow(date: string, field: keyof AdsSummaryRow, value: string) {
     setAdsRows((rows) => {
@@ -244,8 +269,36 @@ export default function Supplements() {
     setAdsCostsLoading(false)
   }
 
-  function updateAdsOrder(id: string, field: keyof AdsOrderRow, value: string) {
-    setAdsOrderRows((rows) => rows.map((row) => row.id === id ? { ...row, [field]: value } : row))
+  function updateCogsRow(id: string, field: keyof ShopifyCogsRow, value: string) {
+    setCogsRows((rows) => rows.map((row) => {
+      if (row.id !== id) return row
+      const next = { ...row, [field]: cogsNumericFields.includes(field as typeof cogsNumericFields[number]) ? Number(value) || 0 : value }
+      if (field !== 'total' && cogsNumericFields.includes(field as typeof cogsNumericFields[number])) {
+        next.total = Math.round((next.subtotal + next.shipping + next.fulfillment_supliful + next.processing_supliful + next.processing_shopify) * 100) / 100
+      }
+      return next
+    }))
+  }
+
+  async function requestCogs(method: 'GET' | 'POST' | 'PUT') {
+    setCogsLoading(true); setCogsError(''); setCogsMessage('')
+    try {
+      const url = method === 'GET' ? `/api/shopify/cogs?date=${encodeURIComponent(cogsDate)}` : '/api/shopify/cogs'
+      const response = await fetch(getApiUrl(url), method === 'GET' ? undefined : {
+        method, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: cogsDate, ...(method === 'PUT' ? { rows: cogsRows } : {}) }),
+      })
+      const payload = await response.json() as { rows?: ShopifyCogsRow[]; message?: string }
+      if (!response.ok) throw new Error(payload.message || `Unable to ${method === 'POST' ? 'fetch' : 'save'} COGS data (${response.status}).`)
+      const rows = payload.rows ?? []
+      setCogsRows(rows)
+      const dailyCogs = rows.reduce((sum, row) => sum + (Number(row.total) || 0) - (Number(row.payout_received) || 0), 0)
+      updateAdsRow(cogsDate, 'cogs', dailyCogs.toFixed(2))
+      if (method !== 'GET') setSavedCogsDates((dates) => new Set(dates).add(cogsDate))
+      setCogsMessage(method === 'POST' ? `${payload.rows?.length ?? 0} Shopify line items fetched and saved.` : method === 'PUT' ? 'COGS & Fee edits saved.' : (payload.rows?.length ? 'Saved COGS & Fee data loaded.' : 'No saved COGS & Fee data exists for this date.'))
+    } catch (error) {
+      setCogsError(error instanceof Error ? error.message : 'Unable to process COGS & Fee data.')
+    } finally { setCogsLoading(false) }
   }
 
   async function fetchOrders() {
@@ -466,17 +519,33 @@ export default function Supplements() {
               </tr>) : <tr><td className="supplements-ads-empty" colSpan={adsSummaryHeaders.length}>Select a date and fetch Google cost to begin the report.</td></tr>}</tbody>
             </table>
           </div>
-          <div className="supplements-table-heading supplements-ads-detail-heading">
-            <div><span>Order costs</span><h2>Order-level breakdown</h2></div>
-            <button className="supplements-add-row" type="button" onClick={() => setAdsOrderRows((rows) => [...rows, emptyAdsOrder()])}>+ Add row</button>
+        </section> : view === 'cogs' ? <section className="supplements-content" aria-labelledby="supplements-cogs-title">
+          <div className="supplements-table-heading">
+            <div><span>Shopify order costs</span><h2 id="supplements-cogs-title">COGS &amp; Fee</h2></div>
           </div>
+          <form className="supplements-orders-filter" onSubmit={(event) => { event.preventDefault(); void requestCogs('POST') }}>
+            <div className="supplements-orders-date-control"><span>Order date</span>
+              <OrderCalendar selected={cogsDate} savedDates={savedCogsDates} onSelect={(date) => { setCogsDate(date); setCogsRows([]); setCogsMessage(''); setCogsError('') }} />
+            </div>
+            <button type="submit" disabled={cogsLoading}>{cogsLoading ? 'Working…' : 'Fetch Shopify'}</button>
+            <button className="view" type="button" onClick={() => void requestCogs('GET')} disabled={cogsLoading}>View</button>
+            <button className="view" type="button" onClick={() => void requestCogs('PUT')} disabled={cogsLoading || !cogsRows.length}>Save edits</button>
+          </form>
+          {cogsError ? <p className="supplements-orders-feedback error" role="alert">{cogsError}</p> : null}
+          {cogsMessage ? <p className="supplements-orders-feedback success" role="status">{cogsMessage}</p> : null}
           <div className="supplements-table-wrap">
-            <table className="supplements-ads-sheet supplements-ads-orders-table">
-              <caption>Order Cost Detail</caption>
-              <thead><tr>{adsOrderHeaders.map((header) => <th scope="col" key={header}>{header}</th>)}<th aria-label="Actions" /></tr></thead>
-              <tbody>{adsOrderRows.length ? adsOrderRows.map((row) => <tr key={row.id}>{(['date', 'order', 'product', 'qty', 'unitPrice', 'subtotal', 'shipping', 'fulfillment', 'supliful', 'shopify', 'total', 'status'] as const).map((field, index) => <td key={field}><input aria-label={`${adsOrderHeaders[index]} row`} type={field === 'date' ? 'date' : 'text'} inputMode={['qty', 'unitPrice', 'subtotal', 'shipping', 'fulfillment', 'supliful', 'shopify', 'total'].includes(field) ? 'decimal' : undefined} value={row[field]} onChange={(event) => updateAdsOrder(row.id, field, event.target.value)} /></td>)}<td className="supplements-delete-cell"><button type="button" aria-label="Delete order row" onClick={() => setAdsOrderRows((rows) => rows.filter((item) => item.id !== row.id))}>×</button></td></tr>) : <tr><td className="supplements-ads-empty" colSpan={adsOrderHeaders.length + 1}>Add a row to enter order costs.</td></tr>}</tbody>
+            <table className="supplements-ads-sheet supplements-cogs-table">
+              <caption>COGS &amp; Fee by Order</caption>
+              <thead><tr>{cogsHeaders.map((header) => <th scope="col" key={header}>{header}</th>)}</tr></thead>
+              <tbody>{cogsRows.length ? cogsRows.map((row) => <tr key={row.id}>
+                <td><input aria-label="Date" type="date" value={row.date} onChange={(event) => updateCogsRow(row.id, 'date', event.target.value)} /></td>
+                <td><input aria-label="Order" value={row.order} onChange={(event) => updateCogsRow(row.id, 'order', event.target.value)} /></td>
+                <td><input aria-label="Product" value={row.product} onChange={(event) => updateCogsRow(row.id, 'product', event.target.value)} /></td>
+                {cogsNumericFields.map((field) => <td key={field}><input aria-label={cogsHeaders[cogsNumericFields.indexOf(field) + 3]} type="number" inputMode="decimal" step={field === 'qty' ? '1' : '0.01'} value={row[field]} onChange={(event) => updateCogsRow(row.id, field, event.target.value)} /></td>)}
+              </tr>) : <tr><td className="supplements-ads-empty" colSpan={cogsHeaders.length}>Choose a date and fetch Shopify orders, or view a saved date.</td></tr>}</tbody>
             </table>
           </div>
+          <p className="supplements-note"><span /> Click any cell to edit it, then select Save edits. Fee changes recalculate Total automatically.</p>
         </section> : view === 'shopify' ? <section className="supplements-content" aria-labelledby="supplements-shopify-title">
           <div className="supplements-table-heading">
             <div><span>Shopify export</span><h2 id="supplements-shopify-title">Shopify</h2></div>

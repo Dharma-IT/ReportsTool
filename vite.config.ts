@@ -7,6 +7,7 @@ import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { fetchShopifySupplementContacts, getSavedShopifyOrderDates, getSavedShopifyOrders, syncShopifyOrders } from './api/_lib/shopify-orders.js'
 import { getHistoricalShopifySales, getSavedShopifySales, getSavedShopifySalesDates, syncShopifySales, updateHistoricalShopifySales } from './api/_lib/shopify-sales.js'
+import { getSavedShopifyCogs, getSavedShopifyCogsDates, saveShopifyCogs, syncShopifyCogs } from './api/_lib/shopify-cogs.js'
 import { fetchGoogleAdsCost } from './api/_lib/google-ads.js'
 import { fetchMetaAdsCost } from './api/_lib/meta-ads.js'
 
@@ -3338,6 +3339,8 @@ function shopifyOrdersApi(env: Record<string, string>): Plugin {
           process.env.SHOPIFY_STORE_DOMAIN = env.SHOPIFY_STORE_DOMAIN || process.env.SHOPIFY_STORE_DOMAIN || ''
           process.env.SHOPIFY_CLIENT_ID = env.SHOPIFY_CLIENT_ID || process.env.SHOPIFY_CLIENT_ID || ''
           process.env.SHOPIFY_CLIENT_SECRET = env.SHOPIFY_CLIENT_SECRET || process.env.SHOPIFY_CLIENT_SECRET || ''
+          process.env.SHOPIFY2_CLIENT_ID = env.SHOPIFY2_CLIENT_ID || process.env.SHOPIFY2_CLIENT_ID || ''
+          process.env.SHOPIFY2_CLIENT_SECRET = env.SHOPIFY2_CLIENT_SECRET || process.env.SHOPIFY2_CLIENT_SECRET || ''
           process.env.SHOPIFY_API_VERSION = env.SHOPIFY_API_VERSION || process.env.SHOPIFY_API_VERSION || ''
           process.env.VITE_SUPABASE_URL = env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
           process.env.SUPABASE_SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -3400,6 +3403,45 @@ function shopifySalesApi(env: Record<string, string>): Plugin {
           return sendJson(response, 502, {
             message: error instanceof Error ? error.message : 'Unable to fetch Shopify sales.',
           })
+        }
+      })
+    },
+  }
+}
+
+function shopifyCogsApi(env: Record<string, string>): Plugin {
+  return {
+    name: 'shopify-cogs-api',
+    configureServer(server) {
+      server.middlewares.use('/api/shopify/cogs', async (request, response) => {
+        if (!['GET', 'POST', 'PUT'].includes(request.method ?? '')) {
+          response.setHeader('Allow', 'GET, POST, PUT')
+          return sendJson(response, 405, { message: 'Method not allowed' })
+        }
+        try {
+          process.env.SHOPIFY_STORE_DOMAIN = env.SHOPIFY_STORE_DOMAIN || process.env.SHOPIFY_STORE_DOMAIN || ''
+          process.env.SHOPIFY_CLIENT_ID = env.SHOPIFY_CLIENT_ID || process.env.SHOPIFY_CLIENT_ID || ''
+          process.env.SHOPIFY_CLIENT_SECRET = env.SHOPIFY_CLIENT_SECRET || process.env.SHOPIFY_CLIENT_SECRET || ''
+          process.env.SHOPIFY2_CLIENT_ID = env.SHOPIFY2_CLIENT_ID || process.env.SHOPIFY2_CLIENT_ID || ''
+          process.env.SHOPIFY2_CLIENT_SECRET = env.SHOPIFY2_CLIENT_SECRET || process.env.SHOPIFY2_CLIENT_SECRET || ''
+          process.env.SHOPIFY_API_VERSION = env.SHOPIFY_API_VERSION || process.env.SHOPIFY_API_VERSION || ''
+          process.env.VITE_SUPABASE_URL = env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
+          process.env.SUPABASE_SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+          const requestUrl = new URL(request.url ?? '', 'http://localhost')
+          const result = request.method === 'GET'
+            ? requestUrl.searchParams.get('dates') === '1'
+              ? await getSavedShopifyCogsDates()
+              : await getSavedShopifyCogs(requestUrl.searchParams.get('date') ?? '')
+            : await (async () => {
+              const body = await readJsonRequest<{ date?: string; rows?: Parameters<typeof saveShopifyCogs>[1] }>(request)
+              return request.method === 'PUT'
+                ? await saveShopifyCogs(body.date ?? '', body.rows ?? [])
+                : await syncShopifyCogs(body.date ?? '')
+            })()
+          response.setHeader('Cache-Control', 'no-store')
+          return sendJson(response, 200, result)
+        } catch (error) {
+          return sendJson(response, 502, { message: error instanceof Error ? error.message : 'Unable to process Shopify COGS.' })
         }
       })
     },
@@ -3473,6 +3515,7 @@ export default defineConfig(({ mode }) => {
       react(),
       metaAdsCostApi(env),
       googleAdsCostApi(env),
+      shopifyCogsApi(env),
       shopifySalesApi(env),
       shopifyOrdersApi(env),
       acAutomationApi(env.STRIPE_SECRET_KEY ?? ''),

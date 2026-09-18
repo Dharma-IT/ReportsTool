@@ -102,6 +102,7 @@ export async function fetchShopifySales(date) {
           shipping_charges: index === 0 ? amount(order.totalShippingPriceSet) : null,
           total_sales: index === 0 ? amount(order.currentTotalPriceSet) : null,
           qty: item.quantity,
+          unit_price: item.quantity ? amount(item.originalTotalSet) / item.quantity : 0,
           sales: amount(item.discountedTotalSet) - (refundByLineItem.get(item.id) ?? 0),
           product_name: item.name,
         })

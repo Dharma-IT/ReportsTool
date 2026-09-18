@@ -107,6 +107,15 @@ create table if not exists public.shopify_sales_history (
   constraint shopify_sales_history_data_is_object check (jsonb_typeof(report_data) = 'object')
 );
 
+create table if not exists public.shopify_cogs_reports (
+  report_date date primary key,
+  report_data jsonb not null default '[]'::jsonb,
+  fetched_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint shopify_cogs_reports_data_is_array check (jsonb_typeof(report_data) = 'array')
+);
+
 create index if not exists aircall_call_events_call_timeline_idx
 on public.aircall_call_events (call_id, event_timestamp desc);
 
@@ -172,6 +181,14 @@ for each row
 execute function public.set_updated_at();
 
 alter table public.shopify_sales_history enable row level security;
+
+drop trigger if exists set_shopify_cogs_reports_updated_at on public.shopify_cogs_reports;
+create trigger set_shopify_cogs_reports_updated_at
+before update on public.shopify_cogs_reports
+for each row
+execute function public.set_updated_at();
+
+alter table public.shopify_cogs_reports enable row level security;
 
 -- Refund snapshots are server-only because they contain deal-level data.
 
