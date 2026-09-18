@@ -37,6 +37,7 @@ type DailyResponse = {
     sales: number
     refunds: number
     balance: number
+    productSales?: Record<string, { name: string; quantity: number }>
   }>
   hubSpotAvailable?: boolean
   hubSpotError?: string | null
@@ -50,6 +51,12 @@ type SavedDailyReport = {
   rows: DailyRow[]
   sourceWarning: string
   fetchedAt: string
+}
+
+type SupplementReport = {
+  products: Array<{ key: string; name: string }>
+  rows: Array<{ staff: string; quantities: Record<string, number> }>
+  unattributedQuantity: number
 }
 
 const teamStaff: Record<DailySection, string[]> = {
@@ -80,6 +87,20 @@ function getNewYorkDate() {
 
 function getApiUrl(path: string) {
   return `${['localhost', '127.0.0.1'].includes(window.location.hostname) ? '' : apiBaseUrl}${path}`
+}
+
+function supplementsFromDailyResponse(team: DailySection, payload: DailyResponse): SupplementReport {
+  const productNames = new Map<string, string>()
+  const rows = teamStaff[team].map((staff) => {
+    const agent = payload.agents.find((candidate) => candidate.name === staff)
+    const quantities: Record<string, number> = {}
+    for (const [key, product] of Object.entries(agent?.productSales ?? {})) {
+      productNames.set(key, product.name)
+      quantities[key] = safeNumber(product.quantity)
+    }
+    return { staff, quantities }
+  })
+  return { products: [...productNames].map(([key, name]) => ({ key, name })), rows, unattributedQuantity: 0 }
 }
 
 function formatDuration(seconds: number) {
@@ -184,6 +205,7 @@ function Daily() {
   const [error, setError] = useState('')
   const [hasLiveData, setHasLiveData] = useState(false)
   const [sourceWarning, setSourceWarning] = useState('')
+  const [supplements, setSupplements] = useState<SupplementReport | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [reportSource, setReportSource] = useState<'live' | 'saved' | null>(null)
   const [doxyUpload, setDoxyUpload] = useState('')
@@ -210,6 +232,7 @@ function Daily() {
           setRows(rowsFromDailyResponse(activeSection, payload))
           setSourceWarning(payload.hubSpotAvailable === false ? (payload.hubSpotError ?? 'HubSpot sales were unavailable.') : '')
           setHasLiveData(true); setReportSource('saved'); setError('')
+          setSupplements(supplementsFromDailyResponse(activeSection, payload))
           return
         }
       } catch { /* Fall back to this browser's saved copy. */ }
@@ -236,6 +259,7 @@ function Daily() {
     setHasLiveData(false)
     setError('')
     setSourceWarning('')
+    setSupplements(null)
     setReportSource(null)
     setDoxyUpload('')
   }
@@ -299,6 +323,7 @@ function Daily() {
     setRows(emptyRows(activeSection))
     setError('')
     setSourceWarning('')
+    setSupplements(null)
     try {
       const params = new URLSearchParams({ from: fromDate, to: toDate, team: activeSection.toLowerCase() })
       const response = await fetch(getApiUrl(`/api/daily-cs-report?${params}`))
@@ -326,6 +351,7 @@ function Daily() {
       setSourceWarning(warning)
       setHasLiveData(true)
       setReportSource('live')
+      setSupplements(supplementsFromDailyResponse(activeSection, payload))
       try {
         const saved: SavedDailyReport = { team: activeSection, fromDate, toDate, rows: fetchedRows, sourceWarning: warning, fetchedAt: new Date().toISOString() }
         localStorage.setItem(reportCacheKey(activeSection, fromDate, toDate), JSON.stringify(saved))
@@ -382,6 +408,8 @@ function Daily() {
   const isSales = activeSection === 'Sales'
   const averageTotal = totals.valid ? formatDuration(Math.round(totals.weightedValid / totals.valid)) : '—'
   const doxyAverageTotal = totals.doxyValid ? formatDuration(Math.round(totals.doxyWeightedValid / totals.doxyValid)) : '—'
+  const supplementTotals = Object.fromEntries((supplements?.products ?? []).map((product) => [product.key,
+    (supplements?.rows ?? []).reduce((sum, row) => sum + safeNumber(row.quantities[product.key]), 0)]))
 
   return (
     <main className="dashboard-shell daily-page">
@@ -459,7 +487,20 @@ function Daily() {
                   {isSales && <><td>{totals.doxyCalls}</td><td>{totals.doxyValid}</td><td>{doxyAverageTotal}</td><td>{formatDuration(totals.doxyTalk)}</td><td>{formatDuration(totals.talk + totals.doxyTalk)}</td></>}
                   <td>{totals.injections}</td><td>{totals.nad}</td><td>{totals.plan}</td><td>{totals.peptides}</td><td>{money.format(totals.sales)}</td><td>{money.format(totals.balance)}</td><td /></tr></tfoot>
               </table>
-            </div><DailyVisualizations rows={rows} /></> : !isLoading && !error ? <div className="daily-awaiting-fetch"><span aria-hidden="true">↻</span><strong>No report loaded</strong><p>Select a date range and click Fetch to load live Aircall and HubSpot values.</p></div> : null}
+            </div>
+            <section className="daily-supplements" aria-labelledby="daily-supplements-title">
+              <div className="daily-supplements-heading"><div><span>HubSpot items report</span><h2 id="daily-supplements-title">Supplements sold by staff</h2></div><small>Selected paid-date range · GLP products excluded</small></div>
+              {supplements?.products.length ? <div className="daily-supplements-scroll"><table className="daily-supplements-table">
+                <thead><tr><th>Staff</th>{supplements.products.map((product) => <th key={product.key}>{product.name}</th>)}<th>Total</th></tr></thead>
+                <tbody>{rows.map((staffRow) => {
+                  const shopifyRow = supplements.rows.find((row) => row.staff === staffRow.staff)
+                  const total = supplements.products.reduce((sum, product) => sum + safeNumber(shopifyRow?.quantities[product.key]), 0)
+                  return <tr key={staffRow.staff}><th scope="row"><span className="daily-avatar">{staffRow.staff.split(' ').map((name) => name[0]).join('')}</span>{staffRow.staff}</th>{supplements.products.map((product) => <td key={product.key}>{safeNumber(shopifyRow?.quantities[product.key])}</td>)}<td>{total}</td></tr>
+                })}</tbody>
+                <tfoot><tr><th>Total</th>{supplements.products.map((product) => <td key={product.key}>{supplementTotals[product.key]}</td>)}<td>{Object.values(supplementTotals).reduce((sum, value) => sum + value, 0)}</td></tr></tfoot>
+              </table></div> : <div className="daily-supplements-empty">No paid Shopify supplement items were found for this date range.</div>}
+            </section>
+            <DailyVisualizations rows={rows} /></> : !isLoading && !error ? <div className="daily-awaiting-fetch"><span aria-hidden="true">↻</span><strong>No report loaded</strong><p>Select a date range and click Fetch to load live Aircall and HubSpot values.</p></div> : null}
           </div>
         </div>
       </section>

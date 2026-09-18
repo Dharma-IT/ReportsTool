@@ -872,10 +872,32 @@ type DailyCsHubSpotMetrics = {
   sales: number
   refunds: number
   balance: number
+  productSales: Record<string, { name: string; quantity: number }>
 }
 
 function emptyDailyCsHubSpotMetrics(): DailyCsHubSpotMetrics {
-  return { injections: 0, nad: 0, plan: 0, peptides: 0, sales: 0, refunds: 0, balance: 0 }
+  return { injections: 0, nad: 0, plan: 0, peptides: 0, sales: 0, refunds: 0, balance: 0, productSales: {} }
+}
+
+function addDailyProductSale(metrics: DailyCsHubSpotMetrics, name: string, quantity: number) {
+  const cleanName = name.trim()
+  const key = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  if (!key || !Number.isFinite(quantity) || quantity <= 0) return
+  const current = metrics.productSales[key] ?? { name: cleanName, quantity: 0 }
+  current.quantity += quantity
+  metrics.productSales[key] = current
+}
+
+function isDailySupplementProduct(name: string) {
+  const product = name.toLowerCase()
+  const glpNames = [
+    'glp-1', 'glp 1', 'semaglutide', 'tirzepatide', 'liraglutide', 'retatrutide',
+    'ozempic', 'wegovy', 'mounjaro', 'zepbound', 'rybelsus', 'saxenda', 'victoza',
+  ]
+  if (glpNames.some((term) => product.includes(term))) return false
+  if ((product.includes('nad+') || /\bnad\b/.test(product)) && product.includes('injection')) return false
+  if (['consultation', 'shipping', 'delivery fee', 'membership'].some((term) => product.includes(term))) return false
+  return product.trim().length > 0
 }
 
 function classifyDailyCsProduct(name: string) {
@@ -971,6 +993,18 @@ async function fetchDailyCsHubSpot(
     const descriptionProducts = parseDailyCsDealDescription(
       deal.properties.deal_description_items__test ?? '',
     )
+    const associatedProducts = (dealToLineItems.get(deal.id) ?? []).flatMap((itemId) => {
+      const item = lineItemsById.get(itemId)
+      const name = item?.properties.name?.trim() ?? ''
+      return name ? [{ name, quantity: finiteNumber(item?.properties.quantity, 1) }] : []
+    })
+    // The Finance Items Report is backed by associated line items, so use those
+    // exact labels first. The aggregate description remains a fallback for
+    // older paid deals that do not have line-item associations.
+    const supplementProducts = associatedProducts.length ? associatedProducts : descriptionProducts
+    for (const item of supplementProducts) {
+      if (isDailySupplementProduct(item.name)) addDailyProductSale(row, item.name, item.quantity)
+    }
     if (descriptionProducts.length) {
       for (const item of descriptionProducts) {
         const category = classifyDailyCsProduct(item.name)
@@ -3309,7 +3343,7 @@ function shopifyOrdersApi(env: Record<string, string>): Plugin {
             : await (async () => {
               const body = await readJsonRequest<{ date?: string; mode?: string }>(request)
               return body.mode === 'contacts'
-                ? await fetchShopifySupplementContacts(body.date ?? '')
+              ? await fetchShopifySupplementContacts(body.date ?? '')
                 : await syncShopifyOrders(body.date ?? '', body.date ?? '')
             })()
           response.setHeader('Cache-Control', 'no-store')
