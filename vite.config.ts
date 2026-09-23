@@ -3200,7 +3200,7 @@ async function listStripeCharges(secretKey: string, start: number, end: number) 
   return charges
 }
 
-function acAutomationApi(stripeSecretKey: string): Plugin {
+function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin {
   return {
     name: 'ac-automation-api',
     configureServer(server) {
@@ -3320,6 +3320,45 @@ function acAutomationApi(stripeSecretKey: string): Plugin {
             const phoneSource = checkout.phone ? 'checkout_session' : customerPhone ? 'customer' : customerShippingPhone ? 'customer_shipping' : chargePhone ? 'charge' : failedPhone ? 'failed_payment' : paymentMethodPhone ? 'payment_method' : metadataPhone ? 'metadata' : 'unavailable'
             const enriched = stripeContact({ ...candidate.source, customer: { ...customer, name: customer.name || checkout.name, email: customer.email || checkout.email, phone } })
             resolved.push({ ...enriched, status: candidate.status, customerId: candidate.customerId, phoneSource })
+          }
+
+          // Some payment methods (notably Affirm) show a phone in Stripe's
+          // Dashboard checkout summary but do not expose it on the public
+          // PaymentIntent, Charge, PaymentMethod, or Customer objects. Recover
+          // those numbers from the matching HubSpot contact when possible.
+          if (hubSpotToken) {
+            const missingByEmail = new Map<string, typeof resolved[number][]>()
+            for (const contact of resolved) {
+              const email = canonicalClientEmail(contact.email)
+              if (!contact.phone && email) missingByEmail.set(email, [...(missingByEmail.get(email) ?? []), contact])
+            }
+            const emails = [...missingByEmail.keys()]
+            for (let startIndex = 0; startIndex < emails.length; startIndex += 100) {
+              const batchEmails = emails.slice(startIndex, startIndex + 100)
+              try {
+                const batch = await hubSpotPost<{
+                  results?: Array<{ properties?: { email?: string | null; phone?: string | null; mobilephone?: string | null; firstname?: string | null; lastname?: string | null } }>
+                }>('/crm/v3/objects/contacts/batch/read', {
+                  idProperty: 'email',
+                  properties: ['email', 'phone', 'mobilephone', 'firstname', 'lastname'],
+                  inputs: batchEmails.map((email) => ({ id: email })),
+                }, hubSpotToken)
+                for (const result of batch.results ?? []) {
+                  const properties = result.properties ?? {}
+                  const email = canonicalClientEmail(properties.email ?? '')
+                  const phone = stripePhone(properties.phone || properties.mobilephone)
+                  if (!email || !phone) continue
+                  for (const contact of missingByEmail.get(email) ?? []) {
+                    contact.phone = phone
+                    contact.phoneSource = 'hubspot'
+                    contact.firstName ||= String(properties.firstname ?? '').trim()
+                    contact.lastName ||= String(properties.lastname ?? '').trim()
+                  }
+                }
+              } catch (error) {
+                failures.push(`HubSpot phone recovery: ${error instanceof Error ? error.message : 'lookup failed'}`)
+              }
+            }
           }
 
           const contacts: Array<ReturnType<typeof stripeContact> & { customerId: string; phoneSource: string }> = []
@@ -3580,7 +3619,7 @@ export default defineConfig(({ mode }) => {
       shopifyCogsApi(env),
       shopifySalesApi(env),
       shopifyOrdersApi(env),
-      acAutomationApi(env.STRIPE_SECRET_KEY ?? ''),
+      acAutomationApi(env.STRIPE_SECRET_KEY ?? '', env.HUBSPOT_ACCESS_TOKEN ?? ''),
       botReportsApi(env.HUBSPOT_ACCESS_TOKEN ?? ''),
       facebookBudgetApi(env.FACEBOOK_SYSTEM_ACCESS_TOKEN ?? ''),
       respondIoReportMetricsApi(
