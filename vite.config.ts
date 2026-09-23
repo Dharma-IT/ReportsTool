@@ -875,19 +875,33 @@ type DailyCsHubSpotMetrics = {
   refunds: number
   balance: number
   productSales: Record<string, { name: string; quantity: number }>
+  peptideSales: Record<string, { name: string; quantity: number }>
 }
 
 function emptyDailyCsHubSpotMetrics(): DailyCsHubSpotMetrics {
-  return { injections: 0, nad: 0, lipoMino: 0, plan: 0, peptides: 0, sales: 0, refunds: 0, balance: 0, productSales: {} }
+  return { injections: 0, nad: 0, lipoMino: 0, plan: 0, peptides: 0, sales: 0, refunds: 0, balance: 0, productSales: {}, peptideSales: {} }
 }
 
-function addDailyProductSale(metrics: DailyCsHubSpotMetrics, name: string, quantity: number) {
+function addDailyProductSale(products: Record<string, { name: string; quantity: number }>, name: string, quantity: number) {
   const cleanName = name.trim()
   const key = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
   if (!key || !Number.isFinite(quantity) || quantity <= 0) return
-  const current = metrics.productSales[key] ?? { name: cleanName, quantity: 0 }
+  const current = products[key] ?? { name: cleanName, quantity: 0 }
   current.quantity += quantity
-  metrics.productSales[key] = current
+  products[key] = current
+}
+
+function isDailyPeptideProduct(name: string) {
+  const product = name.toLowerCase()
+  if (/\bglp[\s-]*1\s+support\b/.test(product)) return false
+  return /\bglp[\s-]*1\b/.test(product) || product.includes('peptide') || [
+    'semaglutide', 'semaglutida', 'semiglutide',
+    'tirzepatide', 'tirzepetide', 'tirzepitide', 'terzepatide',
+    'liraglutide', 'retatrutide', 'retratrutide',
+    'ozempic', 'wegovy', 'mounjaro', 'zepbound', 'rybelsus', 'saxenda', 'victoza',
+    'bpc-157', 'bpc 157', 'cjc-1295', 'cjc 1295', 'ipamorelin', 'sermorelin',
+    'tesamorelin', 'ghk-cu', 'ghk cu', 'pt-141', 'pt 141', 'aod-9604', 'aod 9604',
+  ].some((term) => product.includes(term))
 }
 
 function isDailySupplementProduct(name: string) {
@@ -895,11 +909,7 @@ function isDailySupplementProduct(name: string) {
   // GLP-1 Support is a supplement product, not a GLP-1 medication. Keep it in
   // the supplements report even though its product name contains "GLP-1".
   if (/\bglp[\s-]*1\s+support\b/.test(product)) return true
-  const glpNames = [
-    'glp-1', 'glp 1', 'semaglutide', 'tirzepatide', 'liraglutide', 'retatrutide',
-    'ozempic', 'wegovy', 'mounjaro', 'zepbound', 'rybelsus', 'saxenda', 'victoza',
-  ]
-  if (glpNames.some((term) => product.includes(term))) return false
+  if (isDailyPeptideProduct(name) || /\bglp[\s-]*1\b/.test(product)) return false
   if ((product.includes('nad+') || /\bnad\b/.test(product)) && product.includes('injection')) return false
   if (/\blipo[\s-]*mino\b/.test(product)) return false
   if (['consultation', 'shipping', 'delivery fee', 'membership'].some((term) => product.includes(term))) return false
@@ -1008,9 +1018,10 @@ async function fetchDailyCsHubSpot(
     // The Finance Items Report is backed by associated line items, so use those
     // exact labels first. The aggregate description remains a fallback for
     // older paid deals that do not have line-item associations.
-    const supplementProducts = associatedProducts.length ? associatedProducts : descriptionProducts
-    for (const item of supplementProducts) {
-      if (isDailySupplementProduct(item.name)) addDailyProductSale(row, item.name, item.quantity)
+    const reportProducts = associatedProducts.length ? associatedProducts : descriptionProducts
+    for (const item of reportProducts) {
+      if (isDailyPeptideProduct(item.name)) addDailyProductSale(row.peptideSales, item.name, item.quantity)
+      else if (isDailySupplementProduct(item.name)) addDailyProductSale(row.productSales, item.name, item.quantity)
     }
     if (descriptionProducts.length) {
       for (const item of descriptionProducts) {
