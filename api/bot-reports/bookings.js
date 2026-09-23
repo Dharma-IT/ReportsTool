@@ -140,13 +140,24 @@ export default async function handler(request, response) {
     const fromDate = Array.isArray(request.query?.from) ? request.query.from[0] : request.query?.from
     const toDate = Array.isArray(request.query?.to) ? request.query.to[0] : request.query?.to
     const dateField = Array.isArray(request.query?.dateField) ? request.query.dateField[0] : request.query?.dateField
-    const hubSpotAppointments = await fetchManualAppointments(fromDate, toDate, dateField)
+    const [hubSpotResult, botResult] = await Promise.allSettled([
+      fetchManualAppointments(fromDate, toDate, dateField),
+      fetch('https://dharma-agent-yd5l.onrender.com/api/reports/bookings').then(async (upstream) => {
+        const payload = await upstream.json()
+        if (!upstream.ok) throw new Error(payload.message ?? `Bot reports API failed with ${upstream.status}`)
+        return payload
+      }),
+    ])
+    const hubSpotAppointments = hubSpotResult.status === 'fulfilled' ? hubSpotResult.value : { manualRows: [], teamCounts: { nutritionist: 0, cs: 0, sales: 0 }, teamAppointments: [] }
+    const botReport = botResult.status === 'fulfilled' ? botResult.value : { summary: { total: 0, fromAds: 0, byPlatform: {} }, rows: [] }
     const report = {
-      summary: { total: 0, fromAds: 0, byPlatform: {} },
-      rows: [],
+      summary: botReport.summary ?? { total: 0, fromAds: 0, byPlatform: {} },
+      rows: botReport.rows ?? [],
       manualRows: hubSpotAppointments.manualRows,
       teamCounts: hubSpotAppointments.teamCounts,
       teamAppointments: hubSpotAppointments.teamAppointments,
+      ...(hubSpotResult.status === 'rejected' ? { hubSpotWarning: hubSpotResult.reason instanceof Error ? hubSpotResult.reason.message : 'Unable to load manual appointments' } : {}),
+      ...(botResult.status === 'rejected' ? { botWarning: botResult.reason instanceof Error ? botResult.reason.message : 'Unable to load bot appointments' } : {}),
     }
 
     response.status(200)

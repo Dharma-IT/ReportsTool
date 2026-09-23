@@ -3061,17 +3061,28 @@ function botReportsApi(hubSpotToken: string): Plugin {
       server.middlewares.use('/api/bot-reports/bookings', async (request, response) => {
         try {
           const requestUrl = new URL(request.url ?? '/', 'http://localhost')
-          const hubSpotAppointments = await fetchManualHubSpotAppointments(
-            hubSpotToken,
-            requestUrl.searchParams.get('from') ?? undefined,
-            requestUrl.searchParams.get('to') ?? undefined,
-            requestUrl.searchParams.get('dateField') ?? undefined,
-          )
+          const [hubSpotResult, botResult] = await Promise.allSettled([
+            fetchManualHubSpotAppointments(
+              hubSpotToken,
+              requestUrl.searchParams.get('from') ?? undefined,
+              requestUrl.searchParams.get('to') ?? undefined,
+              requestUrl.searchParams.get('dateField') ?? undefined,
+            ),
+            fetch('https://dharma-agent-yd5l.onrender.com/api/reports/bookings').then(async (upstream) => {
+              const payload = await upstream.json() as { message?: string; summary?: unknown; rows?: unknown[] }
+              if (!upstream.ok) throw new Error(payload.message ?? `Bot reports API failed with ${upstream.status}`)
+              return payload
+            }),
+          ])
+          const hubSpotAppointments = hubSpotResult.status === 'fulfilled' ? hubSpotResult.value : { manualRows: [], teamCounts: { nutritionist: 0, cs: 0, sales: 0 }, teamAppointments: [] }
+          const botReport = botResult.status === 'fulfilled' ? botResult.value as { summary?: unknown; rows?: unknown[] } : { summary: { total: 0, fromAds: 0, byPlatform: {} }, rows: [] }
           const report = {
-            summary: { total: 0, fromAds: 0, byPlatform: {} }, rows: [],
+            summary: botReport.summary ?? { total: 0, fromAds: 0, byPlatform: {} }, rows: botReport.rows ?? [],
             manualRows: hubSpotAppointments.manualRows,
             teamCounts: hubSpotAppointments.teamCounts,
             teamAppointments: hubSpotAppointments.teamAppointments,
+            ...(hubSpotResult.status === 'rejected' ? { hubSpotWarning: hubSpotResult.reason instanceof Error ? hubSpotResult.reason.message : 'Unable to load manual appointments' } : {}),
+            ...(botResult.status === 'rejected' ? { botWarning: botResult.reason instanceof Error ? botResult.reason.message : 'Unable to load bot appointments' } : {}),
           }
           response.statusCode = 200
           response.setHeader('Content-Type', 'application/json')

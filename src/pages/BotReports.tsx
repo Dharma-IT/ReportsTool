@@ -28,11 +28,12 @@ type BookingReport = {
   teamCounts?: { nutritionist: number; cs: number; sales: number }
   teamAppointments?: Array<{ team: 'nutritionist' | 'cs' | 'sales'; agent: string; meeting_start_at: string }>
   hubSpotWarning?: string
+  botWarning?: string
 }
 
 type DateField = 'booked' | 'meeting'
 type SortOrder = 'booked-desc' | 'booked-asc' | 'meeting-asc' | 'meeting-desc'
-type AppointmentView = 'manual' | 'sales' | 'team'
+type AppointmentView = 'manual' | 'bot' | 'sales' | 'team'
 type SalesSummary = { total: number; bySource: Record<string, number>; validAppointments: { total: number; bySource: Record<string, number> } }
 type TeamSalesSummaries = { sales: SalesSummary; cs: SalesSummary }
 
@@ -169,6 +170,15 @@ function getSource(booking: Booking) {
   return 'organic'
 }
 
+function getBotSource(booking: Booking) {
+  const platform = (booking.source_platform ?? '').trim().toLowerCase()
+  const type = (booking.source_type ?? '').trim().toLowerCase()
+  if (platform.includes('facebook') || platform.includes('instagram') || platform.includes('meta')) return 'meta'
+  if (platform.includes('tik') || platform.includes('byte')) return 'tiktok'
+  if (type.includes('organic') || platform.includes('organic')) return 'organic'
+  return 'unverified'
+}
+
 function getPhoneNumber(booking: Booking) {
   return booking.contact_phone ?? booking.attribution_data?.contactPhone ?? '—'
 }
@@ -250,7 +260,7 @@ function BotReports() {
     return () => controller.abort()
   }, [view, appliedStartDate, appliedEndDate, salesFetchRequest])
 
-  const rows = useMemo(() => (view === 'manual' ? report?.manualRows ?? [] : [])
+  const rows = useMemo(() => (view === 'manual' ? report?.manualRows ?? [] : view === 'bot' ? report?.rows ?? [] : [])
     .filter((booking) => {
       const value = dateField === 'meeting' ? booking.meeting_start_at : booking.booked_at
       const date = easternDateKey(value)
@@ -264,10 +274,10 @@ function BotReports() {
     }), [report, appliedStartDate, appliedEndDate, dateField, sortOrder, view])
 
   const sourceCounts = useMemo(() => rows.reduce((counts, booking) => {
-    const source = getSource(booking)
+    const source = view === 'bot' ? getBotSource(booking) : getSource(booking)
     counts[source] = (counts[source] ?? 0) + 1
     return counts
-  }, {} as Record<string, number>), [rows])
+  }, {} as Record<string, number>), [rows, view])
 
   const hasDateFilter = Boolean(startDate || endDate)
   const teamAppointments = useMemo(() => {
@@ -297,6 +307,7 @@ function BotReports() {
       <aside className="appointment-reports-sidebar" aria-label="Appointment sources">
         <span>Appointment type</span>
         <button className={view === 'manual' ? 'active' : ''} type="button" onClick={() => setView('manual')}><b>HM</b><span>Manual<small>Booked by humans</small></span></button>
+        <button className={view === 'bot' ? 'active' : ''} type="button" onClick={() => setView('bot')}><b>BT</b><span>Bot<small>Booked by Dharma Agent</small></span></button>
         <button className={view === 'sales' ? 'active' : ''} type="button" onClick={() => { const today = easternDateKey(new Date().toISOString()); if (!startDate) setStartDate(today); if (!endDate) setEndDate(today); if (view !== 'sales') { setIsSalesLoading(true); setSalesError('') } setView('sales') }}><b>$</b><span>Appointment Sales<small>Lead conversion</small></span></button>
         <button className={view === 'team' ? 'active' : ''} type="button" onClick={() => setView('team')}><b>TM</b><span>Apt per Team<small>Team breakdown</small></span></button>
       </aside>
@@ -305,7 +316,7 @@ function BotReports() {
           <div className="bot-reports-title-block">
             <p className="eyebrow">Dharma Agent Analytics</p>
             <h1 id="bot-reports-title">Appointment Reports</h1>
-            <p>Manually booked appointments, shown in Eastern Time.</p>
+            <p>{view === 'bot' ? 'Bot-booked appointments and channel attribution, shown in Eastern Time.' : 'Manually booked appointments, shown in Eastern Time.'}</p>
           </div>
           <div className="bot-reports-status" aria-label="Report timezone">
             <span aria-hidden="true">ET</span>
@@ -338,31 +349,46 @@ function BotReports() {
         </div> : null}
 
         {view !== 'sales' && view !== 'team' && error ? <div className="call-confirmation-message error">{error}</div> : null}
-        {view !== 'sales' && view !== 'team' && report?.hubSpotWarning ? <div className="call-confirmation-message error">Manual appointments unavailable: {report.hubSpotWarning}</div> : null}
-        {view !== 'sales' && view !== 'team' && isLoading && !report ? <div className="call-confirmation-message loading"><span className="report-loader-spinner" /><span>Loading manual appointments…</span></div> : null}
+        {view === 'manual' && report?.hubSpotWarning ? <div className="call-confirmation-message error">Manual appointments unavailable: {report.hubSpotWarning}</div> : null}
+        {view === 'bot' && report?.botWarning ? <div className="call-confirmation-message error">Bot appointments unavailable: {report.botWarning}</div> : null}
+        {view !== 'sales' && view !== 'team' && isLoading && !report ? <div className="call-confirmation-message loading"><span className="report-loader-spinner" /><span>Loading appointments…</span></div> : null}
 
         {view === 'sales' ? <AppointmentSales summaries={salesSummaries} isLoading={isSalesLoading} error={salesError} /> : view === 'team' ? <AppointmentsPerTeam appointments={teamAppointments} isLoading={isLoading} error={error || report?.hubSpotWarning || ''} /> : report ? (
           <>
-            <div className="bot-summary-grid" aria-label="Booking source totals">
+            {view === 'bot' ? <div className="bot-summary-grid" aria-label="Bot booking source totals">
+              <article className="total"><span>Total booked</span><strong>{rows.length}</strong><small>Confirmed bot appointments</small></article>
+              <article><span>Booked from ads</span><strong>{(sourceCounts.meta ?? 0) + (sourceCounts.tiktok ?? 0) + (sourceCounts.unverified ?? 0)}</strong><small>Attributed ad bookings</small></article>
+              <article className="meta"><span>Meta ads</span><strong>{sourceCounts.meta ?? 0}</strong><small>Facebook &amp; Instagram</small></article>
+              <article className="tiktok"><span>TikTok ads</span><strong>{sourceCounts.tiktok ?? 0}</strong><small>TikTok bookings</small></article>
+              <article><span>Platform unverified</span><strong>{sourceCounts.unverified ?? 0}</strong><small>Ad platform unavailable</small></article>
+              <article className="organic"><span>Organic</span><strong>{sourceCounts.organic ?? 0}</strong><small>Unpaid bookings</small></article>
+            </div> : <div className="bot-summary-grid" aria-label="Booking source totals">
               <article className="total"><span>Manual appointments</span><strong>{rows.length}</strong><small>{hasDateFilter ? `In selected ${dateField} date range` : 'All available appointments'}</small></article>
               <article className="meta"><span>Meta</span><strong>{sourceCounts.meta ?? 0}</strong><small>Facebook &amp; Instagram</small></article>
               <article className="tiktok"><span>TikTok</span><strong>{sourceCounts.tiktok ?? 0}</strong><small>TikTok bookings</small></article>
               <article className="organic"><span>Repurchase</span><strong>{sourceCounts.repurchase ?? 0}</strong><small>Returning patients</small></article>
               <article className="organic"><span>Follow Ups</span><strong>{sourceCounts['follow-ups'] ?? 0}</strong><small>Follow-up appointments</small></article>
               <article className="organic"><span>Organic</span><strong>{sourceCounts.organic ?? 0}</strong><small>All other sources</small></article>
-            </div>
+            </div>}
 
             <div className="bot-table-card">
               <div className="bot-table-heading">
-                <div><h2>Manual appointment details</h2><p>{rows.length} {rows.length === 1 ? 'appointment' : 'appointments'} · booked date in ET</p></div>
+                <div><h2>{view === 'bot' ? 'Successful bot bookings' : 'Manual appointment details'}</h2><p>{rows.length} {rows.length === 1 ? 'appointment' : 'appointments'} · booked date in ET</p></div>
               </div>
               <div className="bot-table-wrap">
                 <table className="bot-report-table">
-                  <thead><tr><th>Meeting</th><th>Booked at</th><th>Meeting time</th><th>Source</th><th>Phone number</th><th>Status</th></tr></thead>
+                  <thead>{view === 'bot' ? <tr><th>Booked</th><th>Appointment</th><th>Source</th><th>Campaign / Ad</th><th>Phone</th><th>Respond contact</th></tr> : <tr><th>Meeting</th><th>Booked at</th><th>Meeting time</th><th>Source</th><th>Phone number</th><th>Status</th></tr>}</thead>
                   <tbody>
                     {rows.map((booking) => {
-                      const source = getSource(booking)
-                      return <tr key={booking.id}>
+                      const source = view === 'bot' ? getBotSource(booking) : getSource(booking)
+                      return view === 'bot' ? <tr key={booking.id}>
+                        <td>{formatDateTime(booking.booked_at)}</td>
+                        <td>{formatDateTime(booking.meeting_start_at)}</td>
+                        <td><span className={`bot-source-pill ${source}`}>{source === 'meta' ? 'Meta ad' : source === 'tiktok' ? 'TikTok ad' : source}</span></td>
+                        <td>{[booking.campaign_name, booking.ad_name].filter(Boolean).join(' / ') || '—'}</td>
+                        <td>{getPhoneNumber(booking)}</td>
+                        <th scope="row">{booking.respond_contact_id}</th>
+                      </tr> : <tr key={booking.id}>
                         <th scope="row">{booking.meeting_name || `Meeting #${booking.id}`}</th>
                         <td>{formatDateTime(booking.booked_at)}</td>
                         <td>{formatDateTime(booking.meeting_start_at)}</td>
