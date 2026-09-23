@@ -22,7 +22,7 @@ function amount(value) {
 
 export async function getSupplementsAds(date) {
   const params = new URLSearchParams({
-    select: 'report_date,meta,google,tiktok,fetched_at,updated_at',
+    select: 'report_date,meta_cost,google_cost,tiktok_cost,cogs,shipping,fulfillment,processing,fetched_at,updated_at',
     order: 'report_date.asc',
   })
   if (date) {
@@ -33,16 +33,33 @@ export async function getSupplementsAds(date) {
   const response = await fetch(`${supabaseRestUrl()}/supplements_ads_reports?${params}`, { headers: headers() })
   const payload = await response.json().catch(() => [])
   if (!response.ok) throw new Error(payload.message || `Supabase ADS history failed with ${response.status}`)
-  return { rows: Array.isArray(payload) ? payload : [] }
+  return { rows: (Array.isArray(payload) ? payload : []).map((row) => ({
+    report_date: row.report_date,
+    meta: amount(row.meta_cost),
+    google: amount(row.google_cost),
+    tiktok: amount(row.tiktok_cost),
+    cogs: amount(row.cogs),
+    shipping: amount(row.shipping),
+    fulfillment: amount(row.fulfillment),
+    processing: amount(row.processing),
+    fetched_at: row.fetched_at,
+    updated_at: row.updated_at,
+  })) }
 }
 
 export async function saveSupplementsAds(row) {
   if (!validDate(row?.report_date)) throw new Error('Choose a valid report date')
   const saved = {
     report_date: row.report_date,
-    meta: amount(row.meta),
-    google: amount(row.google),
-    tiktok: amount(row.tiktok),
+    timezone: 'America/New_York',
+    currency: 'USD',
+    meta_cost: amount(row.meta),
+    google_cost: amount(row.google),
+    tiktok_cost: amount(row.tiktok),
+    cogs: amount(row.cogs),
+    shipping: amount(row.shipping),
+    fulfillment: amount(row.fulfillment),
+    processing: amount(row.processing),
     fetched_at: new Date().toISOString(),
   }
   const response = await fetch(`${supabaseRestUrl()}/supplements_ads_reports?on_conflict=report_date`, {
@@ -52,5 +69,15 @@ export async function saveSupplementsAds(row) {
   })
   const payload = await response.json().catch(() => [])
   if (!response.ok) throw new Error(payload.message || `Supabase ADS save failed with ${response.status}`)
-  return { row: payload[0] ?? saved }
+  const result = payload[0] ?? saved
+  return { row: {
+    report_date: result.report_date,
+    meta: amount(result.meta_cost),
+    google: amount(result.google_cost),
+    tiktok: amount(result.tiktok_cost),
+    cogs: amount(result.cogs),
+    shipping: amount(result.shipping),
+    fulfillment: amount(result.fulfillment),
+    processing: amount(result.processing),
+  } }
 }

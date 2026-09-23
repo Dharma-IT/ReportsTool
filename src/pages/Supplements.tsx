@@ -72,7 +72,7 @@ type ShopifyCogsRow = {
 }
 
 type AdsSummaryRow = Record<'meta' | 'google' | 'tiktok' | 'cogs' | 'shipping' | 'fulfillment' | 'processing', string> & { date: string }
-type SavedAdsRow = { report_date: string; meta: number; google: number; tiktok: number }
+type SavedAdsRow = { report_date: string; meta: number; google: number; tiktok: number; cogs?: number; shipping?: number; fulfillment?: number; processing?: number }
 
 type FinanceTotals = {
   qty: number
@@ -267,6 +267,7 @@ export default function Supplements() {
   const [cogsError, setCogsError] = useState('')
   const [overview, setOverview] = useState<FinanceOverview | null>(null)
   const [overviewLoading, setOverviewLoading] = useState(false)
+  const [overviewAction, setOverviewAction] = useState<'fetch' | 'view' | ''>('')
   const [overviewMessage, setOverviewMessage] = useState('')
   const [overviewError, setOverviewError] = useState('')
   const activeView = supplementViews.find((item) => item.key === view) ?? supplementViews[0]
@@ -303,6 +304,10 @@ export default function Supplements() {
         meta: numericValue(row.meta).toFixed(2),
         google: numericValue(row.google).toFixed(2),
         tiktok: numericValue(row.tiktok).toFixed(2),
+        cogs: numericValue(row.cogs).toFixed(2),
+        shipping: numericValue(row.shipping).toFixed(2),
+        fulfillment: numericValue(row.fulfillment).toFixed(2),
+        processing: numericValue(row.processing).toFixed(2),
       }))))
       .catch((error: unknown) => setAdsError(error instanceof Error ? error.message : 'Unable to load saved ADS data.'))
   }, [])
@@ -337,14 +342,16 @@ export default function Supplements() {
     try {
       const response = await fetch(getApiUrl('/api/supplements/ads'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ report_date: row.date, meta: row.meta, google: row.google, tiktok: row.tiktok }),
+        body: JSON.stringify({ report_date: row.date, meta: row.meta, google: row.google, tiktok: row.tiktok, cogs: row.cogs, shipping: row.shipping, fulfillment: row.fulfillment, processing: row.processing }),
       })
       const payload = await response.json() as { message?: string }
       if (!response.ok) throw new Error(payload.message || `Unable to save ADS data (${response.status}).`)
       setAdsFeedback(`ADS values for ${row.date} were saved.`)
       setAdsError('')
+      return true
     } catch (error) {
       setAdsError(error instanceof Error ? error.message : 'Unable to save ADS data.')
+      return false
     }
   }
 
@@ -381,8 +388,7 @@ export default function Supplements() {
       const existing = adsRows.find((row) => row.date === adsDate) ?? emptyAdsSummary(adsDate)
       const updated = results.reduce((row, result) => result.field ? { ...row, [result.field]: result.value } : row, existing)
       setAdsRows((rows) => [...rows.filter((row) => row.date !== adsDate), updated].sort((a, b) => a.date.localeCompare(b.date)))
-      await saveAdsRow(updated)
-      setAdsFeedback(`${fetched.join(' and ')} Ads cost for ${adsDate} was fetched and saved to Supabase.`)
+      if (await saveAdsRow(updated)) setAdsFeedback(`${fetched.join(' and ')} Ads cost for ${adsDate} was fetched and saved to Supabase.`)
     }
     if (errors.length) setAdsError(errors.join(' '))
     setAdsCostsLoading(false)
@@ -589,6 +595,7 @@ export default function Supplements() {
     if (!dateInput) return
     const date = dateInput
     setOverviewLoading(true)
+    setOverviewAction('fetch')
     setOverviewError('')
     setOverviewMessage('')
 
@@ -626,6 +633,10 @@ export default function Supplements() {
         meta: numericValue(savedAds.meta).toFixed(2),
         google: numericValue(savedAds.google).toFixed(2),
         tiktok: numericValue(savedAds.tiktok).toFixed(2),
+        cogs: numericValue(savedAds.cogs).toFixed(2),
+        shipping: numericValue(savedAds.shipping).toFixed(2),
+        fulfillment: numericValue(savedAds.fulfillment).toFixed(2),
+        processing: numericValue(savedAds.processing).toFixed(2),
       } : adsRows.find((row) => row.date === date) ?? emptyAdsSummary(date)
       const nextAds: AdsSummaryRow = {
         ...previousAds,
@@ -645,7 +656,7 @@ export default function Supplements() {
       setAdsRows(nextAdsRows)
       await requestJson('/api/supplements/ads', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ report_date: date, meta: nextAds.meta, google: nextAds.google, tiktok: nextAds.tiktok }),
+        body: JSON.stringify({ report_date: date, meta: nextAds.meta, google: nextAds.google, tiktok: nextAds.tiktok, cogs: nextAds.cogs, shipping: nextAds.shipping, fulfillment: nextAds.fulfillment, processing: nextAds.processing }),
       })
       if (salesResult.status === 'fulfilled') setSavedShopifyDates((dates) => new Set(dates).add(date))
       if (ordersResult.status === 'fulfilled') setSavedOrderDates((dates) => new Set(dates).add(date))
@@ -662,6 +673,67 @@ export default function Supplements() {
       setOverviewError(error instanceof Error ? error.message : 'Unable to refresh the finance report.')
     } finally {
       setOverviewLoading(false)
+      setOverviewAction('')
+    }
+  }
+
+  async function viewSavedOverview() {
+    if (!dateInput) return
+    const date = dateInput
+    setOverviewLoading(true)
+    setOverviewAction('view')
+    setOverviewError('')
+    setOverviewMessage('')
+    try {
+      const load = async <T,>(path: string) => {
+        const response = await fetch(getApiUrl(path))
+        const payload = await response.json() as T & { message?: string }
+        if (!response.ok) throw new Error(payload.message || `Unable to load saved data (${response.status}).`)
+        return payload
+      }
+      const [salesPayload, ordersPayload, cogsPayload, adsPayload] = await Promise.all([
+        load<{ rows?: ShopifySalesRow[] }>(`/api/shopify/sales?date=${encodeURIComponent(date)}`),
+        load<{ rows?: ShopifyOrderRow[] }>(`/api/shopify/orders?date=${encodeURIComponent(date)}`),
+        load<{ rows?: ShopifyCogsRow[] }>(`/api/shopify/cogs?date=${encodeURIComponent(date)}`),
+        load<{ rows?: SavedAdsRow[] }>(`/api/supplements/ads?date=${encodeURIComponent(date)}`),
+      ])
+      const sales = salesPayload.rows ?? []
+      const orders = ordersPayload.rows ?? []
+      const costs = cogsPayload.rows ?? []
+      const savedAds = adsPayload.rows?.[0]
+      const ads: AdsSummaryRow = savedAds ? {
+        ...emptyAdsSummary(date),
+        meta: numericValue(savedAds.meta).toFixed(2),
+        google: numericValue(savedAds.google).toFixed(2),
+        tiktok: numericValue(savedAds.tiktok).toFixed(2),
+        cogs: numericValue(savedAds.cogs).toFixed(2),
+        shipping: numericValue(savedAds.shipping).toFixed(2),
+        fulfillment: numericValue(savedAds.fulfillment).toFixed(2),
+        processing: numericValue(savedAds.processing).toFixed(2),
+      } : emptyAdsSummary(date)
+
+      setReportDate(date)
+      setOrdersDate(date)
+      setShopifyDate(date)
+      setTotalSalesDate(date)
+      setAdsDate(date)
+      setCogsDate(date)
+      setShopifyRows(sales)
+      setTotalSalesRows(sales)
+      setOrderRows(orders)
+      setCogsRows(costs)
+      setAdsRows((rows) => [...rows.filter((row) => row.date !== date), ads].sort((a, b) => a.date.localeCompare(b.date)))
+      setOverview({ daily: summarizeFinance(sales, costs, ads), monthly: emptyFinanceTotals() })
+
+      const available = [sales.length ? 'sales' : '', orders.length ? 'orders' : '', costs.length ? 'COGS' : '', savedAds ? 'ADS' : ''].filter(Boolean)
+      setOverviewMessage(available.length
+        ? `Saved ${available.join(', ')} data for ${date} was loaded from Supabase. No external sources were fetched.`
+        : `No saved report data exists for ${date}.`)
+    } catch (error) {
+      setOverviewError(error instanceof Error ? error.message : 'Unable to load the saved report.')
+    } finally {
+      setOverviewLoading(false)
+      setOverviewAction('')
     }
   }
 
@@ -700,7 +772,8 @@ export default function Supplements() {
           <form onSubmit={(event) => { event.preventDefault(); void fetchDailyOverview() }}>
             <label htmlFor="supplements-date">Report date</label>
             <input id="supplements-date" type="date" max={getToday()} value={dateInput} onChange={(event) => setDateInput(event.target.value)} />
-            <button type="submit" disabled={!dateInput || overviewLoading}>{overviewLoading ? 'Fetching…' : 'Fetch all'}</button>
+            <button type="submit" disabled={!dateInput || overviewLoading}>{overviewAction === 'fetch' ? 'Fetching…' : 'Fetch all'}</button>
+            <button className="view" type="button" onClick={() => void viewSavedOverview()} disabled={!dateInput || overviewLoading}>{overviewAction === 'view' ? 'Loading…' : 'View saved'}</button>
           </form>
         </div>
 

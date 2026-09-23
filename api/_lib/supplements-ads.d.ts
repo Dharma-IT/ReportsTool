@@ -3,6 +3,10 @@ export type SupplementsAdsRow = {
   meta: number | string
   google: number | string
   tiktok: number | string
+  cogs?: number | string
+  shipping?: number | string
+  fulfillment?: number | string
+  processing?: number | string
   fetched_at?: string
   updated_at?: string
 }
