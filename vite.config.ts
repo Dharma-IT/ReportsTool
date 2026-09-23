@@ -3330,8 +3330,16 @@ function acAutomationApi(stripeSecretKey: string): Plugin {
             return [contact.customerId && `cus:${contact.customerId}`, email && `email:${email}`, contact.phone && `phone:${contact.phone}`, name && (email || contact.phone) && `name:${name}|${email || contact.phone}`].filter(Boolean) as string[]
           }
           const succeededKeys = new Set(resolved.filter((contact) => contact.status === 'succeeded').flatMap(identityKeys))
+          let unusableContacts = 0
           for (const contact of resolved) {
             if (contact.status === 'succeeded') continue
+            // Stripe can return incomplete PaymentIntents and Sessions without
+            // any customer details. They are not actionable recovery contacts
+            // and previously became blank rows with frontend defaults filled in.
+            if (!canonicalClientEmail(contact.email) && !contact.phone) {
+              unusableContacts += 1
+              continue
+            }
             const keys = identityKeys(contact)
             if (keys.some((key) => succeededKeys.has(key))) continue
             let index = keys.map((key) => aliases.get(key)).find((value) => value !== undefined)
@@ -3343,7 +3351,7 @@ function acAutomationApi(stripeSecretKey: string): Plugin {
           const unavailablePhones = output.filter((contact) => !contact.phone).length
           const phoneRecovery = Object.fromEntries([...new Set(contacts.map((contact) => contact.phoneSource))].map((source) => [source, contacts.filter((contact) => contact.phoneSource === source).length]))
           for (const failure of failures) console.warn(`[AC Automation] Stripe lookup failed: ${failure}`)
-          sendJson(response, 200, { date: selectedDate, timezone: 'America/New_York', statuses: selectedStatuses, contacts: output, unavailablePhones, phoneRecovery, lookupFailures: failures.length, message: `${output.length} unique contacts imported. ${unavailablePhones} phone numbers unavailable.` })
+          sendJson(response, 200, { date: selectedDate, timezone: 'America/New_York', statuses: selectedStatuses, contacts: output, unavailablePhones, unusableContacts, phoneRecovery, lookupFailures: failures.length, message: `${output.length} unique contacts imported. ${unavailablePhones} phone numbers unavailable.${unusableContacts ? ` ${unusableContacts} Stripe records without an email or phone were skipped.` : ''}` })
         } catch (error) {
           sendJson(response, 500, { message: error instanceof Error ? error.message : 'Unable to load Stripe abandoned carts.' })
         }
