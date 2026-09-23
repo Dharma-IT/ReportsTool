@@ -73,6 +73,26 @@ type ShopifyCogsRow = {
 
 type AdsSummaryRow = Record<'meta' | 'google' | 'tiktok' | 'cogs' | 'shipping' | 'fulfillment' | 'processing', string> & { date: string }
 
+type FinanceTotals = {
+  qty: number
+  sales: number
+  meta: number
+  tiktok: number
+  google: number
+  cogs: number
+  shipping: number
+  fulfillment: number
+  processingSupliful: number
+  processingShopify: number
+}
+
+type FinanceOverview = { daily: FinanceTotals; monthly: FinanceTotals }
+
+const emptyFinanceTotals = (): FinanceTotals => ({
+  qty: 0, sales: 0, meta: 0, tiktok: 0, google: 0, cogs: 0, shipping: 0,
+  fulfillment: 0, processingSupliful: 0, processingShopify: 0,
+})
+
 const emptyAdsSummary = (date: string): AdsSummaryRow => ({ date, meta: '', google: '', tiktok: '', cogs: '', shipping: '', fulfillment: '', processing: '' })
 
 function readStoredRows<T>(key: string): T[] {
@@ -152,6 +172,42 @@ function EmptyAmount() {
   return <span className="supplements-empty" aria-label="No data">—</span>
 }
 
+function numericValue(value: string | number | null | undefined) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : 0
+}
+
+function summarizeFinance(salesRows: ShopifySalesRow[], cogsRows: ShopifyCogsRow[], ads?: AdsSummaryRow): FinanceTotals {
+  return {
+    qty: salesRows.reduce((sum, row) => sum + numericValue(row.qty), 0),
+    sales: salesRows.reduce((sum, row) => sum + numericValue(row.line_total_sales), 0),
+    meta: numericValue(ads?.meta),
+    tiktok: numericValue(ads?.tiktok),
+    google: numericValue(ads?.google),
+    cogs: cogsRows.reduce((sum, row) => sum + numericValue(row.subtotal), 0),
+    shipping: cogsRows.reduce((sum, row) => sum + numericValue(row.shipping), 0),
+    fulfillment: cogsRows.reduce((sum, row) => sum + numericValue(row.fulfillment_supliful), 0),
+    processingSupliful: cogsRows.reduce((sum, row) => sum + numericValue(row.processing_supliful), 0),
+    processingShopify: cogsRows.reduce((sum, row) => sum + numericValue(row.processing_shopify), 0),
+  }
+}
+
+function combineFinanceTotals(totals: FinanceTotals[]) {
+  return totals.reduce((combined, current) => {
+    for (const key of Object.keys(combined) as Array<keyof FinanceTotals>) combined[key] += current[key]
+    return combined
+  }, emptyFinanceTotals())
+}
+
+function totalSpend(total: FinanceTotals) {
+  return total.meta + total.tiktok + total.google + total.cogs + total.shipping + total.fulfillment
+    + total.processingSupliful + total.processingShopify
+}
+
+function moneyAmount(value: number) {
+  return value.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+}
+
 function OrderCalendar({ selected, savedDates, onSelect }: { selected: string; savedDates: Set<string>; onSelect: (date: string) => void }) {
   const [open, setOpen] = useState(false)
   const [month, setMonth] = useState(() => new Date(`${selected}T12:00:00`))
@@ -217,6 +273,10 @@ export default function Supplements() {
   const [cogsLoading, setCogsLoading] = useState(false)
   const [cogsMessage, setCogsMessage] = useState('')
   const [cogsError, setCogsError] = useState('')
+  const [overview, setOverview] = useState<FinanceOverview | null>(null)
+  const [overviewLoading, setOverviewLoading] = useState(false)
+  const [overviewMessage, setOverviewMessage] = useState('')
+  const [overviewError, setOverviewError] = useState('')
   const activeView = supplementViews.find((item) => item.key === view) ?? supplementViews[0]
 
   useEffect(() => {
@@ -499,9 +559,104 @@ export default function Supplements() {
     }
   }
 
+  async function fetchDailyOverview() {
+    if (!dateInput) return
+    const date = dateInput
+    setOverviewLoading(true)
+    setOverviewError('')
+    setOverviewMessage('')
+
+    async function requestJson<T>(path: string, init?: RequestInit) {
+      const response = await fetch(getApiUrl(path), init)
+      const payload = await response.json().catch(() => ({})) as T & { message?: string }
+      if (!response.ok) throw new Error(payload.message || `Request failed (${response.status}).`)
+      return payload
+    }
+
+    try {
+      setReportDate(date)
+      setOrdersDate(date)
+      setShopifyDate(date)
+      setTotalSalesDate(date)
+      setAdsDate(date)
+      setCogsDate(date)
+
+      const postDate = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date }) }
+      const [salesResult, ordersResult, cogsResult, metaResult, googleResult] = await Promise.allSettled([
+        requestJson<{ rows?: ShopifySalesRow[] }>('/api/shopify/sales', postDate),
+        requestJson<{ rows?: ShopifyOrderRow[] }>('/api/shopify/orders', postDate),
+        requestJson<{ rows?: ShopifyCogsRow[] }>('/api/shopify/cogs', postDate),
+        requestJson<{ cost?: number }>(`/api/meta-ads/cost?date=${encodeURIComponent(date)}`),
+        requestJson<{ cost?: number }>(`/api/google-ads/cost?date=${encodeURIComponent(date)}`),
+      ])
+
+      const sales = salesResult.status === 'fulfilled' ? salesResult.value.rows ?? [] : []
+      const orders = ordersResult.status === 'fulfilled' ? ordersResult.value.rows ?? [] : []
+      const costs = cogsResult.status === 'fulfilled' ? cogsResult.value.rows ?? [] : []
+      const previousAds = adsRows.find((row) => row.date === date) ?? emptyAdsSummary(date)
+      const nextAds: AdsSummaryRow = {
+        ...previousAds,
+        meta: metaResult.status === 'fulfilled' ? numericValue(metaResult.value.cost).toFixed(2) : previousAds.meta,
+        google: googleResult.status === 'fulfilled' ? numericValue(googleResult.value.cost).toFixed(2) : previousAds.google,
+        cogs: costs.reduce((sum, row) => sum + numericValue(row.subtotal), 0).toFixed(2),
+        shipping: costs.reduce((sum, row) => sum + numericValue(row.shipping), 0).toFixed(2),
+        fulfillment: costs.reduce((sum, row) => sum + numericValue(row.fulfillment_supliful), 0).toFixed(2),
+        processing: costs.reduce((sum, row) => sum + numericValue(row.processing_supliful) + numericValue(row.processing_shopify), 0).toFixed(2),
+      }
+      const nextAdsRows = [...adsRows.filter((row) => row.date !== date), nextAds].sort((a, b) => a.date.localeCompare(b.date))
+
+      setShopifyRows(sales)
+      setTotalSalesRows(sales)
+      setOrderRows(orders)
+      setCogsRows(costs)
+      setAdsRows(nextAdsRows)
+      if (salesResult.status === 'fulfilled') setSavedShopifyDates((dates) => new Set(dates).add(date))
+      if (ordersResult.status === 'fulfilled') setSavedOrderDates((dates) => new Set(dates).add(date))
+      if (cogsResult.status === 'fulfilled') setSavedCogsDates((dates) => new Set(dates).add(date))
+
+      const monthStart = `${date.slice(0, 7)}-01`
+      const [salesDatesResult, cogsDatesResult] = await Promise.allSettled([
+        requestJson<{ dates?: string[] }>('/api/shopify/sales?dates=1'),
+        requestJson<{ dates?: string[] }>('/api/shopify/cogs?dates=1'),
+      ])
+      const monthSalesDates = salesDatesResult.status === 'fulfilled'
+        ? (salesDatesResult.value.dates ?? []).filter((savedDate) => savedDate >= monthStart && savedDate <= date && savedDate !== date)
+        : []
+      const monthCogsDates = cogsDatesResult.status === 'fulfilled'
+        ? (cogsDatesResult.value.dates ?? []).filter((savedDate) => savedDate >= monthStart && savedDate <= date && savedDate !== date)
+        : []
+      const [savedSales, savedCosts] = await Promise.all([
+        Promise.all(monthSalesDates.map((savedDate) => requestJson<{ rows?: ShopifySalesRow[] }>(`/api/shopify/sales?date=${encodeURIComponent(savedDate)}`).then((payload) => payload.rows ?? []).catch(() => []))),
+        Promise.all(monthCogsDates.map((savedDate) => requestJson<{ rows?: ShopifyCogsRow[] }>(`/api/shopify/cogs?date=${encodeURIComponent(savedDate)}`).then((payload) => payload.rows ?? []).catch(() => []))),
+      ])
+      const monthAds = nextAdsRows.filter((row) => row.date >= monthStart && row.date <= date)
+      const monthly = combineFinanceTotals([
+        summarizeFinance([...savedSales.flat(), ...sales], [...savedCosts.flat(), ...costs]),
+        ...monthAds.map((row) => summarizeFinance([], [], row)),
+      ])
+      setOverview({ daily: summarizeFinance(sales, costs, nextAds), monthly })
+
+      const failures = [salesResult, ordersResult, cogsResult, metaResult, googleResult]
+        .flatMap((result) => result.status === 'rejected' ? [result.reason instanceof Error ? result.reason.message : 'A source failed to refresh.'] : [])
+      if (failures.length) setOverviewError(`Some sources could not be refreshed: ${failures.join(' ')}`)
+      setOverviewMessage(`All available report sections were refreshed for ${date}.`)
+    } catch (error) {
+      setOverviewError(error instanceof Error ? error.message : 'Unable to refresh the finance report.')
+    } finally {
+      setOverviewLoading(false)
+    }
+  }
+
   function formatShopifyAmount(value: number | null) {
     return value == null ? '' : value.toFixed(2)
   }
+
+  const daily = overview?.daily
+  const monthly = overview?.monthly
+  const dailyExpenseValues = daily ? [
+    daily.meta, daily.tiktok, daily.google, daily.shipping, daily.fulfillment,
+    daily.processingSupliful, daily.processingShopify, daily.cogs,
+  ] : []
 
   return (
     <main className="dashboard-shell supplements-page supplements-layout">
@@ -525,10 +680,10 @@ export default function Supplements() {
 
         {view === 'daily' ? <><div className="supplements-toolbar">
           <div><span>Report controls</span><strong>Select a reporting date</strong></div>
-          <form onSubmit={(event) => { event.preventDefault(); setReportDate(dateInput) }}>
+          <form onSubmit={(event) => { event.preventDefault(); void fetchDailyOverview() }}>
             <label htmlFor="supplements-date">Report date</label>
-            <input id="supplements-date" type="date" value={dateInput} onChange={(event) => setDateInput(event.target.value)} />
-            <button type="submit" disabled={!dateInput}>Apply</button>
+            <input id="supplements-date" type="date" max={getToday()} value={dateInput} onChange={(event) => setDateInput(event.target.value)} />
+            <button type="submit" disabled={!dateInput || overviewLoading}>{overviewLoading ? 'Fetching…' : 'Fetch all'}</button>
           </form>
         </div>
 
@@ -541,18 +696,20 @@ export default function Supplements() {
             <table className="supplements-table">
               <thead><tr><th scope="col">Description</th><th scope="col">Qty. Sold</th><th scope="col">Sales Amount</th></tr></thead>
               <tbody>
-                <tr><th scope="row">Shopify Sales Daily</th><td><EmptyAmount /></td><td><EmptyAmount /></td></tr>
-                <tr className="supplements-total"><th scope="row">Gross Profit Daily</th><td><EmptyAmount /></td><td><EmptyAmount /></td></tr>
-                {dailyExpenses.map((label) => <tr key={label}><th scope="row">{label}</th><td /><td><EmptyAmount /></td></tr>)}
-                <tr className="supplements-total"><th scope="row">Total Spend Daily</th><td /><td><EmptyAmount /></td></tr>
-                <tr className="supplements-net"><th scope="row">Net Profit Daily</th><td><EmptyAmount /></td><td><EmptyAmount /></td></tr>
-                <tr className="supplements-month"><th scope="row">Gross Profit Monthly</th><td><EmptyAmount /></td><td><EmptyAmount /></td></tr>
-                <tr><th scope="row">Spend Monthly <small>(ads, GMV Max &amp; fees)</small></th><td><EmptyAmount /></td><td><EmptyAmount /></td></tr>
-                <tr className="supplements-net"><th scope="row">Net Profit Monthly</th><td><EmptyAmount /></td><td><EmptyAmount /></td></tr>
+                <tr><th scope="row">Shopify Sales Daily</th><td>{daily ? daily.qty.toLocaleString('en-US') : <EmptyAmount />}</td><td>{daily ? moneyAmount(daily.sales) : <EmptyAmount />}</td></tr>
+                <tr className="supplements-total"><th scope="row">Gross Profit Daily</th><td><EmptyAmount /></td><td>{daily ? moneyAmount(daily.sales - daily.cogs) : <EmptyAmount />}</td></tr>
+                {dailyExpenses.map((label, index) => <tr key={label}><th scope="row">{label}</th><td /><td>{daily ? moneyAmount(dailyExpenseValues[index]) : <EmptyAmount />}</td></tr>)}
+                <tr className="supplements-total"><th scope="row">Total Spend Daily</th><td /><td>{daily ? moneyAmount(totalSpend(daily)) : <EmptyAmount />}</td></tr>
+                <tr className="supplements-net"><th scope="row">Net Profit Daily</th><td><EmptyAmount /></td><td>{daily ? moneyAmount(daily.sales - totalSpend(daily)) : <EmptyAmount />}</td></tr>
+                <tr className="supplements-month"><th scope="row">Gross Profit Monthly</th><td>{monthly ? monthly.qty.toLocaleString('en-US') : <EmptyAmount />}</td><td>{monthly ? moneyAmount(monthly.sales - monthly.cogs) : <EmptyAmount />}</td></tr>
+                <tr><th scope="row">Spend Monthly <small>(ads, GMV Max &amp; fees)</small></th><td><EmptyAmount /></td><td>{monthly ? moneyAmount(totalSpend(monthly)) : <EmptyAmount />}</td></tr>
+                <tr className="supplements-net"><th scope="row">Net Profit Monthly</th><td><EmptyAmount /></td><td>{monthly ? moneyAmount(monthly.sales - totalSpend(monthly)) : <EmptyAmount />}</td></tr>
               </tbody>
             </table>
           </div>
-          <p className="supplements-note"><span /> No supplement data has been connected yet. Values will appear here once a source is available.</p>
+          {overviewError ? <p className="supplements-orders-feedback error" role="alert">{overviewError}</p> : null}
+          {overviewMessage ? <p className="supplements-orders-feedback success" role="status">{overviewMessage}</p> : null}
+          <p className="supplements-note"><span /> Fetch all refreshes every sidebar section for this date. TikTok uses the value saved in the ADS sheet.</p>
         </div></> : view === 'ads' ? <section className="supplements-content" aria-labelledby="supplements-ads-title">
           <div className="supplements-table-heading">
             <div><span>Advertising spend</span><h2 id="supplements-ads-title">ADS</h2></div>
