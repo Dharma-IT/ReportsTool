@@ -181,7 +181,16 @@ export async function syncShopifyCogs(date) {
   validateDate(date)
   const report = await fetchShopifySales(date)
   const orderNames = report.rows.map((item) => item.name).filter(Boolean)
-  const payouts = await fetchShopifyProcessingFees(orderNames)
+  let payouts = new Map()
+  let payoutWarning = null
+  try {
+    // Shopify2 has the payments scope needed for exact payout fees. Its
+    // availability must not prevent the primary Shopify client from producing
+    // product, shipping, fulfillment, Supliful processing, and COGS values.
+    payouts = await fetchShopifyProcessingFees(orderNames)
+  } catch (error) {
+    payoutWarning = error instanceof Error ? error.message : 'Shopify payout fees are unavailable.'
+  }
   const orderDetails = new Map()
   let detailOrder = ''
   for (const item of report.rows) {
@@ -229,7 +238,7 @@ export async function syncShopifyCogs(date) {
     return row
   })
   await saveShopifyCogs(date, rows)
-  return { date, fetchedAt: report.fetchedAt, rows }
+  return { date, fetchedAt: report.fetchedAt, rows, ...(payoutWarning ? { warnings: [payoutWarning] } : {}) }
 }
 
 export async function getSavedShopifyCogs(date) {

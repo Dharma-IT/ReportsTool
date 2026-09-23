@@ -180,7 +180,9 @@ function numericValue(value: string | number | null | undefined) {
 function summarizeFinance(salesRows: ShopifySalesRow[], cogsRows: ShopifyCogsRow[], ads?: AdsSummaryRow): FinanceTotals {
   return {
     qty: salesRows.reduce((sum, row) => sum + numericValue(row.qty), 0),
-    sales: salesRows.reduce((sum, row) => sum + numericValue(row.line_total_sales), 0),
+    // Shopify's order total is emitted once per order. Summing line totals can
+    // double-count expanded multi-pack items and does not match Shopify Finance.
+    sales: salesRows.reduce((sum, row) => sum + numericValue(row.total_sales), 0),
     meta: numericValue(ads?.meta),
     tiktok: numericValue(ads?.tiktok),
     google: numericValue(ads?.google),
@@ -190,13 +192,6 @@ function summarizeFinance(salesRows: ShopifySalesRow[], cogsRows: ShopifyCogsRow
     processingSupliful: cogsRows.reduce((sum, row) => sum + numericValue(row.processing_supliful), 0),
     processingShopify: cogsRows.reduce((sum, row) => sum + numericValue(row.processing_shopify), 0),
   }
-}
-
-function combineFinanceTotals(totals: FinanceTotals[]) {
-  return totals.reduce((combined, current) => {
-    for (const key of Object.keys(combined) as Array<keyof FinanceTotals>) combined[key] += current[key]
-    return combined
-  }, emptyFinanceTotals())
 }
 
 function totalSpend(total: FinanceTotals) {
@@ -585,7 +580,7 @@ export default function Supplements() {
       const [salesResult, ordersResult, cogsResult, metaResult, googleResult] = await Promise.allSettled([
         requestJson<{ rows?: ShopifySalesRow[] }>('/api/shopify/sales', postDate),
         requestJson<{ rows?: ShopifyOrderRow[] }>('/api/shopify/orders', postDate),
-        requestJson<{ rows?: ShopifyCogsRow[] }>('/api/shopify/cogs', postDate),
+        requestJson<{ rows?: ShopifyCogsRow[]; warnings?: string[] }>('/api/shopify/cogs', postDate),
         requestJson<{ cost?: number }>(`/api/meta-ads/cost?date=${encodeURIComponent(date)}`),
         requestJson<{ cost?: number }>(`/api/google-ads/cost?date=${encodeURIComponent(date)}`),
       ])
@@ -614,30 +609,11 @@ export default function Supplements() {
       if (ordersResult.status === 'fulfilled') setSavedOrderDates((dates) => new Set(dates).add(date))
       if (cogsResult.status === 'fulfilled') setSavedCogsDates((dates) => new Set(dates).add(date))
 
-      const monthStart = `${date.slice(0, 7)}-01`
-      const [salesDatesResult, cogsDatesResult] = await Promise.allSettled([
-        requestJson<{ dates?: string[] }>('/api/shopify/sales?dates=1'),
-        requestJson<{ dates?: string[] }>('/api/shopify/cogs?dates=1'),
-      ])
-      const monthSalesDates = salesDatesResult.status === 'fulfilled'
-        ? (salesDatesResult.value.dates ?? []).filter((savedDate) => savedDate >= monthStart && savedDate <= date && savedDate !== date)
-        : []
-      const monthCogsDates = cogsDatesResult.status === 'fulfilled'
-        ? (cogsDatesResult.value.dates ?? []).filter((savedDate) => savedDate >= monthStart && savedDate <= date && savedDate !== date)
-        : []
-      const [savedSales, savedCosts] = await Promise.all([
-        Promise.all(monthSalesDates.map((savedDate) => requestJson<{ rows?: ShopifySalesRow[] }>(`/api/shopify/sales?date=${encodeURIComponent(savedDate)}`).then((payload) => payload.rows ?? []).catch(() => []))),
-        Promise.all(monthCogsDates.map((savedDate) => requestJson<{ rows?: ShopifyCogsRow[] }>(`/api/shopify/cogs?date=${encodeURIComponent(savedDate)}`).then((payload) => payload.rows ?? []).catch(() => []))),
-      ])
-      const monthAds = nextAdsRows.filter((row) => row.date >= monthStart && row.date <= date)
-      const monthly = combineFinanceTotals([
-        summarizeFinance([...savedSales.flat(), ...sales], [...savedCosts.flat(), ...costs]),
-        ...monthAds.map((row) => summarizeFinance([], [], row)),
-      ])
-      setOverview({ daily: summarizeFinance(sales, costs, nextAds), monthly })
+      setOverview({ daily: summarizeFinance(sales, costs, nextAds), monthly: emptyFinanceTotals() })
 
       const failures = [salesResult, ordersResult, cogsResult, metaResult, googleResult]
         .flatMap((result) => result.status === 'rejected' ? [result.reason instanceof Error ? result.reason.message : 'A source failed to refresh.'] : [])
+      if (cogsResult.status === 'fulfilled') failures.push(...(cogsResult.value.warnings ?? []))
       if (failures.length) setOverviewError(`Some sources could not be refreshed: ${failures.join(' ')}`)
       setOverviewMessage(`All available report sections were refreshed for ${date}.`)
     } catch (error) {
@@ -652,7 +628,6 @@ export default function Supplements() {
   }
 
   const daily = overview?.daily
-  const monthly = overview?.monthly
   const dailyExpenseValues = daily ? [
     daily.meta, daily.tiktok, daily.google, daily.shipping, daily.fulfillment,
     daily.processingSupliful, daily.processingShopify, daily.cogs,
@@ -697,13 +672,13 @@ export default function Supplements() {
               <thead><tr><th scope="col">Description</th><th scope="col">Qty. Sold</th><th scope="col">Sales Amount</th></tr></thead>
               <tbody>
                 <tr><th scope="row">Shopify Sales Daily</th><td>{daily ? daily.qty.toLocaleString('en-US') : <EmptyAmount />}</td><td>{daily ? moneyAmount(daily.sales) : <EmptyAmount />}</td></tr>
-                <tr className="supplements-total"><th scope="row">Gross Profit Daily</th><td><EmptyAmount /></td><td>{daily ? moneyAmount(daily.sales - daily.cogs) : <EmptyAmount />}</td></tr>
+                <tr className="supplements-total"><th scope="row">Gross Profit Daily</th><td><EmptyAmount /></td><td>{daily ? moneyAmount(daily.sales) : <EmptyAmount />}</td></tr>
                 {dailyExpenses.map((label, index) => <tr key={label}><th scope="row">{label}</th><td /><td>{daily ? moneyAmount(dailyExpenseValues[index]) : <EmptyAmount />}</td></tr>)}
                 <tr className="supplements-total"><th scope="row">Total Spend Daily</th><td /><td>{daily ? moneyAmount(totalSpend(daily)) : <EmptyAmount />}</td></tr>
                 <tr className="supplements-net"><th scope="row">Net Profit Daily</th><td><EmptyAmount /></td><td>{daily ? moneyAmount(daily.sales - totalSpend(daily)) : <EmptyAmount />}</td></tr>
-                <tr className="supplements-month"><th scope="row">Gross Profit Monthly</th><td>{monthly ? monthly.qty.toLocaleString('en-US') : <EmptyAmount />}</td><td>{monthly ? moneyAmount(monthly.sales - monthly.cogs) : <EmptyAmount />}</td></tr>
-                <tr><th scope="row">Spend Monthly <small>(ads, GMV Max &amp; fees)</small></th><td><EmptyAmount /></td><td>{monthly ? moneyAmount(totalSpend(monthly)) : <EmptyAmount />}</td></tr>
-                <tr className="supplements-net"><th scope="row">Net Profit Monthly</th><td><EmptyAmount /></td><td>{monthly ? moneyAmount(monthly.sales - totalSpend(monthly)) : <EmptyAmount />}</td></tr>
+                <tr className="supplements-month"><th scope="row">Gross Profit Monthly</th><td><EmptyAmount /></td><td><EmptyAmount /></td></tr>
+                <tr><th scope="row">Spend Monthly <small>(ads, GMV Max &amp; fees)</small></th><td><EmptyAmount /></td><td><EmptyAmount /></td></tr>
+                <tr className="supplements-net"><th scope="row">Net Profit Monthly</th><td><EmptyAmount /></td><td><EmptyAmount /></td></tr>
               </tbody>
             </table>
           </div>
