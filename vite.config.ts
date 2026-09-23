@@ -2352,23 +2352,27 @@ async function fetchHubSpotBotBookings(reportDate: string, token: string) {
 }
 
 async function fetchHubSpotOwners(token: string) {
-  const owners: HubSpotOwner[] = []
-  let after = ''
+  const ownersById = new Map<string, HubSpotOwner>()
 
-  do {
-    const url = new URL('https://api.hubapi.com/crm/v3/owners')
-    url.searchParams.set('limit', '100')
-    url.searchParams.set('archived', 'false')
-    if (after) url.searchParams.set('after', after)
-    const payload = await hubSpotGet<{
-      results?: HubSpotOwner[]
-      paging?: { next?: { after?: string } }
-    }>(url.toString(), token)
-    owners.push(...(payload.results ?? []))
-    after = payload.paging?.next?.after ?? ''
-  } while (after)
+  // Deals retain their original owner ID after that owner is deactivated.
+  // Load archived owners as well so historical sales remain attributable.
+  for (const archived of ['false', 'true']) {
+    let after = ''
+    do {
+      const url = new URL('https://api.hubapi.com/crm/v3/owners')
+      url.searchParams.set('limit', '100')
+      url.searchParams.set('archived', archived)
+      if (after) url.searchParams.set('after', after)
+      const payload = await hubSpotGet<{
+        results?: HubSpotOwner[]
+        paging?: { next?: { after?: string } }
+      }>(url.toString(), token)
+      for (const owner of payload.results ?? []) ownersById.set(String(owner.id), owner)
+      after = payload.paging?.next?.after ?? ''
+    } while (after)
+  }
 
-  return owners
+  return [...ownersById.values()]
 }
 
 async function hubSpotGet<T>(url: string, token: string): Promise<T> {

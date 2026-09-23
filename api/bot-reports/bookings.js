@@ -43,12 +43,23 @@ async function fetchManualAppointments(fromDate, toDate, dateField) {
     after = payload.paging?.next?.after
   } while (after)
 
-  const ownersResponse = await fetch('https://api.hubapi.com/crm/v3/owners?limit=100&archived=false', {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  const ownersPayload = await ownersResponse.json()
-  if (!ownersResponse.ok) throw new Error(ownersPayload.message ?? `HubSpot owners failed with ${ownersResponse.status}`)
-  const ownerNames = new Map((ownersPayload.results ?? []).map((owner) => [String(owner.id), `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim()]))
+  const ownerNames = new Map()
+  for (const archived of ['false', 'true']) {
+    let ownerAfter
+    do {
+      const ownersUrl = new URL('https://api.hubapi.com/crm/v3/owners')
+      ownersUrl.searchParams.set('limit', '100')
+      ownersUrl.searchParams.set('archived', archived)
+      if (ownerAfter) ownersUrl.searchParams.set('after', ownerAfter)
+      const ownersResponse = await fetch(ownersUrl, { headers: { Authorization: `Bearer ${token}` } })
+      const ownersPayload = await ownersResponse.json()
+      if (!ownersResponse.ok) throw new Error(ownersPayload.message ?? `HubSpot owners failed with ${ownersResponse.status}`)
+      for (const owner of ownersPayload.results ?? []) {
+        ownerNames.set(String(owner.id), `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim())
+      }
+      ownerAfter = ownersPayload.paging?.next?.after
+    } while (ownerAfter)
+  }
   const appointmentTeams = [
     { team: 'sales', name: 'Andres Castro', aliases: ['andres castro'] },
     { team: 'sales', name: 'Maria Claudia', aliases: ['maria claudia'] },
