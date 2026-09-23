@@ -72,6 +72,7 @@ type ShopifyCogsRow = {
 }
 
 type AdsSummaryRow = Record<'meta' | 'google' | 'tiktok' | 'cogs' | 'shipping' | 'fulfillment' | 'processing', string> & { date: string }
+type SavedAdsRow = { report_date: string; meta: number; google: number; tiktok: number }
 
 type FinanceTotals = {
   qty: number
@@ -94,10 +95,6 @@ const emptyFinanceTotals = (): FinanceTotals => ({
 })
 
 const emptyAdsSummary = (date: string): AdsSummaryRow => ({ date, meta: '', google: '', tiktok: '', cogs: '', shipping: '', fulfillment: '', processing: '' })
-
-function readStoredRows<T>(key: string): T[] {
-  try { return JSON.parse(localStorage.getItem(key) ?? '[]') as T[] } catch { return [] }
-}
 
 const dailyExpenses = [
   'Meta Ads',
@@ -258,7 +255,7 @@ export default function Supplements() {
   const [totalSalesMessage, setTotalSalesMessage] = useState('')
   const [totalSalesError, setTotalSalesError] = useState('')
   const [adsDate, setAdsDate] = useState(getToday())
-  const [adsRows, setAdsRows] = useState<AdsSummaryRow[]>(() => readStoredRows<AdsSummaryRow>('supplements-ads-summary'))
+  const [adsRows, setAdsRows] = useState<AdsSummaryRow[]>([])
   const [adsCostsLoading, setAdsCostsLoading] = useState(false)
   const [adsFeedback, setAdsFeedback] = useState('')
   const [adsError, setAdsError] = useState('')
@@ -294,7 +291,21 @@ export default function Supplements() {
     }).catch(() => undefined)
   }, [view])
 
-  useEffect(() => { localStorage.setItem('supplements-ads-summary', JSON.stringify(adsRows)) }, [adsRows])
+  useEffect(() => {
+    void fetch(getApiUrl('/api/supplements/ads'))
+      .then(async (response) => {
+        const payload = await response.json() as { rows?: SavedAdsRow[]; message?: string }
+        if (!response.ok) throw new Error(payload.message || 'Unable to load saved ADS data')
+        return payload.rows ?? []
+      })
+      .then((rows) => setAdsRows(rows.map((row) => ({
+        ...emptyAdsSummary(row.report_date),
+        meta: numericValue(row.meta).toFixed(2),
+        google: numericValue(row.google).toFixed(2),
+        tiktok: numericValue(row.tiktok).toFixed(2),
+      }))))
+      .catch((error: unknown) => setAdsError(error instanceof Error ? error.message : 'Unable to load saved ADS data.'))
+  }, [])
 
   useEffect(() => {
     if (view !== 'cogs') return
@@ -322,6 +333,21 @@ export default function Supplements() {
     })
   }
 
+  async function saveAdsRow(row: AdsSummaryRow) {
+    try {
+      const response = await fetch(getApiUrl('/api/supplements/ads'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report_date: row.date, meta: row.meta, google: row.google, tiktok: row.tiktok }),
+      })
+      const payload = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(payload.message || `Unable to save ADS data (${response.status}).`)
+      setAdsFeedback(`ADS values for ${row.date} were saved.`)
+      setAdsError('')
+    } catch (error) {
+      setAdsError(error instanceof Error ? error.message : 'Unable to save ADS data.')
+    }
+  }
+
   function updateAdsCostBreakdown(date: string, rows: ShopifyCogsRow[]) {
     const total = (field: keyof ShopifyCogsRow) => rows.reduce((sum, row) => sum + (Number(row[field]) || 0), 0).toFixed(2)
     setAdsRows((currentRows) => {
@@ -347,12 +373,17 @@ export default function Supplements() {
       const response = await fetch(getApiUrl(`${source.path}?date=${encodeURIComponent(adsDate)}`))
       const payload = await response.json() as { cost?: number; message?: string }
       if (!response.ok) throw new Error(`${source.name}: ${payload.message || `request failed (${response.status})`}`)
-      updateAdsRow(adsDate, source.field, Number(payload.cost ?? 0).toFixed(2))
-      return source.name
-    }).map((request) => request.then((name) => ({ name, error: '' })).catch((error: unknown) => ({ name: '', error: error instanceof Error ? error.message : 'Ad cost fetch failed.' }))))
+      return { name: source.name, field: source.field, value: numericValue(payload.cost).toFixed(2) }
+    }).map((request) => request.then((result) => ({ ...result, error: '' })).catch((error: unknown) => ({ name: '', field: null, value: '', error: error instanceof Error ? error.message : 'Ad cost fetch failed.' }))))
     const fetched = results.flatMap((result) => result.name ? [result.name] : [])
     const errors = results.flatMap((result) => result.error ? [result.error] : [])
-    if (fetched.length) setAdsFeedback(`${fetched.join(' and ')} Ads cost for ${adsDate} was fetched and saved.`)
+    if (fetched.length) {
+      const existing = adsRows.find((row) => row.date === adsDate) ?? emptyAdsSummary(adsDate)
+      const updated = results.reduce((row, result) => result.field ? { ...row, [result.field]: result.value } : row, existing)
+      setAdsRows((rows) => [...rows.filter((row) => row.date !== adsDate), updated].sort((a, b) => a.date.localeCompare(b.date)))
+      await saveAdsRow(updated)
+      setAdsFeedback(`${fetched.join(' and ')} Ads cost for ${adsDate} was fetched and saved to Supabase.`)
+    }
     if (errors.length) setAdsError(errors.join(' '))
     setAdsCostsLoading(false)
   }
@@ -577,18 +608,25 @@ export default function Supplements() {
       setCogsDate(date)
 
       const postDate = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date }) }
-      const [salesResult, ordersResult, cogsResult, metaResult, googleResult] = await Promise.allSettled([
+      const [salesResult, ordersResult, cogsResult, metaResult, googleResult, savedAdsResult] = await Promise.allSettled([
         requestJson<{ rows?: ShopifySalesRow[] }>('/api/shopify/sales', postDate),
         requestJson<{ rows?: ShopifyOrderRow[] }>('/api/shopify/orders', postDate),
         requestJson<{ rows?: ShopifyCogsRow[]; warnings?: string[] }>('/api/shopify/cogs', postDate),
         requestJson<{ cost?: number }>(`/api/meta-ads/cost?date=${encodeURIComponent(date)}`),
         requestJson<{ cost?: number }>(`/api/google-ads/cost?date=${encodeURIComponent(date)}`),
+        requestJson<{ rows?: SavedAdsRow[] }>(`/api/supplements/ads?date=${encodeURIComponent(date)}`),
       ])
 
       const sales = salesResult.status === 'fulfilled' ? salesResult.value.rows ?? [] : []
       const orders = ordersResult.status === 'fulfilled' ? ordersResult.value.rows ?? [] : []
       const costs = cogsResult.status === 'fulfilled' ? cogsResult.value.rows ?? [] : []
-      const previousAds = adsRows.find((row) => row.date === date) ?? emptyAdsSummary(date)
+      const savedAds = savedAdsResult.status === 'fulfilled' ? savedAdsResult.value.rows?.[0] : undefined
+      const previousAds = savedAds ? {
+        ...emptyAdsSummary(date),
+        meta: numericValue(savedAds.meta).toFixed(2),
+        google: numericValue(savedAds.google).toFixed(2),
+        tiktok: numericValue(savedAds.tiktok).toFixed(2),
+      } : adsRows.find((row) => row.date === date) ?? emptyAdsSummary(date)
       const nextAds: AdsSummaryRow = {
         ...previousAds,
         meta: metaResult.status === 'fulfilled' ? numericValue(metaResult.value.cost).toFixed(2) : previousAds.meta,
@@ -605,13 +643,17 @@ export default function Supplements() {
       setOrderRows(orders)
       setCogsRows(costs)
       setAdsRows(nextAdsRows)
+      await requestJson('/api/supplements/ads', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report_date: date, meta: nextAds.meta, google: nextAds.google, tiktok: nextAds.tiktok }),
+      })
       if (salesResult.status === 'fulfilled') setSavedShopifyDates((dates) => new Set(dates).add(date))
       if (ordersResult.status === 'fulfilled') setSavedOrderDates((dates) => new Set(dates).add(date))
       if (cogsResult.status === 'fulfilled') setSavedCogsDates((dates) => new Set(dates).add(date))
 
       setOverview({ daily: summarizeFinance(sales, costs, nextAds), monthly: emptyFinanceTotals() })
 
-      const failures = [salesResult, ordersResult, cogsResult, metaResult, googleResult]
+      const failures = [salesResult, ordersResult, cogsResult, metaResult, googleResult, savedAdsResult]
         .flatMap((result) => result.status === 'rejected' ? [result.reason instanceof Error ? result.reason.message : 'A source failed to refresh.'] : [])
       if (cogsResult.status === 'fulfilled') failures.push(...(cogsResult.value.warnings ?? []))
       if (failures.length) setOverviewError(`Some sources could not be refreshed: ${failures.join(' ')}`)
@@ -701,7 +743,7 @@ export default function Supplements() {
               <thead><tr>{adsSummaryHeaders.map((header) => <th scope="col" key={header}>{header}</th>)}</tr></thead>
               <tbody>{adsRows.length ? adsRows.map((row) => <tr key={row.date}>
                 <th scope="row">{new Date(`${row.date}T12:00:00`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' })}</th>
-                {(['meta', 'google', 'tiktok', 'cogs', 'shipping', 'fulfillment', 'processing'] as const).map((field) => <td key={field}><input aria-label={`${adsSummaryHeaders[(['meta', 'google', 'tiktok', 'cogs', 'shipping', 'fulfillment', 'processing'] as const).indexOf(field) + 1]} ${row.date}`} inputMode="decimal" value={row[field]} onChange={(event) => updateAdsRow(row.date, field, event.target.value)} placeholder="0.00" /></td>)}
+                {(['meta', 'google', 'tiktok', 'cogs', 'shipping', 'fulfillment', 'processing'] as const).map((field) => <td key={field}><input aria-label={`${adsSummaryHeaders[(['meta', 'google', 'tiktok', 'cogs', 'shipping', 'fulfillment', 'processing'] as const).indexOf(field) + 1]} ${row.date}`} inputMode="decimal" value={row[field]} onChange={(event) => updateAdsRow(row.date, field, event.target.value)} onBlur={() => void saveAdsRow(row)} placeholder="0.00" /></td>)}
               </tr>) : <tr><td className="supplements-ads-empty" colSpan={adsSummaryHeaders.length}>Select a date and fetch Google cost to begin the report.</td></tr>}</tbody>
             </table>
           </div>

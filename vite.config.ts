@@ -10,6 +10,7 @@ import { getHistoricalShopifySales, getSavedShopifySales, getSavedShopifySalesDa
 import { getSavedShopifyCogs, getSavedShopifyCogsDates, saveShopifyCogs, syncShopifyCogs } from './api/_lib/shopify-cogs.js'
 import { fetchGoogleAdsCost } from './api/_lib/google-ads.js'
 import { fetchMetaAdsCost } from './api/_lib/meta-ads.js'
+import { getSupplementsAds, saveSupplementsAds } from './api/_lib/supplements-ads.js'
 
 const execFileAsync = promisify(execFile)
 const ACCOUNT_ID = 'act_653630476536860'
@@ -3524,6 +3525,32 @@ function metaAdsCostApi(env: Record<string, string>): Plugin {
   }
 }
 
+function supplementsAdsApi(env: Record<string, string>): Plugin {
+  return {
+    name: 'supplements-ads-api',
+    configureServer(server) {
+      server.middlewares.use('/api/supplements/ads', async (request, response) => {
+        if (!['GET', 'POST'].includes(request.method ?? '')) {
+          response.setHeader('Allow', 'GET, POST')
+          return sendJson(response, 405, { message: 'Method not allowed' })
+        }
+        try {
+          process.env.VITE_SUPABASE_URL = env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
+          process.env.SUPABASE_SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+          const requestUrl = new URL(request.url ?? '', 'http://localhost')
+          const result = request.method === 'GET'
+            ? await getSupplementsAds(requestUrl.searchParams.get('date') ?? '')
+            : await saveSupplementsAds(await readJsonRequest(request))
+          response.setHeader('Cache-Control', 'no-store')
+          return sendJson(response, 200, result)
+        } catch (error) {
+          return sendJson(response, 502, { message: error instanceof Error ? error.message : 'Unable to process ADS data.' })
+        }
+      })
+    },
+  }
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
@@ -3540,6 +3567,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       metaAdsCostApi(env),
+      supplementsAdsApi(env),
       googleAdsCostApi(env),
       shopifyCogsApi(env),
       shopifySalesApi(env),
