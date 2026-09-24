@@ -9,16 +9,32 @@ function dummyEmailPhone(properties) {
   return match ? normalizePhone(match[1]) : ''
 }
 
-async function fetchManualAppointments(fromDate, toDate, dateField) {
+function easternDateTimeToUtc(date, time, nextDay = false) {
+  const [year, month, day] = date.split('-').map(Number)
+  const [hour, minute] = time.split(':').map(Number)
+  const target = Date.UTC(year, month - 1, day + (nextDay ? 1 : 0), hour, minute)
+  const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+  let result = target
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const parts = formatter.formatToParts(new Date(result))
+    const part = (type) => Number(parts.find((item) => item.type === type)?.value ?? 0)
+    result += target - Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'))
+  }
+  return result
+}
+
+async function fetchManualAppointments(fromDate, toDate, dateField, fromTime, toTime) {
   const token = process.env.HUBSPOT_ACCESS_TOKEN
   if (!token) throw new Error('HubSpot reporting is not configured')
 
   const fallback = new Date().toISOString().slice(0, 10)
   const start = /^\d{4}-\d{2}-\d{2}$/.test(fromDate ?? '') ? fromDate : fallback
   const end = /^\d{4}-\d{2}-\d{2}$/.test(toDate ?? '') ? toDate : start
-  // Eastern midnight is 04:00 or 05:00 UTC; keep a one-hour DST buffer.
-  const from = Date.parse(`${start}T00:00:00Z`) + (3 * 3600000)
-  const to = Date.parse(`${end}T00:00:00Z`) + (30 * 3600000)
+  const startTime = /^\d{2}:\d{2}$/.test(fromTime ?? '') ? fromTime : '00:00'
+  const endTime = /^\d{2}:\d{2}$/.test(toTime ?? '') ? toTime : '23:59'
+  const overnight = start === end && endTime < startTime
+  const from = easternDateTimeToUtc(start, startTime)
+  const to = easternDateTimeToUtc(end, endTime, overnight) + 60000
   const dateProperty = dateField === 'meeting' ? 'hs_meeting_start_time' : 'hs_createdate'
   const meetings = []
   let after
@@ -151,8 +167,10 @@ export default async function handler(request, response) {
     const fromDate = Array.isArray(request.query?.from) ? request.query.from[0] : request.query?.from
     const toDate = Array.isArray(request.query?.to) ? request.query.to[0] : request.query?.to
     const dateField = Array.isArray(request.query?.dateField) ? request.query.dateField[0] : request.query?.dateField
+    const fromTime = Array.isArray(request.query?.fromTime) ? request.query.fromTime[0] : request.query?.fromTime
+    const toTime = Array.isArray(request.query?.toTime) ? request.query.toTime[0] : request.query?.toTime
     const [hubSpotResult, botResult] = await Promise.allSettled([
-      fetchManualAppointments(fromDate, toDate, dateField),
+      fetchManualAppointments(fromDate, toDate, dateField, fromTime, toTime),
       fetch('https://dharma-agent-yd5l.onrender.com/api/reports/bookings').then(async (upstream) => {
         const payload = await upstream.json()
         if (!upstream.ok) throw new Error(payload.message ?? `Bot reports API failed with ${upstream.status}`)

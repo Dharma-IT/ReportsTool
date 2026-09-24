@@ -3309,6 +3309,7 @@ tbody tr:last-child td {
 .bot-date-controls { display:flex; align-items:flex-end; gap:10px; }
 .bot-date-controls label { display:grid; gap:6px; }.bot-date-controls label span { color:#52705c; font-size:10px; font-weight:900; letter-spacing:.09em; text-transform:uppercase; }
 .bot-date-controls input,.bot-date-controls select { min-height:43px; padding:0 12px; border:1px solid #c7d3c8; border-radius:9px; background:#fff; color:#193c2d; font-weight:750; color-scheme:light; }
+.bot-date-controls .bot-time-control input{width:112px}
 .bot-date-controls select { min-width:135px; cursor:pointer; }
 .bot-date-controls input:focus,.bot-date-controls select:focus { border-color:#4b765d; outline:0; box-shadow:0 0 0 3px rgba(75,118,93,.13); }
 .bot-date-divider { padding-bottom:12px; color:#899489; font-size:11px; font-weight:800; text-transform:uppercase; }

@@ -149,6 +149,31 @@ function easternDateKey(value: string) {
   return `${part('year')}-${part('month')}-${part('day')}`
 }
 
+function shiftDate(date: string, days: number) {
+  const shifted = new Date(`${date}T12:00:00Z`)
+  shifted.setUTCDate(shifted.getUTCDate() + days)
+  return shifted.toISOString().slice(0, 10)
+}
+
+function easternDateTime(value: string) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: EASTERN_TIME_ZONE,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(value))
+  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value ?? 0)
+  return Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'))
+}
+
+function rangeBoundary(date: string, time: string, overnight = false) {
+  const [year, month, day] = date.split('-').map(Number)
+  const [hour, minute] = time.split(':').map(Number)
+  const target = Date.UTC(year, month - 1, day + (overnight ? 1 : 0), hour, minute)
+  let result = target
+  for (let attempt = 0; attempt < 2; attempt += 1) result += target - easternDateTime(new Date(result).toISOString())
+  return result
+}
+
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
@@ -184,14 +209,19 @@ function getPhoneNumber(booking: Booking) {
 }
 
 function BotReports() {
-  const initialDate = useMemo(() => easternDateKey(new Date().toISOString()), [])
+  const initialEndDate = useMemo(() => easternDateKey(new Date().toISOString()), [])
+  const initialStartDate = useMemo(() => shiftDate(initialEndDate, -1), [initialEndDate])
   const [report, setReport] = useState<BookingReport | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
-  const [startDate, setStartDate] = useState(initialDate)
-  const [endDate, setEndDate] = useState(initialDate)
-  const [appliedStartDate, setAppliedStartDate] = useState(initialDate)
-  const [appliedEndDate, setAppliedEndDate] = useState(initialDate)
+  const [startDate, setStartDate] = useState(initialStartDate)
+  const [endDate, setEndDate] = useState(initialEndDate)
+  const [startTime, setStartTime] = useState('18:00')
+  const [endTime, setEndTime] = useState('09:00')
+  const [appliedStartDate, setAppliedStartDate] = useState(initialStartDate)
+  const [appliedEndDate, setAppliedEndDate] = useState(initialEndDate)
+  const [appliedStartTime, setAppliedStartTime] = useState('18:00')
+  const [appliedEndTime, setAppliedEndTime] = useState('09:00')
   const [salesFetchRequest, setSalesFetchRequest] = useState(0)
   const [dateField, setDateField] = useState<DateField>('booked')
   const [sortOrder, setSortOrder] = useState<SortOrder>('booked-desc')
@@ -205,7 +235,7 @@ function BotReports() {
     setError('')
 
     try {
-      const params = new URLSearchParams({ from: startDate, to: endDate, dateField })
+      const params = new URLSearchParams({ from: startDate, to: endDate, fromTime: startTime, toTime: endTime, dateField })
       const response = await fetch(`/api/bot-reports/bookings?${params}`, { signal })
       setReport(await parseReportResponse(response))
     } catch (loadError) {
@@ -214,12 +244,12 @@ function BotReports() {
     } finally {
       if (!signal?.aborted) setIsLoading(false)
     }
-  }, [startDate, endDate, dateField])
+  }, [startDate, endDate, startTime, endTime, dateField])
 
   useEffect(() => {
     const controller = new AbortController()
 
-    const params = new URLSearchParams({ from: initialDate, to: initialDate, dateField: 'booked' })
+    const params = new URLSearchParams({ from: initialStartDate, to: initialEndDate, fromTime: '18:00', toTime: '09:00', dateField: 'booked' })
     fetch(`/api/bot-reports/bookings?${params}`, { signal: controller.signal })
       .then(parseReportResponse)
       .then(setReport)
@@ -232,7 +262,7 @@ function BotReports() {
       })
 
     return () => controller.abort()
-  }, [initialDate])
+  }, [initialStartDate, initialEndDate])
 
   useEffect(() => {
     if (view !== 'sales') return
@@ -263,15 +293,18 @@ function BotReports() {
   const rows = useMemo(() => (view === 'manual' ? report?.manualRows ?? [] : view === 'bot' ? report?.rows ?? [] : [])
     .filter((booking) => {
       const value = dateField === 'meeting' ? booking.meeting_start_at : booking.booked_at
-      const date = easternDateKey(value)
-      return (!appliedStartDate || date >= appliedStartDate) && (!appliedEndDate || date <= appliedEndDate)
+      const overnight = appliedStartDate === appliedEndDate && appliedEndTime < appliedStartTime
+      const timestamp = new Date(value).getTime()
+      const from = rangeBoundary(appliedStartDate, appliedStartTime)
+      const through = rangeBoundary(appliedEndDate, appliedEndTime, overnight) + 60_000
+      return timestamp >= from && timestamp < through
     })
     .sort((left, right) => {
       const [field, direction] = sortOrder.split('-') as ['booked' | 'meeting', 'asc' | 'desc']
       const leftValue = new Date(field === 'meeting' ? left.meeting_start_at : left.booked_at).getTime()
       const rightValue = new Date(field === 'meeting' ? right.meeting_start_at : right.booked_at).getTime()
       return direction === 'asc' ? leftValue - rightValue : rightValue - leftValue
-    }), [report, appliedStartDate, appliedEndDate, dateField, sortOrder, view])
+    }), [report, appliedStartDate, appliedEndDate, appliedStartTime, appliedEndTime, dateField, sortOrder, view])
 
   const sourceCounts = useMemo(() => rows.reduce((counts, booking) => {
     const source = view === 'bot' ? getBotSource(booking) : getSource(booking)
@@ -291,6 +324,8 @@ function BotReports() {
   const fetchSelectedDates = () => {
     setAppliedStartDate(startDate)
     setAppliedEndDate(endDate)
+    setAppliedStartTime(startTime)
+    setAppliedEndTime(endTime)
 
     if (view === 'sales') {
       setIsSalesLoading(true)
@@ -328,10 +363,12 @@ function BotReports() {
           <div className="bot-date-controls" aria-label="Filter and sort bookings by date in Eastern Time">
             <label><span>Date field</span><select value={dateField} onChange={(event) => setDateField(event.target.value as DateField)}><option value="booked">Booked date</option><option value="meeting">Meeting date</option></select></label>
             <label><span>From</span><input type="date" value={startDate} max={endDate || undefined} onChange={(event) => setStartDate(event.target.value)} /></label>
+            <label className="bot-time-control"><span>Time (ET)</span><input type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} /></label>
             <span className="bot-date-divider" aria-hidden="true">to</span>
             <label><span>Through</span><input type="date" value={endDate} min={startDate || undefined} onChange={(event) => setEndDate(event.target.value)} /></label>
+            <label className="bot-time-control"><span>Time (ET)</span><input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} /></label>
             <label><span>Sort by</span><select value={sortOrder} onChange={(event) => setSortOrder(event.target.value as SortOrder)}><option value="booked-desc">Booked: newest</option><option value="booked-asc">Booked: oldest</option><option value="meeting-asc">Meeting: soonest</option><option value="meeting-desc">Meeting: latest</option></select></label>
-            {hasDateFilter ? <button type="button" className="bot-clear-filter" onClick={() => { setStartDate(''); setEndDate('') }}>Clear</button> : null}
+            {hasDateFilter ? <button type="button" className="bot-clear-filter" onClick={() => { setStartDate(''); setEndDate(''); setStartTime('00:00'); setEndTime('23:59') }}>Clear</button> : null}
           </div>
           <button type="button" className="bot-refresh-button" onClick={fetchSelectedDates} disabled={isLoading || !startDate || !endDate}>
             {isLoading ? 'Fetching…' : 'Fetch'}

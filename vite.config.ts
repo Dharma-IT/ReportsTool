@@ -2976,14 +2976,19 @@ function appointmentPhone(value: unknown) {
   return digits.length > 10 ? digits.slice(-10) : digits
 }
 
-async function fetchManualHubSpotAppointments(token: string, fromDate?: string, toDate?: string, dateField?: string) {
+async function fetchManualHubSpotAppointments(token: string, fromDate?: string, toDate?: string, dateField?: string, fromTime?: string, toTime?: string) {
   if (!token) throw new Error('HubSpot reporting is not configured.')
   const fallback = new Date().toISOString().slice(0, 10)
   const start = /^\d{4}-\d{2}-\d{2}$/.test(fromDate ?? '') ? fromDate! : fallback
   const end = /^\d{4}-\d{2}-\d{2}$/.test(toDate ?? '') ? toDate! : start
-  // Eastern midnight is 04:00 or 05:00 UTC; keep a one-hour DST buffer.
-  const from = Date.parse(`${start}T00:00:00Z`) + (3 * 3_600_000)
-  const to = Date.parse(`${end}T00:00:00Z`) + (30 * 3_600_000)
+  const startTime = /^\d{2}:\d{2}$/.test(fromTime ?? '') ? fromTime! : '00:00'
+  const endTime = /^\d{2}:\d{2}$/.test(toTime ?? '') ? toTime! : '23:59'
+  const [startHour, startMinute] = startTime.split(':').map(Number)
+  const [endHour, endMinute] = endTime.split(':').map(Number)
+  const overnight = start === end && endTime < startTime
+  const throughDate = overnight ? shiftIsoDate(end, 1) : end
+  const from = zonedTimeToUtc(start, startHour, startMinute, 0, 'America/New_York').getTime()
+  const to = zonedTimeToUtc(throughDate, endHour, endMinute, 0, 'America/New_York').getTime() + 60_000
   const dateProperty = dateField === 'meeting' ? 'hs_meeting_start_time' : 'hs_createdate'
   const meetings = await searchAllHubSpotObjects<{
     id: string
@@ -3072,6 +3077,8 @@ function botReportsApi(hubSpotToken: string): Plugin {
               requestUrl.searchParams.get('from') ?? undefined,
               requestUrl.searchParams.get('to') ?? undefined,
               requestUrl.searchParams.get('dateField') ?? undefined,
+              requestUrl.searchParams.get('fromTime') ?? undefined,
+              requestUrl.searchParams.get('toTime') ?? undefined,
             ),
             fetch('https://dharma-agent-yd5l.onrender.com/api/reports/bookings').then(async (upstream) => {
               const payload = await upstream.json() as { message?: string; summary?: unknown; rows?: unknown[] }
