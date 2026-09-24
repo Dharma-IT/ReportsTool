@@ -64,7 +64,7 @@ type SupplementReport = {
 
 const teamStaff: Record<DailySection, string[]> = {
   CS: ['Arles Martinez', 'Aline Strelow', 'Brayam Zuluaga', 'Edmilson Morales'],
-  Sales: ['Maria Claudia', 'Erika Vargas', 'Meribet Yazziet'],
+  Sales: ['Maria Claudia', 'Erika Vargas'],
 }
 
 function emptyRows(team: DailySection): DailyRow[] {

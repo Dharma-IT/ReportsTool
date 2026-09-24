@@ -45,7 +45,6 @@ const DAILY_SALES_AGENTS = [
   { name: 'Andres Castro', aliases: ['Andres Castro', 'Andrés Castro'] },
   { name: 'Maria Claudia', aliases: ['Maria Claudia', 'María Claudia'] },
   { name: 'Erika Vargas', aliases: ['Erika Vargas'] },
-  { name: 'Meribet Yazziet', aliases: ['Meribet Yazziet', 'Meribet Sampson'] },
   { name: 'Ailin Isabel', aliases: ['Ailin Isabel', 'Ailín Isabel'] },
 ]
 const APPOINTMENT_NUTRITIONISTS = [
@@ -1579,7 +1578,6 @@ function agentReportApi(
               'Andres Castro': { numbersCalled: 48, totalIntents: 79, validCalls: 9, averageCallSeconds: 376, totalTalkSeconds: 8405 },
               'Maria Claudia': { numbersCalled: 85, totalIntents: 140, validCalls: 3, averageCallSeconds: 232, totalTalkSeconds: 6276 },
               'Erika Vargas': { numbersCalled: 47, totalIntents: 105, validCalls: 11, averageCallSeconds: 1129, totalTalkSeconds: 17875 },
-              'Meribet Yazziet': { numbersCalled: 36, totalIntents: 57, validCalls: 9, averageCallSeconds: 952, totalTalkSeconds: 15711 },
               'Ailin Isabel': { numbersCalled: 0, totalIntents: 0, validCalls: 0, averageCallSeconds: 0, totalTalkSeconds: 0 },
             }
             agents.forEach((agent) => Object.assign(agent, reconciledAircall[agent.name] ?? {}))
