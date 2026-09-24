@@ -73,8 +73,9 @@ function formatDuration(totalSeconds: number) {
 }
 
 function withoutRemovedAgents(report: AgentReportResponse): AgentReportResponse {
-  const agents = report.agents.filter((agent) => agent.name !== 'Diana Villalobos')
-  const staff = report.staff.filter((row) => row.name !== 'Diana Villalobos')
+  const removedAgents = new Set(['Diana Villalobos', 'Ailene Nuevas'])
+  const agents = report.agents.filter((agent) => !removedAgents.has(agent.name))
+  const staff = report.staff.filter((row) => !removedAgents.has(row.name))
   const sumNullable = (values: Array<number | null>) =>
     values.some((value) => value === null)
       ? null
@@ -243,7 +244,7 @@ function AgentReport() {
 
   const secondaryAgentNames = new Set(['Kathering Silva', 'Zara Meza'])
   const currentAgentNames = new Set([
-    'Belizabett Gonzalez', 'Carol Fernandes', 'Ailene Nuevas', 'Laura Sanchez',
+    'Belizabett Gonzalez', 'Carol Fernandes', 'Ivan Baez', 'Laura Sanchez',
     'Natasha Lopez', 'Natasha Lorente', 'William Carcamo', 'Kathering Silva', 'Zara Meza',
   ])
   const currentAgents = report?.agents.filter((agent) => currentAgentNames.has(agent.name)) ?? []
