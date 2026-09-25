@@ -1046,6 +1046,83 @@ async function fetchDailyCsHubSpot(
   return metrics
 }
 
+type WeeklyProductTotals = { revenue: number; units: number; bySeller: Record<string, { revenue: number; units: number }> }
+
+function weeklyProductCategory(name: string) {
+  const product = name.toLowerCase()
+  if (product.includes('slim boost')) return 'Slim Boost'
+  if (product.includes('nutrition')) return 'Nutritional Plans'
+  if (product.includes('nad+') || /\bnad\b/.test(product)) return 'NAD+'
+  if (product.includes('sermorelin')) return 'Sermorelin'
+  if (product.includes('ghk')) return 'GHK-Cu Troches'
+  if (product.includes('glutathione')) return 'Glutathione'
+  if (['semaglutide', 'semaglutida', 'tirzepatide', 'tirzepatida', 'liraglutide', 'retatrutide', 'ozempic', 'wegovy', 'mounjaro', 'zepbound', 'compound'].some((term) => product.includes(term))) return 'Weight Loss Injections'
+  if (isDailyPeptideProduct(name)) return 'Peptides'
+  return null
+}
+
+async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token: string) {
+  if (!token) throw new Error('HubSpot reporting is not configured.')
+  const deals = await searchAllHubSpotObjects<HubSpotDeal>('deals', {
+    filterGroups: [{ filters: [{ propertyName: 'paid_date_all_pipelines', operator: 'BETWEEN', value: String(Date.parse(`${fromDate}T00:00:00Z`)), highValue: String(Date.parse(`${toDate}T00:00:00Z`)) }] }],
+    properties: ['amount', 'value_refund', 'hubspot_owner_id', 'deal_description_items__test'],
+  }, token)
+  const owners = await fetchHubSpotOwners(token)
+  const ownerNames = new Map(owners.map((owner) => [owner.id, `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim()]))
+  const dealToItems = new Map<string, string[]>()
+  for (let index = 0; index < deals.length; index += 100) {
+    const batch = deals.slice(index, index + 100)
+    const payload = await hubSpotPost<{ results?: Array<{ from: { id: string }; to: Array<{ toObjectId: string }> }> }>('/crm/v4/associations/deals/line_items/batch/read', { inputs: batch.map((deal) => ({ id: deal.id })) }, token)
+    for (const row of payload.results ?? []) dealToItems.set(row.from.id, row.to.map((item) => String(item.toObjectId)))
+  }
+  const itemIds = [...new Set([...dealToItems.values()].flat())]
+  const items = new Map<string, HubSpotLineItem>()
+  for (let index = 0; index < itemIds.length; index += 100) {
+    const batch = itemIds.slice(index, index + 100)
+    const payload = await hubSpotPost<{ results?: HubSpotLineItem[] }>('/crm/v3/objects/line_items/batch/read', { inputs: batch.map((id) => ({ id })), properties: ['name', 'quantity', 'amount', 'price'] }, token)
+    for (const item of payload.results ?? []) items.set(item.id, item)
+  }
+  const bySeller: Record<string, number> = {}
+  const refundsBySeller: Record<string, number> = {}
+  const products: Record<string, WeeklyProductTotals> = {}
+  let revenue = 0
+  let refunds = 0
+  for (const deal of deals) {
+    const seller = ownerNames.get(deal.properties.hubspot_owner_id ?? '') || 'Unassigned'
+    const dealRevenue = Math.abs(finiteNumber(deal.properties.amount))
+    const dealRefund = Math.abs(finiteNumber(deal.properties.value_refund))
+    revenue += dealRevenue
+    refunds += dealRefund
+    bySeller[seller] = roundMoney((bySeller[seller] ?? 0) + dealRevenue)
+    refundsBySeller[seller] = roundMoney((refundsBySeller[seller] ?? 0) + dealRefund)
+    const associated = (dealToItems.get(deal.id) ?? []).map((id) => items.get(id)).filter(Boolean) as HubSpotLineItem[]
+    const parsed = associated.length ? associated.map((item) => ({ name: item.properties.name ?? '', quantity: finiteNumber(item.properties.quantity, 1), amount: finiteNumber(item.properties.amount, finiteNumber(item.properties.price) * finiteNumber(item.properties.quantity, 1)) })) : parseDailyCsDealDescription(deal.properties.deal_description_items__test ?? '').map((item) => ({ ...item, amount: 0 }))
+    for (const item of parsed) {
+      const category = weeklyProductCategory(item.name)
+      if (!category) continue
+      const row = products[category] ?? { revenue: 0, units: 0, bySeller: {} }
+      const sellerRow = row.bySeller[seller] ?? { revenue: 0, units: 0 }
+      row.revenue = roundMoney(row.revenue + item.amount)
+      row.units += item.quantity
+      sellerRow.revenue = roundMoney(sellerRow.revenue + item.amount)
+      sellerRow.units += item.quantity
+      row.bySeller[seller] = sellerRow
+      products[category] = row
+    }
+  }
+  return { fromDate, toDate, revenue: roundMoney(revenue), refunds: roundMoney(refunds), dealCount: deals.length, bySeller, refundsBySeller, products }
+}
+
+function completedEasternWeeks() {
+  const today = getTodayInNewYork()
+  const day = new Date(`${today}T12:00:00Z`).getUTCDay()
+  const currentMonday = shiftIsoDate(today, -((day + 6) % 7))
+  return {
+    last: { from: shiftIsoDate(currentMonday, -7), to: shiftIsoDate(currentMonday, -1) },
+    prior: { from: shiftIsoDate(currentMonday, -14), to: shiftIsoDate(currentMonday, -8) },
+  }
+}
+
 function normalizeAppointmentSalesSource(value: string | null | undefined) {
   const source = (value ?? '').trim().toLowerCase()
   if (source.includes('facebook') || source.includes('instagram') || source.includes('meta')) return 'meta'
@@ -1443,6 +1520,31 @@ function agentReportApi(
   return {
     name: 'aircall-agent-report-api',
     configureServer(server) {
+      server.middlewares.use('/api/weekly-report', async (_request, response) => {
+        try {
+          const weeks = completedEasternWeeks()
+          const [lastWeek, twoWeeksAgo] = await Promise.all([
+            fetchWeeklyHubSpotPeriod(weeks.last.from, weeks.last.to, hubSpotToken),
+            fetchWeeklyHubSpotPeriod(weeks.prior.from, weeks.prior.to, hubSpotToken),
+          ])
+          const revenueDelta = roundMoney(lastWeek.revenue - twoWeeksAgo.revenue)
+          const lastUnits = Object.values(lastWeek.products).reduce((sum, product) => sum + product.units, 0)
+          const priorUnits = Object.values(twoWeeksAgo.products).reduce((sum, product) => sum + product.units, 0)
+          const topSeller = Object.entries(lastWeek.bySeller).sort((left, right) => right[1] - left[1])[0] ?? ['No seller', 0]
+          const weeklyMoney = (value: number) => value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          sendJson(response, 200, {
+            timezone: 'America/New_York', lastWeek, twoWeeksAgo,
+            insights: [
+              { kind: revenueDelta >= 0 ? 'up' : 'down', title: `Revenue ${revenueDelta >= 0 ? 'increased' : 'decreased'} by $${weeklyMoney(Math.abs(revenueDelta))} last week`, detail: `Revenue was $${weeklyMoney(lastWeek.revenue)} versus $${weeklyMoney(twoWeeksAgo.revenue)} two weeks ago.` },
+              { kind: lastUnits >= priorUnits ? 'up' : 'down', title: `Product units ${lastUnits >= priorUnits ? 'increased' : 'decreased'} by ${Math.abs(lastUnits - priorUnits)}`, detail: `${lastUnits.toLocaleString('en-US')} units were sold last week versus ${priorUnits.toLocaleString('en-US')} two weeks ago.` },
+              { kind: 'seller', title: `${topSeller[0]} led last week's revenue`, detail: `$${weeklyMoney(Number(topSeller[1]))} in paid HubSpot deals.` },
+            ],
+          })
+        } catch (error) {
+          sendJson(response, 502, { message: error instanceof Error ? error.message : 'Unable to build the weekly HubSpot report.' })
+        }
+      })
+
       server.middlewares.use('/api/daily-cs-report', async (request, response) => {
         try {
           const requestUrl = new URL(request.url ?? '', 'http://localhost')

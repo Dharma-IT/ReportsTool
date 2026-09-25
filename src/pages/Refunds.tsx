@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 type RefundReport = {
   timezone: string
@@ -97,6 +97,23 @@ function Refunds() {
   }, [fromDate, toDate])
 
   const maxWeeklyAmount = Math.max(1, ...(report?.weekly ?? []).map((week) => Math.max(week.sales, week.refunds)))
+  const agentRefunds = useMemo(() => {
+    const weeks = report?.weekly ?? []
+    const rows = new Map<string, Record<string, number>>()
+    for (const deal of report?.details ?? []) {
+      const date = deal.paidDate || deal.refundDate
+      const week = weeks.find((item) => date >= item.weekStart && date <= item.weekEnd)
+      if (!week) continue
+      const seller = deal.seller || 'Unassigned'
+      const values = rows.get(seller) ?? {}
+      values[week.weekStart] = (values[week.weekStart] ?? 0) + deal.refundAmount
+      rows.set(seller, values)
+    }
+    return [...rows]
+      .filter(([seller]) => seller.trim().toLowerCase() !== 'denis reis')
+      .map(([seller, values]) => ({ seller, values, total: Object.values(values).reduce((sum, value) => sum + value, 0) }))
+      .sort((left, right) => right.total - left.total)
+  }, [report])
 
   return (
     <main className="dashboard-shell refunds-page">
@@ -130,6 +147,15 @@ function Refunds() {
           </div>
           <div className="refunds-table-wrap"><table className="refunds-table refunds-weekly-table"><thead><tr><th>Week</th><th>Total sales amount</th><th>Total refund</th><th>Refund rate</th></tr></thead><tbody>
             {(report?.weekly ?? []).map((week) => <tr key={week.weekStart}><td>{displayDate(week.weekStart)} – {displayDate(week.weekEnd)}</td><td>{money.format(week.sales)}</td><td>{money.format(week.refunds)}</td><td><b className={week.refundRate > 3 ? 'refund-rate high' : 'refund-rate'}>{week.refundRate.toFixed(2)}%</b></td></tr>)}
+          </tbody></table></div>
+        </section>
+
+        <section className="refunds-table-card refunds-agent-card" aria-labelledby="refunds-agent-title">
+          <div className="refunds-table-title"><div><span>Agent breakdown</span><strong id="refunds-agent-title">Refunds per agent by week</strong></div><small>{agentRefunds.length} agents</small></div>
+          <div className="refunds-table-wrap"><table className="refunds-table refunds-agent-table"><thead><tr><th>Agent</th>{(report?.weekly ?? []).map((week) => <th key={week.weekStart}>{displayDate(week.weekStart)} – {displayDate(week.weekEnd)}</th>)}<th>Total refunded</th></tr></thead><tbody>
+            {agentRefunds.map((agent) => <tr key={agent.seller}><th scope="row">{agent.seller}</th>{(report?.weekly ?? []).map((week) => <td key={week.weekStart} className={(agent.values[week.weekStart] ?? 0) > 0 ? 'refund-amount' : ''}>{money.format(agent.values[week.weekStart] ?? 0)}</td>)}<td className="refund-amount"><strong>{money.format(agent.total)}</strong></td></tr>)}
+            {agentRefunds.length ? <tr className="refunds-agent-total"><th scope="row">Weekly total</th>{(report?.weekly ?? []).map((week) => <td key={week.weekStart}>{money.format(agentRefunds.reduce((sum, agent) => sum + (agent.values[week.weekStart] ?? 0), 0))}</td>)}<td>{money.format(agentRefunds.reduce((sum, agent) => sum + agent.total, 0))}</td></tr> : null}
+            {!isLoading && !agentRefunds.length ? <tr><td className="refunds-no-rows" colSpan={(report?.weekly.length ?? 0) + 2}>No agent refunds were found in this date range.</td></tr> : null}
           </tbody></table></div>
         </section>
 

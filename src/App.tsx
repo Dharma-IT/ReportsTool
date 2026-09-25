@@ -6,6 +6,7 @@ import HomeDashboard from './pages/HomeDashboard'
 import FinanceReport from './pages/FinanceReport'
 import BotReports from './pages/BotReports'
 import Daily from './pages/Daily'
+import Weekly from './pages/Weekly'
 import Refunds from './pages/Refunds'
 import ACAutomation from './pages/ACAutomation'
 import Supplements from './pages/Supplements'
@@ -23,6 +24,7 @@ const routes: AppRoute[] = [
   { path: '/missed-calls', label: 'Missed Calls' },
   { path: '/agent-report', label: 'Customer Care' },
   { path: '/daily', label: 'Daily' },
+  { path: '/weekly', label: 'Weekly' },
   { path: '/refunds', label: 'Refunds' },
   { path: '/appointment-reports', label: 'Appointment Reports' },
   { path: '/ac-automation', label: 'AC Automation' },
@@ -75,6 +77,8 @@ function App() {
         <AgentReport />
       ) : activeRoute === '/daily' ? (
         <Daily />
+      ) : activeRoute === '/weekly' ? (
+        <Weekly />
       ) : activeRoute === '/refunds' ? (
         <Refunds />
       ) : activeRoute === '/appointment-reports' ? (
