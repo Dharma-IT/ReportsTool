@@ -1456,7 +1456,13 @@ function financeReportApi(
           const totalRevenue = roundMoney(deals.reduce(
             (sum, deal) => sum + finiteNumber(deal.properties.amount), 0,
           ))
-          const reconciliationDifference = roundMoney(totalRevenue - allocatedRevenue)
+          // Negative-amount deals are refunds and are already presented in the
+          // Revenue Loss section. Exclude them from the reconciliation row so
+          // they are not also labelled as taxes, fees, or unallocated revenue.
+          const negativeDealRevenue = roundMoney(deals.reduce(
+            (sum, deal) => sum + Math.min(0, finiteNumber(deal.properties.amount)), 0,
+          ))
+          const reconciliationDifference = roundMoney(totalRevenue - allocatedRevenue - negativeDealRevenue)
           if (Math.abs(reconciliationDifference) > 0.005) {
             productRows.set('__reconciliation__', {
               category: 'Others', product: 'Taxes / Fees / Unallocated Revenue', quantity: 0,
