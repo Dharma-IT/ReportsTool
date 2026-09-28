@@ -191,33 +191,41 @@ export async function syncShopifyCogs(date) {
   } catch (error) {
     payoutWarning = error instanceof Error ? error.message : 'Shopify payout fees are unavailable.'
   }
+  const feeExemptProduct = (name) => {
+    const normalized = String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+    return normalized.replace(/\s+/g, '').includes('slimboost') || normalized.includes('detox')
+  }
   const orderDetails = new Map()
   let detailOrder = ''
   for (const item of report.rows) {
     if (item.name) detailOrder = item.name
-    const detail = orderDetails.get(detailOrder) || { weight: 0, subtotal: 0, fulfillment: 0, fallbackShipping: 0, country: null, province: null, service: null }
+    const detail = orderDetails.get(detailOrder) || { weight: 0, subtotal: 0, fulfillment: 0, fallbackShipping: 0, country: null, province: null, service: null, feeTargetId: null, tiktok: false }
     const qty = Number(item.qty || 0)
-    detail.weight += weightInPounds(item.unit_weight, item.weight_unit) * qty
-    detail.subtotal += (productUnitCost(item.product_name) ?? 0) * qty
-    detail.fulfillment += suplifulFulfillmentFee(qty)
-    detail.fallbackShipping += Number(item.shipping_charges || 0)
+    detail.tiktok ||= String(item.sales_channel || '').toLowerCase().includes('tiktok')
+    if (!feeExemptProduct(item.product_name)) {
+      detail.feeTargetId ||= item.id
+      detail.weight += weightInPounds(item.unit_weight, item.weight_unit) * qty
+      detail.subtotal += (productUnitCost(item.product_name) ?? 0) * qty
+      detail.fulfillment += suplifulFulfillmentFee(qty)
+      detail.fallbackShipping += Number(item.shipping_charges || 0)
+    }
     detail.country ||= item.shipping_country
     detail.province ||= item.shipping_province
     detail.service ||= item.shipping_service
     orderDetails.set(detailOrder, detail)
   }
   let currentOrder = ''
-  const assignedFees = new Set()
   const rows = report.rows.map((item) => {
     if (item.name) currentOrder = item.name
     const qty = Number(item.qty || 0)
     const detail = orderDetails.get(currentOrder)
+    const receivesFees = Boolean(detail && !detail.tiktok && detail.feeTargetId === item.id)
     const calculatedShipping = detail && suplifulShippingCost(detail.weight, detail.country, detail.province, detail.service)
-    const shipping = assignedFees.has(currentOrder) ? 0 : (calculatedShipping ?? detail?.fallbackShipping ?? 0)
+    const shipping = receivesFees ? (calculatedShipping ?? detail?.fallbackShipping ?? 0) : 0
     const unitPrice = productUnitCost(item.product_name)
     const fulfillment = suplifulFulfillmentFee(qty)
     const processingBase = (detail?.subtotal || 0) + (calculatedShipping ?? detail?.fallbackShipping ?? 0) + (detail?.fulfillment || 0)
-    const processing = assignedFees.has(currentOrder) ? 0 : roundMoney(processingBase * SUPLIFUL_PROCESSING_RATE)
+    const processing = receivesFees ? roundMoney(processingBase * SUPLIFUL_PROCESSING_RATE) : 0
     const row = {
       id: item.id,
       date,
@@ -229,11 +237,10 @@ export async function syncShopifyCogs(date) {
       shipping,
       fulfillment_supliful: fulfillment,
       processing_supliful: processing,
-      processing_shopify: assignedFees.has(currentOrder) ? 0 : Math.round(Number(payouts.get(currentOrder)?.fee || 0) * 100) / 100,
-      payout_received: assignedFees.has(currentOrder) ? 0 : Math.round(Number(payouts.get(currentOrder)?.net || 0) * 100) / 100,
+      processing_shopify: receivesFees ? Math.round(Number(payouts.get(currentOrder)?.fee || 0) * 100) / 100 : 0,
+      payout_received: receivesFees ? Math.round(Number(payouts.get(currentOrder)?.net || 0) * 100) / 100 : 0,
       total: 0,
     }
-    assignedFees.add(currentOrder)
     row.total = roundMoney((row.subtotal ?? 0) + row.shipping + row.fulfillment_supliful + row.processing_supliful + row.processing_shopify)
     return row
   })

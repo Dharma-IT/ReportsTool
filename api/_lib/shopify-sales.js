@@ -8,6 +8,7 @@ const SALES_QUERY = `query SalesForSupplements($after: String, $search: String!)
       legacyResourceId
       name
       createdAt
+      sourceName
       currentTotalPriceSet { shopMoney { amount } }
       currentTotalTaxSet { shopMoney { amount } }
       totalShippingPriceSet { shopMoney { amount } }
@@ -136,6 +137,7 @@ export async function fetchShopifySales(date) {
           shipping_country: order.shippingAddress?.countryCodeV2 ?? null,
           shipping_province: order.shippingAddress?.provinceCode ?? null,
           shipping_service: order.shippingLine?.code || order.shippingLine?.title || null,
+          sales_channel: order.sourceName || null,
         })
       })
     }
