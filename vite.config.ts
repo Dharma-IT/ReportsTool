@@ -45,6 +45,7 @@ const DAILY_SALES_AGENTS = [
   { name: 'Andres Castro', aliases: ['Andres Castro', 'Andrés Castro'] },
   { name: 'Maria Claudia', aliases: ['Maria Claudia', 'María Claudia'] },
   { name: 'Erika Vargas', aliases: ['Erika Vargas'] },
+  { name: 'Alejandra Oyala', aliases: ['Alejandra Oyala'] },
   { name: 'Ailin Isabel', aliases: ['Ailin Isabel', 'Ailín Isabel'] },
 ]
 const APPOINTMENT_NUTRITIONISTS = [
