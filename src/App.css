@@ -804,6 +804,26 @@
 .daily-date-controls button { min-height:39px; padding:0 15px; border:0; border-radius:9px; background:var(--green-deep); color:#fff; font-family:inherit; font-size:11px; font-weight:900; cursor:pointer; box-shadow:0 9px 20px rgba(28,84,60,.16); }
 .daily-date-controls button:hover:not(:disabled) { background:#123f2e; transform:translateY(-1px); }
 .daily-date-controls button:disabled { cursor:wait; opacity:.6; }
+.daily-date-controls .daily-manage-team-button { border:1px solid rgba(52,88,65,.2); background:#fff; color:#1c543c; box-shadow:none; }
+.daily-agent-modal-backdrop { position:fixed; z-index:1000; inset:0; display:grid; place-items:center; padding:20px; background:rgba(15,43,31,.48); backdrop-filter:blur(5px); }
+.daily-agent-modal { width:min(520px,100%); overflow:hidden; border:1px solid rgba(52,88,65,.18); border-radius:20px; background:#fff; box-shadow:0 28px 80px rgba(13,45,30,.25); animation:report-panel-arrive .25s ease-out both; }
+.daily-agent-modal>header { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; padding:25px 26px 21px; border-bottom:1px solid rgba(52,88,65,.12); background:linear-gradient(135deg,#f7faf3,#fffaf0); }
+.daily-agent-modal>header span { color:#a27625; font-size:9px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; }
+.daily-agent-modal>header h2 { margin:5px 0 6px; color:#173f30; font:600 29px/1 Georgia,serif; }
+.daily-agent-modal>header p { margin:0; color:#707b6c; font-size:11px; line-height:1.5; }
+.daily-agent-modal>header button { display:grid; flex:0 0 32px; width:32px; height:32px; place-items:center; border:1px solid rgba(52,88,65,.16); border-radius:50%; background:#fff; color:#315442; font-size:21px; cursor:pointer; }
+.daily-agent-form { display:grid; gap:15px; padding:23px 26px 14px; }
+.daily-agent-form label { display:grid; gap:7px; }
+.daily-agent-form label>span { color:#657263; font-size:9px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; }
+.daily-agent-form select,.daily-agent-form input { width:100%; min-height:44px; padding:9px 12px; border:1px solid rgba(52,88,65,.2); border-radius:10px; background:#fbfcf9; color:#264a38; font:700 12px/1.2 inherit; outline:none; }
+.daily-agent-form select:focus,.daily-agent-form input:focus { border-color:#b48a32; box-shadow:0 0 0 3px rgba(243,205,101,.2); }
+.daily-agent-feedback { margin:0 26px 12px; padding:10px 12px; border-radius:9px; font-size:11px; font-weight:750; }
+.daily-agent-feedback.error { background:#fff0ed; color:#963e2d; }
+.daily-agent-feedback.success { background:#edf7e9; color:#28603e; }
+.daily-agent-modal>footer { display:flex; justify-content:flex-end; gap:9px; padding:12px 26px 24px; }
+.daily-agent-modal>footer button { min-height:40px; padding:0 17px; border:0; border-radius:9px; background:#1c543c; color:#fff; font:800 11px/1 inherit; cursor:pointer; }
+.daily-agent-modal>footer button.secondary { border:1px solid rgba(52,88,65,.18); background:#fff; color:#315442; }
+.daily-agent-modal>footer button:disabled { cursor:not-allowed; opacity:.55; }
 .daily-table-card { overflow:hidden; border:1px solid rgba(52,88,65,.16); border-radius:15px; background:#fff; box-shadow:0 14px 36px rgba(30,62,42,.07); }
 .daily-table-title { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:18px 20px; border-bottom:1px solid rgba(52,88,65,.12); background:linear-gradient(90deg,#fbfcf7,#f3f7eb); }
 .daily-table-title > div { display:grid; gap:3px; }

@@ -229,6 +229,7 @@ type HubSpotOwner = {
   id: string
   firstName?: string
   lastName?: string
+  archived?: boolean
 }
 
 type HubSpotDeal = {
@@ -1239,10 +1240,95 @@ function financeReportApi(
   hubSpotToken: string,
   supabaseUrl: string,
   supabaseServiceRoleKey: string,
+  dailyAgentAdminPin: string,
 ): Plugin {
   return {
     name: 'hubspot-finance-report-api',
     configureServer(server) {
+      server.middlewares.use('/api/daily-report-agents', async (request, response) => {
+        response.setHeader('Cache-Control', 'no-store')
+        try {
+          if (request.method === 'GET') {
+            const [sales, cs, owners] = await Promise.all([
+              fetchDailyAgentRoster('sales', supabaseUrl, supabaseServiceRoleKey),
+              fetchDailyAgentRoster('cs', supabaseUrl, supabaseServiceRoleKey),
+              hubSpotToken ? fetchHubSpotOwners(hubSpotToken) : Promise.resolve([]),
+            ])
+            const hubspotOwners = owners.filter((owner) => owner.archived !== true).map((owner) => ({
+              id: String(owner.id),
+              name: `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim(),
+            })).filter((owner) => owner.name).sort((left, right) => left.name.localeCompare(right.name))
+            const configuredAgents = [...sales, ...cs]
+            const configuredOwnerIds = new Set(hubspotOwners.filter((owner) => configuredAgents.some((agent) =>
+              agent.hubspotOwnerId === owner.id || agent.aliases.some((alias) => namesMatch(alias, owner.name)),
+            )).map((owner) => owner.id))
+            sendJson(response, 200, { agents: { sales, cs }, hubspotOwners, configuredOwnerIds: [...configuredOwnerIds] })
+            return
+          }
+
+          if (request.method !== 'POST') {
+            response.setHeader('Allow', 'GET, POST')
+            sendJson(response, 405, { message: 'Method not allowed.' })
+            return
+          }
+          const body = await readJsonRequest<{ pin?: string; team?: string; hubspotOwnerId?: string }>(request)
+          if (body.pin !== dailyAgentAdminPin) {
+            sendJson(response, 403, { message: 'Incorrect PIN.' })
+            return
+          }
+          if (!['sales', 'cs'].includes(body.team ?? '') || !body.hubspotOwnerId) {
+            sendJson(response, 400, { message: 'Select a team and HubSpot owner.' })
+            return
+          }
+          if (!hubSpotToken) throw new Error('HubSpot reporting is not configured.')
+          if (!supabaseUrl || !supabaseServiceRoleKey) throw new Error('Agent roster storage is not configured.')
+          const owner = (await fetchHubSpotOwners(hubSpotToken)).find((candidate) => String(candidate.id) === body.hubspotOwnerId)
+          if (!owner) {
+            sendJson(response, 404, { message: 'That HubSpot owner is no longer available.' })
+            return
+          }
+          const displayName = `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim()
+          if (!displayName) {
+            sendJson(response, 400, { message: 'The selected HubSpot owner has no name.' })
+            return
+          }
+          const allConfiguredAgents = [
+            ...await fetchDailyAgentRoster('sales', supabaseUrl, supabaseServiceRoleKey),
+            ...await fetchDailyAgentRoster('cs', supabaseUrl, supabaseServiceRoleKey),
+          ]
+          if (allConfiguredAgents.some((agent) => agent.aliases.some((alias) => namesMatch(alias, displayName)))) {
+            sendJson(response, 409, { message: `${displayName} is already on a Daily Dashboard team.` })
+            return
+          }
+          const existingResponse = await supabaseRest(
+            supabaseUrl,
+            supabaseServiceRoleKey,
+            `daily_report_agents?hubspot_owner_id=eq.${encodeURIComponent(body.hubspotOwnerId)}&select=id&limit=1`,
+          )
+          if (((await existingResponse.json()) as unknown[]).length) {
+            sendJson(response, 409, { message: `${displayName} is already on a Daily Dashboard team.` })
+            return
+          }
+          const roster = await fetchDailyAgentRoster(body.team as 'sales' | 'cs', supabaseUrl, supabaseServiceRoleKey)
+          const saveResponse = await supabaseRest(supabaseUrl, supabaseServiceRoleKey, 'daily_report_agents', {
+            method: 'POST',
+            headers: { Prefer: 'return=representation' },
+            body: JSON.stringify({
+              team: body.team,
+              display_name: displayName,
+              hubspot_owner_id: String(owner.id),
+              aliases: [displayName],
+              sort_order: (roster.length + 1) * 10,
+              active: true,
+            }),
+          })
+          const saved = (await saveResponse.json()) as Array<{ id: number }>
+          sendJson(response, 201, { message: `${displayName} was added to ${body.team === 'sales' ? 'Sales' : 'CS'}.`, id: saved[0]?.id })
+        } catch (error) {
+          sendJson(response, 500, { message: error instanceof Error ? error.message : 'Unable to manage the Daily Dashboard roster.' })
+        }
+      })
+
       server.middlewares.use('/api/refunds-report', async (request, response) => {
         try {
           const requestUrl = new URL(request.url ?? '', 'http://localhost')
@@ -1556,7 +1642,7 @@ function agentReportApi(
         try {
           const requestUrl = new URL(request.url ?? '', 'http://localhost')
           const team = requestUrl.searchParams.get('team') === 'sales' ? 'sales' : 'cs'
-          const teamAgents = team === 'sales' ? DAILY_SALES_AGENTS : DAILY_CS_AGENTS
+          const teamAgents = await fetchDailyAgentRoster(team, supabaseUrl, supabaseServiceRoleKey)
           const fromDate = requestUrl.searchParams.get('from') || getTodayInNewYork()
           const toDate = requestUrl.searchParams.get('to') || fromDate
           if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(toDate)) {
@@ -2704,6 +2790,47 @@ async function supabaseRest(
   return response
 }
 
+type DailyAgentRosterEntry = {
+  name: string
+  aliases: string[]
+  hubspotOwnerId?: string
+}
+
+async function fetchDailyAgentRoster(
+  team: 'sales' | 'cs',
+  supabaseUrl: string,
+  serviceRoleKey: string,
+): Promise<DailyAgentRosterEntry[]> {
+  const fallback = team === 'sales'
+    ? DAILY_SALES_AGENTS.filter((agent) => ['Maria Claudia', 'Erika Vargas', 'Alejandra Oyala'].includes(agent.name))
+    : DAILY_CS_AGENTS
+  if (!supabaseUrl || !serviceRoleKey) return fallback.map((agent) => ({ ...agent }))
+  try {
+    const response = await supabaseRest(
+      supabaseUrl,
+      serviceRoleKey,
+      `daily_report_agents?team=eq.${team}&active=eq.true&select=display_name,aliases,hubspot_owner_id&order=sort_order.asc,display_name.asc`,
+    )
+    const rows = (await response.json()) as Array<{
+      display_name: string
+      aliases: unknown
+      hubspot_owner_id?: string | null
+    }>
+    if (!rows.length) return fallback.map((agent) => ({ ...agent }))
+    return rows.map((row) => ({
+      name: row.display_name,
+      aliases: Array.isArray(row.aliases) && row.aliases.every((alias) => typeof alias === 'string')
+        ? row.aliases
+        : [row.display_name],
+      ...(row.hubspot_owner_id ? { hubspotOwnerId: row.hubspot_owner_id } : {}),
+    }))
+  } catch {
+    // Deployments created before the roster table continue using the built-in
+    // team until the database migration is applied.
+    return fallback.map((agent) => ({ ...agent }))
+  }
+}
+
 async function fetchLastRungAgents(
   callIds: number[],
   supabaseUrl: string,
@@ -3771,6 +3898,7 @@ export default defineConfig(({ mode }) => {
         env.HUBSPOT_ACCESS_TOKEN ?? '',
         env.VITE_SUPABASE_URL ?? '',
         env.SUPABASE_SERVICE_ROLE_KEY ?? '',
+        env.DAILY_AGENT_ADMIN_PIN || '1234',
       ),
     ],
   }

@@ -67,8 +67,11 @@ const teamStaff: Record<DailySection, string[]> = {
   Sales: ['Maria Claudia', 'Erika Vargas', 'Alejandra Oyala'],
 }
 
-function emptyRows(team: DailySection): DailyRow[] {
-  return teamStaff[team].map((staff) => ({
+type DailyRoster = Record<'sales' | 'cs', Array<{ name: string; hubspotOwnerId?: string }>>
+type HubSpotOwnerOption = { id: string; name: string }
+
+function emptyRows(team: DailySection, staffNames = teamStaff[team]): DailyRow[] {
+  return staffNames.map((staff) => ({
     staff, called: 0, intents: 0, valid: 0, average: '', aircall: '', doxyCalls: 0,
     doxyValid: 0, doxyAverage: '', doxyTotal: '', injections: 0,
     nad: 0, lipoMino: 0, plan: 0, peptides: 0, sales: 0, balance: 0, observation: '',
@@ -92,9 +95,9 @@ function getApiUrl(path: string) {
   return `${['localhost', '127.0.0.1'].includes(window.location.hostname) ? '' : apiBaseUrl}${path}`
 }
 
-function productsFromDailyResponse(team: DailySection, payload: DailyResponse, field: 'productSales' | 'peptideSales'): SupplementReport {
+function productsFromDailyResponse(payload: DailyResponse, field: 'productSales' | 'peptideSales'): SupplementReport {
   const productNames = new Map<string, string>()
-  const rows = teamStaff[team].map((staff) => {
+  const rows = payload.agents.map(({ name: staff }) => {
     const agent = payload.agents.find((candidate) => candidate.name === staff)
     const quantities: Record<string, number> = {}
     for (const [key, product] of Object.entries(agent?.[field] ?? {})) {
@@ -124,8 +127,8 @@ function safeNumber(value: number | undefined) {
   return Number.isFinite(value) ? value! : 0
 }
 
-function rowsFromDailyResponse(team: DailySection, payload: DailyResponse) {
-  return emptyRows(team).map((row) => {
+function rowsFromDailyResponse(team: DailySection, payload: DailyResponse, staffNames = payload.agents.map((agent) => agent.name)) {
+  return emptyRows(team, staffNames).map((row) => {
     const agent = payload.agents.find((candidate) => candidate.name === row.staff)
     return agent ? {
       ...row,
@@ -214,8 +217,46 @@ function Daily() {
   const [reportSource, setReportSource] = useState<'live' | 'saved' | null>(null)
   const [doxyUpload, setDoxyUpload] = useState('')
   const [isExporting, setIsExporting] = useState(false)
+  const [teamRoster, setTeamRoster] = useState<Record<DailySection, string[]>>({
+    CS: teamStaff.CS,
+    Sales: teamStaff.Sales,
+  })
+  const [isTeamManagerOpen, setIsTeamManagerOpen] = useState(false)
+  const [hubspotOwners, setHubspotOwners] = useState<HubSpotOwnerOption[]>([])
+  const [configuredOwnerIds, setConfiguredOwnerIds] = useState<Set<string>>(new Set())
+  const [selectedOwnerId, setSelectedOwnerId] = useState('')
+  const [selectedAgentTeam, setSelectedAgentTeam] = useState<'sales' | 'cs'>('sales')
+  const [agentPin, setAgentPin] = useState('')
+  const [isRosterLoading, setIsRosterLoading] = useState(false)
+  const [isAgentSaving, setIsAgentSaving] = useState(false)
+  const [agentManagerMessage, setAgentManagerMessage] = useState('')
+  const [agentManagerError, setAgentManagerError] = useState('')
   const doxyFileInput = useRef<HTMLInputElement>(null)
   const reportCard = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const loadRoster = async () => {
+      try {
+        const response = await fetch(getApiUrl('/api/daily-report-agents'))
+        const payload = await response.json() as {
+          agents?: DailyRoster
+          hubspotOwners?: HubSpotOwnerOption[]
+          configuredOwnerIds?: string[]
+        }
+        if (!response.ok || cancelled || !payload.agents) return
+        const nextRoster = {
+          Sales: payload.agents.sales.map((agent) => agent.name),
+          CS: payload.agents.cs.map((agent) => agent.name),
+        }
+        setTeamRoster(nextRoster)
+        setHubspotOwners(payload.hubspotOwners ?? [])
+        setConfiguredOwnerIds(new Set(payload.configuredOwnerIds ?? []))
+      } catch { /* The built-in roster remains available if management is offline. */ }
+    }
+    void loadRoster()
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     if (!isLoading) return
@@ -233,11 +274,11 @@ function Daily() {
         if (response.ok) {
           const payload = await response.json() as DailyResponse
           if (cancelled) return
-          setRows(rowsFromDailyResponse(activeSection, payload))
+          setRows(rowsFromDailyResponse(activeSection, payload, teamRoster[activeSection]))
           setSourceWarning(payload.hubSpotAvailable === false ? (payload.hubSpotError ?? 'HubSpot sales were unavailable.') : '')
           setHasLiveData(true); setReportSource('saved'); setError('')
-          setSupplements(productsFromDailyResponse(activeSection, payload, 'productSales'))
-          setPeptides(productsFromDailyResponse(activeSection, payload, 'peptideSales'))
+          setSupplements(productsFromDailyResponse(payload, 'productSales'))
+          setPeptides(productsFromDailyResponse(payload, 'peptideSales'))
           return
         }
       } catch { /* Fall back to this browser's saved copy. */ }
@@ -247,20 +288,20 @@ function Daily() {
         if (cached) {
           const saved = JSON.parse(cached) as SavedDailyReport
           if (saved.team === activeSection && saved.fromDate === fromDate && saved.toDate === toDate && Array.isArray(saved.rows)) {
-            setRows(saved.rows.filter((row) => teamStaff[activeSection].includes(row.staff))); setSourceWarning(saved.sourceWarning ?? ''); setHasLiveData(true); setReportSource('saved'); setError(''); setSupplements(null); setPeptides(null); return
+            setRows(saved.rows.filter((row) => teamRoster[activeSection].includes(row.staff))); setSourceWarning(saved.sourceWarning ?? ''); setHasLiveData(true); setReportSource('saved'); setError(''); setSupplements(null); setPeptides(null); return
           }
         }
       } catch { /* No browser cache is available. */ }
-      setRows(emptyRows(activeSection)); setHasLiveData(false); setReportSource(null); setSourceWarning(''); setSupplements(null); setPeptides(null)
+      setRows(emptyRows(activeSection, teamRoster[activeSection])); setHasLiveData(false); setReportSource(null); setSourceWarning(''); setSupplements(null); setPeptides(null)
     }
     void loadSavedReport()
     return () => { cancelled = true }
-  }, [activeSection, fromDate, toDate, isLoading])
+  }, [activeSection, fromDate, toDate, isLoading, teamRoster])
 
   function selectTeam(team: DailySection) {
     if (isLoading) return
     setActiveSection(team)
-    setRows(emptyRows(team))
+    setRows(emptyRows(team, teamRoster[team]))
     setHasLiveData(false)
     setError('')
     setSourceWarning('')
@@ -268,6 +309,62 @@ function Daily() {
     setPeptides(null)
     setReportSource(null)
     setDoxyUpload('')
+  }
+
+  async function openTeamManager() {
+    setIsTeamManagerOpen(true)
+    setAgentManagerError('')
+    setAgentManagerMessage('')
+    setSelectedAgentTeam(activeSection === 'Sales' ? 'sales' : 'cs')
+    setIsRosterLoading(true)
+    try {
+      const response = await fetch(getApiUrl('/api/daily-report-agents'))
+      const payload = await response.json() as {
+        agents?: DailyRoster
+        hubspotOwners?: HubSpotOwnerOption[]
+        configuredOwnerIds?: string[]
+        message?: string
+      }
+      if (!response.ok) throw new Error(payload.message ?? 'Unable to load HubSpot owners.')
+      setHubspotOwners(payload.hubspotOwners ?? [])
+      setConfiguredOwnerIds(new Set(payload.configuredOwnerIds ?? []))
+    } catch (managerError) {
+      setAgentManagerError(managerError instanceof Error ? managerError.message : 'Unable to load HubSpot owners.')
+    } finally {
+      setIsRosterLoading(false)
+    }
+  }
+
+  async function saveAgent() {
+    if (!selectedOwnerId || !agentPin || isAgentSaving) return
+    setIsAgentSaving(true)
+    setAgentManagerError('')
+    setAgentManagerMessage('')
+    try {
+      const response = await fetch(getApiUrl('/api/daily-report-agents'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: agentPin, team: selectedAgentTeam, hubspotOwnerId: selectedOwnerId }),
+      })
+      const payload = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(payload.message ?? 'Unable to add this person.')
+      const selectedOwner = hubspotOwners.find((owner) => owner.id === selectedOwnerId)
+      if (selectedOwner) {
+        const section: DailySection = selectedAgentTeam === 'sales' ? 'Sales' : 'CS'
+        setTeamRoster((current) => ({ ...current, [section]: [...current[section], selectedOwner.name] }))
+        setConfiguredOwnerIds((current) => new Set([...current, selectedOwner.id]))
+        if (activeSection === section) setRows((current) => current.some((row) => row.staff === selectedOwner.name)
+          ? current
+          : [...current, ...emptyRows(section, [selectedOwner.name])])
+      }
+      setAgentManagerMessage(payload.message ?? 'Person added successfully.')
+      setSelectedOwnerId('')
+      setAgentPin('')
+    } catch (managerError) {
+      setAgentManagerError(managerError instanceof Error ? managerError.message : 'Unable to add this person.')
+    } finally {
+      setIsAgentSaving(false)
+    }
   }
 
   async function uploadDoxyReport(event: ChangeEvent<HTMLInputElement>) {
@@ -291,7 +388,7 @@ function Daily() {
         const date = doxyDate(record[dateIndex] ?? '')
         if (!date || date < fromDate || date > toDate) continue
         const provider = (record[providerIndex] ?? '').trim().toLowerCase()
-        if (!teamStaff.Sales.some((staff) => staff.toLowerCase() === provider)) continue
+        if (!teamRoster.Sales.some((staff) => staff.toLowerCase() === provider)) continue
         const seconds = durationSeconds(record[durationIndex] ?? '')
         const metric = metrics.get(provider) ?? { calls: 0, valid: 0, validSeconds: 0, totalSeconds: 0 }
         metric.calls += 1
@@ -326,7 +423,7 @@ function Daily() {
     setElapsedSeconds(0)
     setHasLiveData(false)
     setReportSource(null)
-    setRows(emptyRows(activeSection))
+    setRows(emptyRows(activeSection, teamRoster[activeSection]))
     setError('')
     setSourceWarning('')
     setSupplements(null)
@@ -336,7 +433,7 @@ function Daily() {
       const response = await fetch(getApiUrl(`/api/daily-cs-report?${params}`))
       const payload = (await response.json()) as DailyResponse
       if (!response.ok) throw new Error(payload.message ?? 'Unable to load the daily report.')
-      const fetchedRows = emptyRows(activeSection).map((row) => {
+      const fetchedRows = emptyRows(activeSection, payload.agents.map((agent) => agent.name)).map((row) => {
         const agent = payload.agents.find((candidate) => candidate.name === row.staff)
         return agent ? {
           ...row,
@@ -359,8 +456,8 @@ function Daily() {
       setSourceWarning(warning)
       setHasLiveData(true)
       setReportSource('live')
-      setSupplements(productsFromDailyResponse(activeSection, payload, 'productSales'))
-      setPeptides(productsFromDailyResponse(activeSection, payload, 'peptideSales'))
+      setSupplements(productsFromDailyResponse(payload, 'productSales'))
+      setPeptides(productsFromDailyResponse(payload, 'peptideSales'))
       try {
         const saved: SavedDailyReport = { team: activeSection, fromDate, toDate, rows: fetchedRows, sourceWarning: warning, fetchedAt: new Date().toISOString() }
         localStorage.setItem(reportCacheKey(activeSection, fromDate, toDate), JSON.stringify(saved))
@@ -422,6 +519,7 @@ function Daily() {
     (supplements?.rows ?? []).reduce((sum, row) => sum + safeNumber(row.quantities[product.key]), 0)]))
   const peptideTotals = Object.fromEntries((peptides?.products ?? []).map((product) => [product.key,
     (peptides?.rows ?? []).reduce((sum, row) => sum + safeNumber(row.quantities[product.key]), 0)]))
+  const availableHubspotOwners = hubspotOwners.filter((owner) => !configuredOwnerIds.has(owner.id))
 
   return (
     <main className="dashboard-shell daily-page">
@@ -449,11 +547,28 @@ function Daily() {
               <p>{isSales ? 'Sales activity, products and revenue at a glance.' : 'Customer care activity, products and sales at a glance.'}</p>
             </div>
             <div className="daily-date-controls">
+              <button className="daily-manage-team-button" type="button" onClick={openTeamManager}>Manage team</button>
               <label><span>From</span><input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></label>
               <label><span>To</span><input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /></label>
               <button type="button" onClick={fetchDailyReport} disabled={isLoading || !fromDate || !toDate}>{isLoading ? 'Fetching both…' : 'Fetch'}</button>
             </div>
           </header>
+
+          {isTeamManagerOpen && <div className="daily-agent-modal-backdrop" role="presentation" onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isAgentSaving) setIsTeamManagerOpen(false)
+          }}>
+            <section className="daily-agent-modal" role="dialog" aria-modal="true" aria-labelledby="daily-agent-modal-title">
+              <header><div><span>Team settings</span><h2 id="daily-agent-modal-title">Add a person</h2><p>Selecting directly from HubSpot prevents spelling and attribution errors.</p></div><button type="button" aria-label="Close" onClick={() => setIsTeamManagerOpen(false)} disabled={isAgentSaving}>×</button></header>
+              <div className="daily-agent-form">
+                <label><span>Team</span><select value={selectedAgentTeam} onChange={(event) => setSelectedAgentTeam(event.target.value as 'sales' | 'cs')} disabled={isAgentSaving}><option value="sales">Sales</option><option value="cs">Customer Service</option></select></label>
+                <label><span>HubSpot owner</span><select value={selectedOwnerId} onChange={(event) => setSelectedOwnerId(event.target.value)} disabled={isRosterLoading || isAgentSaving}><option value="">{isRosterLoading ? 'Loading HubSpot owners…' : 'Select a person'}</option>{availableHubspotOwners.map((owner) => <option value={owner.id} key={owner.id}>{owner.name}</option>)}</select></label>
+                <label><span>Save PIN</span><input type="password" inputMode="numeric" autoComplete="off" maxLength={4} placeholder="Enter 4-digit PIN" value={agentPin} onChange={(event) => setAgentPin(event.target.value.replace(/\D/g, '').slice(0, 4))} disabled={isAgentSaving} /></label>
+              </div>
+              {agentManagerError && <p className="daily-agent-feedback error" role="alert">{agentManagerError}</p>}
+              {agentManagerMessage && <p className="daily-agent-feedback success" role="status">{agentManagerMessage}</p>}
+              <footer><button type="button" className="secondary" onClick={() => setIsTeamManagerOpen(false)} disabled={isAgentSaving}>Cancel</button><button type="button" onClick={saveAgent} disabled={!selectedOwnerId || agentPin.length !== 4 || isRosterLoading || isAgentSaving}>{isAgentSaving ? 'Adding…' : 'Add to report'}</button></footer>
+            </section>
+          </div>}
 
           <div className="daily-table-card" ref={reportCard}>
             <div className="daily-table-title">
