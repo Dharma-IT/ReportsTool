@@ -87,7 +87,7 @@ function ACAutomation() {
           firstName: contact.firstName, lastName: contact.lastName,
           preference: 'es', phone,
           treatment: 'Slim Boost - Weight Loss Booster', source: 'Abandoned cart',
-          owner: 'Erika Vargas', dealDate: displayDate(supplementDate),
+          owner: 'Laura Camila', dealDate: displayDate(supplementDate),
         }
       }))
     } catch (caught) { setSupplementRows([]); setSupplementError(caught instanceof Error ? caught.message : 'Unable to load Shopify orders.') }

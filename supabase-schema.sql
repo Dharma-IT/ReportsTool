@@ -96,6 +96,9 @@ where hubspot_owner_id is not null;
 create unique index if not exists daily_report_agents_team_name_idx
 on public.daily_report_agents (team, lower(display_name));
 
+delete from public.daily_report_agents
+where lower(display_name) in ('natasha lopez', 'erika vargas');
+
 insert into public.daily_report_agents (team, display_name, hubspot_owner_id, aliases, sort_order)
 values
   ('cs', 'Arles Martinez', null, '["Arles Martinez"]', 10),
@@ -103,7 +106,7 @@ values
   ('cs', 'Brayam Zuluaga', null, '["Brayam Zuluaga", "Brayan Zuluaga"]', 30),
   ('cs', 'Edmilson Morales', null, '["Edmilson Morales", "Edmilson Velasquez"]', 40),
   ('sales', 'Maria Claudia', null, '["Maria Claudia", "María Claudia"]', 10),
-  ('sales', 'Erika Vargas', null, '["Erika Vargas"]', 20),
+  ('sales', 'Laura Camila', '100061173', '["Laura Camila"]', 20),
   ('sales', 'Alejandra Oyala', '99223316', '["Alejandra Oyala"]', 30)
 on conflict do nothing;
 

@@ -64,7 +64,7 @@ type SupplementReport = {
 
 const teamStaff: Record<DailySection, string[]> = {
   CS: ['Arles Martinez', 'Aline Strelow', 'Brayam Zuluaga', 'Edmilson Morales'],
-  Sales: ['Maria Claudia', 'Erika Vargas', 'Alejandra Oyala'],
+  Sales: ['Maria Claudia', 'Laura Camila', 'Alejandra Oyala'],
 }
 
 type DailyRoster = Record<'sales' | 'cs', Array<{ name: string; hubspotOwnerId?: string }>>
@@ -82,6 +82,11 @@ const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD
 const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 const apiBaseUrl = configuredApiBaseUrl === 'https://dharma-campaignreport-1.onrender.com' ? 'https://dharma-campaignreport-503z.onrender.com' : configuredApiBaseUrl
 const dailyCachePrefix = 'dharma-daily-report:'
+const excludedReportStaff = new Set(['natasha lopez', 'erika vargas'])
+
+function activeReportRows(rows: DailyRow[]) {
+  return rows.filter((row) => !excludedReportStaff.has(row.staff.trim().toLowerCase()))
+}
 
 function reportCacheKey(team: DailySection, from: string, to: string) {
   return `${dailyCachePrefix}${team.toLowerCase()}:${from}:${to}`
@@ -274,7 +279,7 @@ function Daily() {
         if (response.ok) {
           const payload = await response.json() as DailyResponse
           if (cancelled) return
-          setRows(rowsFromDailyResponse(activeSection, payload, teamRoster[activeSection]))
+          setRows(activeReportRows(rowsFromDailyResponse(activeSection, payload, teamRoster[activeSection])))
           setSourceWarning(payload.hubSpotAvailable === false ? (payload.hubSpotError ?? 'HubSpot sales were unavailable.') : '')
           setHasLiveData(true); setReportSource('saved'); setError('')
           setSupplements(productsFromDailyResponse(payload, 'productSales'))
@@ -288,7 +293,7 @@ function Daily() {
         if (cached) {
           const saved = JSON.parse(cached) as SavedDailyReport
           if (saved.team === activeSection && saved.fromDate === fromDate && saved.toDate === toDate && Array.isArray(saved.rows)) {
-            setRows(saved.rows.filter((row) => teamRoster[activeSection].includes(row.staff))); setSourceWarning(saved.sourceWarning ?? ''); setHasLiveData(true); setReportSource('saved'); setError(''); setSupplements(null); setPeptides(null); return
+            setRows(activeReportRows(saved.rows.filter((row) => teamRoster[activeSection].includes(row.staff)))); setSourceWarning(saved.sourceWarning ?? ''); setHasLiveData(true); setReportSource('saved'); setError(''); setSupplements(null); setPeptides(null); return
           }
         }
       } catch { /* No browser cache is available. */ }
@@ -452,7 +457,7 @@ function Daily() {
         } : row
       })
       const warning = payload.hubSpotAvailable === false ? (payload.hubSpotError ?? 'HubSpot sales were unavailable.') : ''
-      setRows(fetchedRows)
+      setRows(activeReportRows(fetchedRows))
       setSourceWarning(warning)
       setHasLiveData(true)
       setReportSource('live')

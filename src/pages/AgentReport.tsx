@@ -245,7 +245,7 @@ function AgentReport() {
   const secondaryAgentNames = new Set(['Kathering Silva', 'Zara Meza'])
   const currentAgentNames = new Set([
     'Belizabett Gonzalez', 'Carol Fernandes', 'Ivan Baez', 'Laura Sanchez',
-    'Natasha Lopez', 'Natasha Lorente', 'William Carcamo', 'Kathering Silva', 'Zara Meza',
+    'Laura Camila', 'Natasha Lorente', 'William Carcamo', 'Kathering Silva', 'Zara Meza',
   ])
   const currentAgents = report?.agents.filter((agent) => currentAgentNames.has(agent.name)) ?? []
   const currentStaff = report?.staff.filter((row) => currentAgentNames.has(row.name)) ?? []
