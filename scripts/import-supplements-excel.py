@@ -183,12 +183,12 @@ def parse_workbook(path: Path) -> dict[str, Any]:
     for row_number, row in enumerate(orders_sheet.iter_rows(min_row=2, values_only=True), 2):
         values = list(row)
         created_at = values[15] if len(values) > 15 else None
-        if not in_scope(created_at, epoch):
-            continue
-        report_date = iso_date(created_at, epoch)
         order_name = text(values[0])
         if "tiktokw.us" in text(values[1]).lower():
             tiktok_orders.add(order_name)
+        if not in_scope(created_at, epoch):
+            continue
+        report_date = iso_date(created_at, epoch)
         order_row = {
             "shopify_order_id": stable_integer("order", order_name),
             "shopify_lineitem_id": stable_integer("line", order_name, str(row_number)),
@@ -229,12 +229,11 @@ def parse_workbook(path: Path) -> dict[str, Any]:
             adjusted_costs_by_date[report_date]["fulfillment"] += as_number(row["fulfillment_supliful"])
             adjusted_costs_by_date[report_date]["processing"] += as_number(row["processing_supliful"])
     for row in ads_rows:
-        adjusted = adjusted_costs_by_date.get(row["report_date"])
-        if adjusted is not None:
-            row["cogs"] = round(adjusted["cogs"], 6)
-            row["shipping"] = round(adjusted["shipping"], 6)
-            row["fulfillment"] = round(adjusted["fulfillment"], 6)
-            row["processing"] = round(adjusted["processing"], 6)
+        adjusted = adjusted_costs_by_date[row["report_date"]]
+        row["cogs"] = round(adjusted["cogs"], 6)
+        row["shipping"] = round(adjusted["shipping"], 6)
+        row["fulfillment"] = round(adjusted["fulfillment"], 6)
+        row["processing"] = round(adjusted["processing"], 6)
 
     raw_sales_by_date: dict[str, list[dict[str, Any]]] = defaultdict(list)
     sales_sheet = workbook["Total sales by order"]

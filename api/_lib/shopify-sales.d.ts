@@ -27,6 +27,9 @@ export type ShopifySalesRow = {
   shipping_country: string | null
   shipping_province: string | null
   shipping_service: string | null
+  sales_channel?: string | null
+  fulfillment_status?: string | null
+  cost_recognition_date?: string | null
 }
 
 export type ShopifyHistoricalProductRow = {
@@ -35,7 +38,7 @@ export type ShopifyHistoricalProductRow = {
   sales_amount: number
 }
 
-export function fetchShopifySales(date: string): Promise<{
+export function fetchShopifySales(date: string, options?: { costRecognition?: boolean }): Promise<{
   date: string
   fetchedAt: string
   rows: ShopifySalesRow[]

@@ -9,6 +9,8 @@ const SALES_QUERY = `query SalesForSupplements($after: String, $search: String!)
       name
       createdAt
       sourceName
+      displayFulfillmentStatus
+      fulfillments(first: 100) { createdAt status }
       currentTotalPriceSet { shopMoney { amount } }
       currentTotalTaxSet { shopMoney { amount } }
       totalShippingPriceSet { shopMoney { amount } }
@@ -50,6 +52,12 @@ function nextDate(value) {
   return date.toISOString().slice(0, 10)
 }
 
+function easternDate(value) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(value))
+}
+
 function validateDate(date) {
   if (!validDate(date)) throw new Error('Choose a valid report date')
   if (date < EARLIEST_DATE) throw new Error(`Shopify data starts on ${EARLIEST_DATE}`)
@@ -74,7 +82,7 @@ async function shopifyGraphql(query, variables) {
   return payload.data
 }
 
-export async function fetchShopifySales(date) {
+export async function fetchShopifySales(date, options = {}) {
   validateDate(date)
   const rows = []
   let after = null
@@ -82,11 +90,18 @@ export async function fetchShopifySales(date) {
   do {
     const data = await shopifyGraphql(SALES_QUERY, {
       after,
-      search: `created_at:>=${date} created_at:<${nextDate(date)}`,
+      search: `${options.costRecognition ? 'updated_at' : 'created_at'}:>=${date} ${options.costRecognition ? 'updated_at' : 'created_at'}:<${nextDate(date)}`,
     })
     const orders = data.orders
 
     for (const order of orders.nodes) {
+      const eligibleFulfillment = ['FULFILLED', 'IN_PROGRESS'].includes(String(order.displayFulfillmentStatus || '').toUpperCase())
+        ? (order.fulfillments ?? []).filter((fulfillment) =>
+            fulfillment.createdAt && !['CANCELLED', 'ERROR', 'FAILURE'].includes(String(fulfillment.status || '').toUpperCase()),
+          ).sort((left, right) => left.createdAt.localeCompare(right.createdAt))[0]
+        : null
+      const costRecognitionDate = eligibleFulfillment ? easternDate(eligibleFulfillment.createdAt) : null
+      if (options.costRecognition && costRecognitionDate !== date) continue
       const refundByLineItem = new Map()
       for (const refund of order.refunds ?? []) {
         for (const refundedItem of refund.refundLineItems?.nodes ?? []) {
@@ -138,6 +153,8 @@ export async function fetchShopifySales(date) {
           shipping_province: order.shippingAddress?.provinceCode ?? null,
           shipping_service: order.shippingLine?.code || order.shippingLine?.title || null,
           sales_channel: order.sourceName || null,
+          fulfillment_status: order.displayFulfillmentStatus || null,
+          cost_recognition_date: costRecognitionDate,
         })
       })
     }

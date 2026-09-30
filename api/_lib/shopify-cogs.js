@@ -179,7 +179,7 @@ export async function saveShopifyCogs(date, rows) {
 
 export async function syncShopifyCogs(date) {
   validateDate(date)
-  const report = await fetchShopifySales(date)
+  const report = await fetchShopifySales(date, { costRecognition: true })
   const orderNames = report.rows.map((item) => item.name).filter(Boolean)
   let payouts = new Map()
   let payoutWarning = null
