@@ -210,20 +210,30 @@ def parse_workbook(path: Path) -> dict[str, Any]:
     # The workbook does not include a dedicated sales-channel column, but
     # TikTok Shop orders use Shopify's @scs.tiktokw.us relay email domain.
     # Product exemptions apply independently of the order channel.
-    adjusted_costs_by_date: dict[str, dict[str, float]] = defaultdict(lambda: {"shipping": 0.0, "processing": 0.0})
+    adjusted_costs_by_date: dict[str, dict[str, float]] = defaultdict(lambda: {"cogs": 0.0, "shipping": 0.0, "fulfillment": 0.0, "processing": 0.0})
     for report_date, rows in cogs_by_date.items():
         for row in rows:
-            if fee_exempt_product(row["product"]) or row["order"] in tiktok_orders:
+            tiktok_order = row["order"] in tiktok_orders
+            exempt_product = fee_exempt_product(row["product"])
+            if tiktok_order:
+                row["unit_price"] = 0.01
+                row["subtotal"] = round(as_number(row["qty"]) * 0.01, 6)
+            if exempt_product or tiktok_order:
                 row["shipping"] = 0.0
+                row["fulfillment_supliful"] = 0.0
                 row["processing_supliful"] = 0.0
                 row["processing_shopify"] = 0.0
-                row["total"] = round(as_number(row["subtotal"]) + as_number(row["fulfillment_supliful"]), 6)
+                row["total"] = round(as_number(row["subtotal"]), 6)
+            adjusted_costs_by_date[report_date]["cogs"] += as_number(row["subtotal"])
             adjusted_costs_by_date[report_date]["shipping"] += as_number(row["shipping"])
+            adjusted_costs_by_date[report_date]["fulfillment"] += as_number(row["fulfillment_supliful"])
             adjusted_costs_by_date[report_date]["processing"] += as_number(row["processing_supliful"])
     for row in ads_rows:
         adjusted = adjusted_costs_by_date.get(row["report_date"])
         if adjusted is not None:
+            row["cogs"] = round(adjusted["cogs"], 6)
             row["shipping"] = round(adjusted["shipping"], 6)
+            row["fulfillment"] = round(adjusted["fulfillment"], 6)
             row["processing"] = round(adjusted["processing"], 6)
 
     raw_sales_by_date: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -288,8 +298,9 @@ def parse_workbook(path: Path) -> dict[str, Any]:
                 sales_by_date[report_date].append(report_row)
 
     ads_dates = [row["report_date"] for row in ads_rows]
-    if len(ads_rows) != 30 or len(set(ads_dates)) != 30:
-        raise ValueError(f"Expected exactly 30 unique September ADS rows; found {len(ads_rows)} rows and {len(set(ads_dates))} dates")
+    expected_days = (date.fromisoformat(END_DATE) - date.fromisoformat(START_DATE)).days + 1
+    if len(ads_rows) != expected_days or len(set(ads_dates)) != expected_days:
+        raise ValueError(f"Expected exactly {expected_days} unique ADS rows; found {len(ads_rows)} rows and {len(set(ads_dates))} dates")
 
     return {
         "ads": ads_rows,
@@ -381,11 +392,16 @@ def summary(parsed: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> int:
+    global END_DATE
     parser = argparse.ArgumentParser(description="Replace September supplement reporting data from the Dharma workbook.")
     parser.add_argument("workbook", type=Path)
+    parser.add_argument("--through", default=END_DATE, help="Last September date to replace (YYYY-MM-DD).")
     parser.add_argument("--apply", action="store_true", help="Write the replacement data to Supabase.")
     parser.add_argument("--backup-dir", type=Path, default=Path("migration-backups"))
     args = parser.parse_args()
+    if not (START_DATE <= args.through <= "2026-09-30"):
+        raise ValueError("--through must be between 2026-09-01 and 2026-09-30")
+    END_DATE = args.through
 
     load_env(Path(".env.local"))
     parsed = parse_workbook(args.workbook)
@@ -418,7 +434,7 @@ def main() -> int:
     }
     print("Supabase verification:")
     print(json.dumps(result, indent=2))
-    expected = {"ads_days": 30, "cogs_days": len(parsed["cogs"]), "sales_days": len(parsed["sales"]), "orders_rows": len(parsed["orders"]), "history_snapshots": 1}
+    expected = {"ads_days": len(parsed["ads"]), "cogs_days": len(parsed["cogs"]), "sales_days": len(parsed["sales"]), "orders_rows": len(parsed["orders"]), "history_snapshots": 1}
     if result != expected:
         raise RuntimeError(f"Post-import counts differ. Expected {expected}, received {result}")
     return 0

@@ -202,7 +202,7 @@ export async function syncShopifyCogs(date) {
     const detail = orderDetails.get(detailOrder) || { weight: 0, subtotal: 0, fulfillment: 0, fallbackShipping: 0, country: null, province: null, service: null, feeTargetId: null, tiktok: false }
     const qty = Number(item.qty || 0)
     detail.tiktok ||= String(item.sales_channel || '').toLowerCase().includes('tiktok')
-    if (!feeExemptProduct(item.product_name)) {
+    if (!detail.tiktok && !feeExemptProduct(item.product_name)) {
       detail.feeTargetId ||= item.id
       detail.weight += weightInPounds(item.unit_weight, item.weight_unit) * qty
       detail.subtotal += (productUnitCost(item.product_name) ?? 0) * qty
@@ -219,11 +219,13 @@ export async function syncShopifyCogs(date) {
     if (item.name) currentOrder = item.name
     const qty = Number(item.qty || 0)
     const detail = orderDetails.get(currentOrder)
+    const exemptProduct = feeExemptProduct(item.product_name)
+    const tiktokOrder = Boolean(detail?.tiktok)
     const receivesFees = Boolean(detail && !detail.tiktok && detail.feeTargetId === item.id)
     const calculatedShipping = detail && suplifulShippingCost(detail.weight, detail.country, detail.province, detail.service)
     const shipping = receivesFees ? (calculatedShipping ?? detail?.fallbackShipping ?? 0) : 0
-    const unitPrice = productUnitCost(item.product_name)
-    const fulfillment = suplifulFulfillmentFee(qty)
+    const unitPrice = tiktokOrder ? 0.01 : productUnitCost(item.product_name)
+    const fulfillment = tiktokOrder || exemptProduct ? 0 : suplifulFulfillmentFee(qty)
     const processingBase = (detail?.subtotal || 0) + (calculatedShipping ?? detail?.fallbackShipping ?? 0) + (detail?.fulfillment || 0)
     const processing = receivesFees ? roundMoney(processingBase * SUPLIFUL_PROCESSING_RATE) : 0
     const row = {
