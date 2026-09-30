@@ -100,7 +100,35 @@ function getApiUrl(path: string) {
   return `${['localhost', '127.0.0.1'].includes(window.location.hostname) ? '' : apiBaseUrl}${path}`
 }
 
+const peptideDashboardProducts = [
+  { key: 'ghk-cu-troches-one-month', name: 'GHK-Cu Troches - One month', matches: (name: string) => name.includes('ghk cu troches') && /\b(?:one|1) month\b/.test(name) },
+  { key: 'ghk-cu-troches-three-months', name: 'GHK-Cu Troches - 3 Months', matches: (name: string) => name.includes('ghk cu troches') && /\b(?:three|3) months?\b/.test(name) },
+  { key: 'sermorelin-30-day', name: 'Sermorelin (One Time / 30-Day Supply)', matches: (name: string) => name.includes('sermorelin') && /\b30 day\b/.test(name) },
+  { key: 'sermorelin-60-day', name: 'Sermorelin (One Time / 60-Day Supply)', matches: (name: string) => name.includes('sermorelin') && /\b60 day\b/.test(name) },
+  { key: 'glutathione-two-months', name: 'Glutathione 2 Months', matches: (name: string) => name.includes('glutathione') && /\b(?:two|2) months?\b/.test(name) },
+  { key: 'glutathione-four-months', name: 'Glutathione 4 Months', matches: (name: string) => name.includes('glutathione') && /\b(?:four|4) months?\b/.test(name) },
+]
+
+function normalizedProductName(name: string) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
 function productsFromDailyResponse(payload: DailyResponse, field: 'productSales' | 'peptideSales'): SupplementReport {
+  if (field === 'peptideSales') {
+    const rows = payload.agents.map(({ name: staff, peptideSales = {} }) => {
+      const quantities = Object.fromEntries(peptideDashboardProducts.map((product) => [product.key, 0]))
+      for (const item of Object.values(peptideSales)) {
+        const product = peptideDashboardProducts.find((candidate) => candidate.matches(normalizedProductName(item.name)))
+        if (product) quantities[product.key] += safeNumber(item.quantity)
+      }
+      return { staff, quantities }
+    })
+    return {
+      products: peptideDashboardProducts.map(({ key, name }) => ({ key, name })),
+      rows,
+      unattributedQuantity: 0,
+    }
+  }
   const productNames = new Map<string, string>()
   const rows = payload.agents.map(({ name: staff }) => {
     const agent = payload.agents.find((candidate) => candidate.name === staff)
@@ -633,7 +661,7 @@ function Daily() {
               </table></div> : <div className="daily-supplements-empty">No paid Shopify supplement items were found for this date range.</div>}
             </section>
             <section className="daily-supplements daily-peptides" aria-labelledby="daily-peptides-title">
-              <div className="daily-supplements-heading"><div><span>HubSpot items report</span><h2 id="daily-peptides-title">Peptides sold by staff</h2></div><small>Selected paid-date range · Peptide and GLP medications</small></div>
+              <div className="daily-supplements-heading"><div><span>HubSpot items report</span><h2 id="daily-peptides-title">Peptides sold by staff</h2></div><small>Selected paid-date range · Listed peptide products</small></div>
               {peptides?.products.length ? <div className="daily-supplements-scroll"><table className="daily-supplements-table">
                 <thead><tr><th>Staff</th>{peptides.products.map((product) => <th key={product.key}>{product.name}</th>)}<th>Total</th></tr></thead>
                 <tbody>{rows.map((staffRow) => {

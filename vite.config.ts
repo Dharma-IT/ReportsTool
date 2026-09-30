@@ -903,6 +903,7 @@ function isDailyPeptideProduct(name: string) {
     'ozempic', 'wegovy', 'mounjaro', 'zepbound', 'rybelsus', 'saxenda', 'victoza',
     'bpc-157', 'bpc 157', 'cjc-1295', 'cjc 1295', 'ipamorelin', 'sermorelin',
     'tesamorelin', 'ghk-cu', 'ghk cu', 'pt-141', 'pt 141', 'aod-9604', 'aod 9604',
+    'glutathione',
   ].some((term) => product.includes(term))
 }
 
@@ -927,7 +928,7 @@ function classifyDailyCsProduct(name: string) {
   if (product.includes('nutrition')) return 'plan'
   if (
     (product.includes('peptide') && !product.includes('tirzepatide')) ||
-    ['bpc-157', 'bpc 157', 'cjc-1295', 'cjc 1295', 'ipamorelin', 'sermorelin', 'tesamorelin'].some((name) => product.includes(name))
+    ['bpc-157', 'bpc 157', 'cjc-1295', 'cjc 1295', 'ipamorelin', 'sermorelin', 'tesamorelin', 'ghk-cu', 'ghk cu', 'glutathione'].some((name) => product.includes(name))
   ) return 'peptides'
   if (product.includes('semaglutide') || product.includes('tirzepatide') || product.includes('injection') || product.includes('slim boost')) return 'injections'
   return null
