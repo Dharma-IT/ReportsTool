@@ -78,7 +78,6 @@ async function fetchManualAppointments(fromDate, toDate, dateField, fromTime, to
   }
   const appointmentTeams = [
     { team: 'sales', name: 'Andres Castro', aliases: ['andres castro'] },
-    { team: 'sales', name: 'Maria Claudia', aliases: ['maria claudia'] },
     { team: 'sales', name: 'Laura Camila', aliases: ['laura camila'] },
     { team: 'sales', name: 'Meribet Yazziet', aliases: ['meribet yazziet', 'meribet sampson'] },
     { team: 'sales', name: 'Ailin Isabel', aliases: ['ailin isabel'] },

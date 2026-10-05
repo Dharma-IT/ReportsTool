@@ -43,7 +43,6 @@ const DAILY_CS_AGENTS = [
 ]
 const DAILY_SALES_AGENTS = [
   { name: 'Andres Castro', aliases: ['Andres Castro', 'Andrés Castro'] },
-  { name: 'Maria Claudia', aliases: ['Maria Claudia', 'María Claudia'] },
   { name: 'Laura Camila', aliases: ['Laura Camila'] },
   { name: 'Alejandra Oyala', aliases: ['Alejandra Oyala'] },
   { name: 'Ailin Isabel', aliases: ['Ailin Isabel', 'Ailín Isabel'] },
@@ -2802,7 +2801,7 @@ async function fetchDailyAgentRoster(
   serviceRoleKey: string,
 ): Promise<DailyAgentRosterEntry[]> {
   const fallback = team === 'sales'
-    ? DAILY_SALES_AGENTS.filter((agent) => ['Maria Claudia', 'Laura Camila', 'Alejandra Oyala'].includes(agent.name))
+    ? DAILY_SALES_AGENTS.filter((agent) => ['Laura Camila', 'Alejandra Oyala'].includes(agent.name))
     : DAILY_CS_AGENTS
   if (!supabaseUrl || !serviceRoleKey) return fallback.map((agent) => ({ ...agent }))
   try {
@@ -2817,7 +2816,7 @@ async function fetchDailyAgentRoster(
       hubspot_owner_id?: string | null
     }>
     if (!rows.length) return fallback.map((agent) => ({ ...agent }))
-    return rows.filter((row) => !['natasha lopez', 'erika vargas'].includes(row.display_name.trim().toLowerCase())).map((row) => ({
+    return rows.filter((row) => !['natasha lopez', 'erika vargas', 'maria claudia'].includes(row.display_name.trim().toLowerCase())).map((row) => ({
       name: row.display_name,
       aliases: Array.isArray(row.aliases) && row.aliases.every((alias) => typeof alias === 'string')
         ? row.aliases
