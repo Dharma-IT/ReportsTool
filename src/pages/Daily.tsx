@@ -262,6 +262,7 @@ function Daily() {
   const [agentPin, setAgentPin] = useState('')
   const [isRosterLoading, setIsRosterLoading] = useState(false)
   const [isAgentSaving, setIsAgentSaving] = useState(false)
+  const [removingAgent, setRemovingAgent] = useState('')
   const [agentManagerMessage, setAgentManagerMessage] = useState('')
   const [agentManagerError, setAgentManagerError] = useState('')
   const doxyFileInput = useRef<HTMLInputElement>(null)
@@ -359,6 +360,10 @@ function Daily() {
         message?: string
       }
       if (!response.ok) throw new Error(payload.message ?? 'Unable to load HubSpot owners.')
+      if (payload.agents) setTeamRoster({
+        Sales: payload.agents.sales.map((agent) => agent.name),
+        CS: payload.agents.cs.map((agent) => agent.name),
+      })
       setHubspotOwners(payload.hubspotOwners ?? [])
       setConfiguredOwnerIds(new Set(payload.configuredOwnerIds ?? []))
     } catch (managerError) {
@@ -397,6 +402,37 @@ function Daily() {
       setAgentManagerError(managerError instanceof Error ? managerError.message : 'Unable to add this person.')
     } finally {
       setIsAgentSaving(false)
+    }
+  }
+
+  async function removeAgent(name: string) {
+    if (!agentPin || isAgentSaving || removingAgent) return
+    setRemovingAgent(name)
+    setAgentManagerError('')
+    setAgentManagerMessage('')
+    try {
+      const response = await fetch(getApiUrl('/api/daily-report-agents'), {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: agentPin, team: selectedAgentTeam, name }),
+      })
+      const payload = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(payload.message ?? 'Unable to remove this person.')
+      const section: DailySection = selectedAgentTeam === 'sales' ? 'Sales' : 'CS'
+      setTeamRoster((current) => ({ ...current, [section]: current[section].filter((staff) => staff !== name) }))
+      if (activeSection === section) setRows((current) => current.filter((row) => row.staff !== name))
+      const ownerId = hubspotOwners.find((owner) => owner.name === name)?.id
+      if (ownerId) setConfiguredOwnerIds((current) => {
+        const next = new Set(current)
+        next.delete(ownerId)
+        return next
+      })
+      setAgentManagerMessage(payload.message ?? `${name} was removed.`)
+      setAgentPin('')
+    } catch (managerError) {
+      setAgentManagerError(managerError instanceof Error ? managerError.message : 'Unable to remove this person.')
+    } finally {
+      setRemovingAgent('')
     }
   }
 
@@ -591,11 +627,12 @@ function Daily() {
             if (event.target === event.currentTarget && !isAgentSaving) setIsTeamManagerOpen(false)
           }}>
             <section className="daily-agent-modal" role="dialog" aria-modal="true" aria-labelledby="daily-agent-modal-title">
-              <header><div><span>Team settings</span><h2 id="daily-agent-modal-title">Add a person</h2><p>Selecting directly from HubSpot prevents spelling and attribution errors.</p></div><button type="button" aria-label="Close" onClick={() => setIsTeamManagerOpen(false)} disabled={isAgentSaving}>×</button></header>
+              <header><div><span>Team settings</span><h2 id="daily-agent-modal-title">Manage team</h2><p>Add people from HubSpot or remove them from future reports.</p></div><button type="button" aria-label="Close" onClick={() => setIsTeamManagerOpen(false)} disabled={isAgentSaving || Boolean(removingAgent)}>×</button></header>
               <div className="daily-agent-form">
                 <label><span>Team</span><select value={selectedAgentTeam} onChange={(event) => setSelectedAgentTeam(event.target.value as 'sales' | 'cs')} disabled={isAgentSaving}><option value="sales">Sales</option><option value="cs">Customer Service</option></select></label>
                 <label><span>HubSpot owner</span><select value={selectedOwnerId} onChange={(event) => setSelectedOwnerId(event.target.value)} disabled={isRosterLoading || isAgentSaving}><option value="">{isRosterLoading ? 'Loading HubSpot owners…' : 'Select a person'}</option>{availableHubspotOwners.map((owner) => <option value={owner.id} key={owner.id}>{owner.name}</option>)}</select></label>
                 <label><span>Save PIN</span><input type="password" inputMode="numeric" autoComplete="off" maxLength={4} placeholder="Enter 4-digit PIN" value={agentPin} onChange={(event) => setAgentPin(event.target.value.replace(/\D/g, '').slice(0, 4))} disabled={isAgentSaving} /></label>
+                <div className="daily-agent-members"><span>Current team</span>{teamRoster[selectedAgentTeam === 'sales' ? 'Sales' : 'CS'].map((name) => <div key={name}><strong>{name}</strong><button type="button" onClick={() => void removeAgent(name)} disabled={agentPin.length !== 4 || isAgentSaving || Boolean(removingAgent)}>{removingAgent === name ? 'Removing…' : 'Remove'}</button></div>)}</div>
               </div>
               {agentManagerError && <p className="daily-agent-feedback error" role="alert">{agentManagerError}</p>}
               {agentManagerMessage && <p className="daily-agent-feedback success" role="status">{agentManagerMessage}</p>}

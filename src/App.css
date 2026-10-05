@@ -817,6 +817,11 @@
 .daily-agent-form label>span { color:#657263; font-size:9px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; }
 .daily-agent-form select,.daily-agent-form input { width:100%; min-height:44px; padding:9px 12px; border:1px solid rgba(52,88,65,.2); border-radius:10px; background:#fbfcf9; color:#264a38; font:700 12px/1.2 inherit; outline:none; }
 .daily-agent-form select:focus,.daily-agent-form input:focus { border-color:#b48a32; box-shadow:0 0 0 3px rgba(243,205,101,.2); }
+.daily-agent-members { display:grid; gap:7px; padding-top:2px; }
+.daily-agent-members>span { color:#657263; font-size:9px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; }
+.daily-agent-members>div { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:42px; padding:7px 8px 7px 12px; border:1px solid rgba(52,88,65,.14); border-radius:10px; background:#fbfcf9; color:#264a38; font-size:12px; }
+.daily-agent-members button { min-height:28px; padding:0 10px; border:1px solid rgba(150,62,45,.22); border-radius:7px; background:#fff5f2; color:#963e2d; font:800 10px/1 inherit; cursor:pointer; }
+.daily-agent-members button:disabled { cursor:not-allowed; opacity:.5; }
 .daily-agent-feedback { margin:0 26px 12px; padding:10px 12px; border-radius:9px; font-size:11px; font-weight:750; }
 .daily-agent-feedback.error { background:#fff0ed; color:#963e2d; }
 .daily-agent-feedback.success { background:#edf7e9; color:#28603e; }

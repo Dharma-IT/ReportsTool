@@ -1263,14 +1263,34 @@ function financeReportApi(
             return
           }
 
-          if (request.method !== 'POST') {
-            response.setHeader('Allow', 'GET, POST')
+          if (!['POST', 'DELETE'].includes(request.method ?? '')) {
+            response.setHeader('Allow', 'GET, POST, DELETE')
             sendJson(response, 405, { message: 'Method not allowed.' })
             return
           }
-          const body = await readJsonRequest<{ pin?: string; team?: string; hubspotOwnerId?: string }>(request)
+          const body = await readJsonRequest<{ pin?: string; team?: string; hubspotOwnerId?: string; name?: string }>(request)
           if (body.pin !== dailyAgentAdminPin) {
             sendJson(response, 403, { message: 'Incorrect PIN.' })
+            return
+          }
+          if (request.method === 'DELETE') {
+            if (!['sales', 'cs'].includes(body.team ?? '') || !body.name?.trim()) {
+              sendJson(response, 400, { message: 'Select a valid team member.' })
+              return
+            }
+            if (!supabaseUrl || !supabaseServiceRoleKey) throw new Error('Agent roster storage is not configured.')
+            const deleteResponse = await supabaseRest(
+              supabaseUrl,
+              supabaseServiceRoleKey,
+              `daily_report_agents?team=eq.${body.team}&display_name=eq.${encodeURIComponent(body.name.trim())}`,
+              { method: 'DELETE', headers: { Prefer: 'return=representation' } },
+            )
+            const removed = (await deleteResponse.json()) as unknown[]
+            if (!removed.length) {
+              sendJson(response, 404, { message: 'That person is no longer on this team.' })
+              return
+            }
+            sendJson(response, 200, { message: `${body.name.trim()} was removed from future reports.` })
             return
           }
           if (!['sales', 'cs'].includes(body.team ?? '') || !body.hubspotOwnerId) {
@@ -2812,7 +2832,7 @@ async function fetchDailyAgentRoster(
       aliases: unknown
       hubspot_owner_id?: string | null
     }>
-    if (!rows.length) return fallback.map((agent) => ({ ...agent }))
+    if (!rows.length) return []
     return rows.filter((row) => !['natasha lopez', 'erika vargas', 'maria claudia', 'laura camila'].includes(row.display_name.trim().toLowerCase())).map((row) => ({
       name: row.display_name,
       aliases: Array.isArray(row.aliases) && row.aliases.every((alias) => typeof alias === 'string')
