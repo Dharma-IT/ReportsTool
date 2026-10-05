@@ -64,7 +64,7 @@ type SupplementReport = {
 
 const teamStaff: Record<DailySection, string[]> = {
   CS: ['Arles Martinez', 'Aline Strelow', 'Brayam Zuluaga', 'Edmilson Morales'],
-  Sales: ['Laura Camila', 'Alejandra Oyala'],
+  Sales: ['Alejandra Oyala'],
 }
 
 type DailyRoster = Record<'sales' | 'cs', Array<{ name: string; hubspotOwnerId?: string }>>
@@ -82,7 +82,7 @@ const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD
 const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 const apiBaseUrl = configuredApiBaseUrl === 'https://dharma-campaignreport-1.onrender.com' ? 'https://dharma-campaignreport-503z.onrender.com' : configuredApiBaseUrl
 const dailyCachePrefix = 'dharma-daily-report:'
-const excludedReportStaff = new Set(['natasha lopez', 'erika vargas', 'maria claudia'])
+const excludedReportStaff = new Set(['natasha lopez', 'erika vargas', 'maria claudia', 'laura camila'])
 
 function activeReportRows(rows: DailyRow[]) {
   return rows.filter((row) => !excludedReportStaff.has(row.staff.trim().toLowerCase()))

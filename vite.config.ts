@@ -30,7 +30,6 @@ const AGENT_REPORT_AGENTS = [
   { name: 'Belizabett Gonzalez', aliases: ['Belizabett Gonzalez'] },
   { name: 'Ivan Baez', aliases: ['Ivan Baez'] },
   { name: 'Laura Sanchez', aliases: ['Laura Sanchez', 'Laura Alejandra Sanchez Pinto'] },
-  { name: 'Laura Camila', aliases: ['Laura Camila'] },
   { name: 'William Carcamo', aliases: ['William Carcamo'] },
   { name: 'Kathering Silva', aliases: ['Kathering Silva'] },
   { name: 'Zara Meza', aliases: ['Zara Meza'] },
@@ -43,7 +42,6 @@ const DAILY_CS_AGENTS = [
 ]
 const DAILY_SALES_AGENTS = [
   { name: 'Andres Castro', aliases: ['Andres Castro', 'Andrés Castro'] },
-  { name: 'Laura Camila', aliases: ['Laura Camila'] },
   { name: 'Alejandra Oyala', aliases: ['Alejandra Oyala'] },
   { name: 'Ailin Isabel', aliases: ['Ailin Isabel', 'Ailín Isabel'] },
 ]
@@ -56,7 +54,6 @@ const STAFF_PERFORMANCE_REPORT = [
   { name: 'Carol Fernandes', respondAliases: ['Carolina Lopez'], hubSpotAliases: ['Carol Fernandes'], hasCalls: false },
   { name: 'Ivan Baez', respondAliases: ['Ivan Baez'], hubSpotAliases: ['Ivan Baez'], hasCalls: true },
   { name: 'Laura Sanchez', respondAliases: ['Laura Sanchez'], hubSpotAliases: ['Laura Sanchez'], hasCalls: true },
-  { name: 'Laura Camila', respondAliases: ['Laura Camila'], hubSpotAliases: ['Laura Camila'], hasCalls: true },
   { name: 'Natasha Lorente', respondAliases: ['Jose Lorente'], hubSpotAliases: ['Natasha Lorente'], hasCalls: false },
   { name: 'William Carcamo', respondAliases: ['William Carcamo'], hubSpotAliases: ['William Carcamo'], hasCalls: true },
   { name: 'Kathering Silva', respondAliases: ['Kathering Silva'], hubSpotAliases: ['Kathering Silva'], hasCalls: true },
@@ -2801,7 +2798,7 @@ async function fetchDailyAgentRoster(
   serviceRoleKey: string,
 ): Promise<DailyAgentRosterEntry[]> {
   const fallback = team === 'sales'
-    ? DAILY_SALES_AGENTS.filter((agent) => ['Laura Camila', 'Alejandra Oyala'].includes(agent.name))
+    ? DAILY_SALES_AGENTS.filter((agent) => agent.name === 'Alejandra Oyala')
     : DAILY_CS_AGENTS
   if (!supabaseUrl || !serviceRoleKey) return fallback.map((agent) => ({ ...agent }))
   try {
@@ -2816,7 +2813,7 @@ async function fetchDailyAgentRoster(
       hubspot_owner_id?: string | null
     }>
     if (!rows.length) return fallback.map((agent) => ({ ...agent }))
-    return rows.filter((row) => !['natasha lopez', 'erika vargas', 'maria claudia'].includes(row.display_name.trim().toLowerCase())).map((row) => ({
+    return rows.filter((row) => !['natasha lopez', 'erika vargas', 'maria claudia', 'laura camila'].includes(row.display_name.trim().toLowerCase())).map((row) => ({
       name: row.display_name,
       aliases: Array.isArray(row.aliases) && row.aliases.every((alias) => typeof alias === 'string')
         ? row.aliases

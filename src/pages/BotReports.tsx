@@ -89,7 +89,7 @@ function AppointmentSales({ summaries, isLoading, error }: { summaries: TeamSale
 }
 
 const appointmentTeamMembers = {
-  sales: ['Andres Castro', 'Laura Camila', 'Meribet Yazziet', 'Ailin Isabel'],
+  sales: ['Andres Castro', 'Meribet Yazziet', 'Ailin Isabel'],
   nutritionist: ['Maria Sandoval', 'Paula Alfonso'],
   cs: ['Arles Martinez', 'Aline Strelow', 'Brayam Zuluaga', 'Edmilson Morales'],
 } as const
