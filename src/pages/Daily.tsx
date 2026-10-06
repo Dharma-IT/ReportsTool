@@ -151,8 +151,9 @@ function formatDuration(seconds: number) {
 }
 
 function durationSeconds(value: string) {
-  if (!value || !/^\d+:\d{2}:\d{2}$/.test(value)) return 0
-  const seconds = value.split(':').reduce((total, part) => total * 60 + Number(part), 0)
+  const normalized = value?.trim() ?? ''
+  if (!/^\d+(?::\d{1,2}){1,2}$/.test(normalized)) return 0
+  const seconds = normalized.split(':').reduce((total, part) => total * 60 + Number(part), 0)
   return Number.isFinite(seconds) ? seconds : 0
 }
 
@@ -194,8 +195,21 @@ function parseCsv(text: string) {
 }
 
 function doxyDate(value: string) {
-  const match = value.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-  return match ? `${match[3]}-${match[1].padStart(2, '0')}-${match[2].padStart(2, '0')}` : ''
+  const normalized = value.trim()
+  const iso = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s]|$)/)
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`
+  const us = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})(?:[\s,]|$)/)
+  if (us) {
+    const year = us[3].length === 2 ? `20${us[3]}` : us[3]
+    return `${year}-${us[1].padStart(2, '0')}-${us[2].padStart(2, '0')}`
+  }
+  const parsed = new Date(normalized)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`
+}
+
+function normalizedDoxyName(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 }
 
 function DailyVisualizations({ rows }: { rows: DailyRow[] }) {
@@ -446,18 +460,20 @@ function Daily() {
       if (!file.name.toLowerCase().endsWith('.csv')) throw new Error('Please upload the Doxy meeting history as a CSV file.')
       const records = parseCsv(await file.text())
       const headers = records.shift()?.map((header) => header.replace(/^\uFEFF/, '').trim().toLowerCase()) ?? []
-      const dateIndex = headers.indexOf('date')
-      const providerIndex = headers.indexOf('provider name')
-      const durationIndex = headers.indexOf('duration')
+      const headerIndex = (...names: string[]) => headers.findIndex((header) => names.includes(header))
+      const dateIndex = headerIndex('date', 'meeting date', 'start date', 'started at', 'start time')
+      const providerIndex = headerIndex('provider name', 'provider', 'host name', 'host')
+      const durationIndex = headerIndex('duration', 'call duration', 'meeting duration')
       if ([dateIndex, providerIndex, durationIndex].some((index) => index < 0)) throw new Error('This CSV needs Date, Provider name, and Duration columns.')
 
       const metrics = new Map<string, { calls: number; valid: number; validSeconds: number; totalSeconds: number }>()
+      const salesProviders = new Set(teamRoster.Sales.map(normalizedDoxyName))
       let matchedCalls = 0
       for (const record of records) {
         const date = doxyDate(record[dateIndex] ?? '')
         if (!date || date < fromDate || date > toDate) continue
-        const provider = (record[providerIndex] ?? '').trim().toLowerCase()
-        if (!teamRoster.Sales.some((staff) => staff.toLowerCase() === provider)) continue
+        const provider = normalizedDoxyName(record[providerIndex] ?? '')
+        if (!salesProviders.has(provider)) continue
         const seconds = durationSeconds(record[durationIndex] ?? '')
         const metric = metrics.get(provider) ?? { calls: 0, valid: 0, validSeconds: 0, totalSeconds: 0 }
         metric.calls += 1
@@ -469,7 +485,7 @@ function Daily() {
       if (!matchedCalls) throw new Error(`No Sales provider calls were found between ${fromDate} and ${toDate}.`)
 
       const uploadedRows = rows.map((row) => {
-        const metric = metrics.get(row.staff.toLowerCase())
+        const metric = metrics.get(normalizedDoxyName(row.staff))
         return { ...row, doxyCalls: metric?.calls ?? 0, doxyValid: metric?.valid ?? 0,
           doxyAverage: metric?.valid ? formatDuration(metric.validSeconds / metric.valid) : '—',
           doxyTotal: metric ? formatDuration(metric.totalSeconds) : '0:00:00' }
