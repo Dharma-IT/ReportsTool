@@ -67,7 +67,7 @@ const teamStaff: Record<DailySection, string[]> = {
   Sales: ['Alejandra Oyala'],
 }
 
-type DailyRoster = Record<'sales' | 'cs', Array<{ name: string; hubspotOwnerId?: string }>>
+type DailyRoster = Record<'sales' | 'cs', Array<{ name: string; aliases?: string[]; hubspotOwnerId?: string }>>
 type HubSpotOwnerOption = { id: string; name: string }
 
 function emptyRows(team: DailySection, staffNames = teamStaff[team]): DailyRow[] {
@@ -268,6 +268,10 @@ function Daily() {
     CS: teamStaff.CS,
     Sales: teamStaff.Sales,
   })
+  const [doxyProviderAliases, setDoxyProviderAliases] = useState<Record<string, string>>({
+    'alejandra oyala': 'alejandra oyala',
+    'alejandra olaya': 'alejandra oyala',
+  })
   const [isTeamManagerOpen, setIsTeamManagerOpen] = useState(false)
   const [hubspotOwners, setHubspotOwners] = useState<HubSpotOwnerOption[]>([])
   const [configuredOwnerIds, setConfiguredOwnerIds] = useState<Set<string>>(new Set())
@@ -298,6 +302,10 @@ function Daily() {
           CS: payload.agents.cs.map((agent) => agent.name),
         }
         setTeamRoster(nextRoster)
+        setDoxyProviderAliases(Object.fromEntries(payload.agents.sales.flatMap((agent) => {
+          const canonical = normalizedDoxyName(agent.name)
+          return [agent.name, ...(agent.aliases ?? [])].map((alias) => [normalizedDoxyName(alias), canonical])
+        })))
         setHubspotOwners(payload.hubspotOwners ?? [])
         setConfiguredOwnerIds(new Set(payload.configuredOwnerIds ?? []))
       } catch { /* The built-in roster remains available if management is offline. */ }
@@ -472,7 +480,8 @@ function Daily() {
       for (const record of records) {
         const date = doxyDate(record[dateIndex] ?? '')
         if (!date || date < fromDate || date > toDate) continue
-        const provider = normalizedDoxyName(record[providerIndex] ?? '')
+        const providerName = normalizedDoxyName(record[providerIndex] ?? '')
+        const provider = doxyProviderAliases[providerName] ?? providerName
         if (!salesProviders.has(provider)) continue
         const seconds = durationSeconds(record[durationIndex] ?? '')
         const metric = metrics.get(provider) ?? { calls: 0, valid: 0, validSeconds: 0, totalSeconds: 0 }

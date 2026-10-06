@@ -42,7 +42,7 @@ const DAILY_CS_AGENTS = [
 ]
 const DAILY_SALES_AGENTS = [
   { name: 'Andres Castro', aliases: ['Andres Castro', 'Andrés Castro'] },
-  { name: 'Alejandra Oyala', aliases: ['Alejandra Oyala'] },
+  { name: 'Alejandra Oyala', aliases: ['Alejandra Oyala', 'Alejandra Olaya'] },
   { name: 'Ailin Isabel', aliases: ['Ailin Isabel', 'Ailín Isabel'] },
 ]
 const APPOINTMENT_NUTRITIONISTS = [
@@ -2835,7 +2835,9 @@ async function fetchDailyAgentRoster(
     if (!rows.length) return []
     return rows.filter((row) => !['natasha lopez', 'erika vargas', 'maria claudia', 'laura camila'].includes(row.display_name.trim().toLowerCase())).map((row) => ({
       name: row.display_name,
-      aliases: Array.isArray(row.aliases) && row.aliases.every((alias) => typeof alias === 'string')
+      aliases: row.display_name.trim().toLowerCase() === 'alejandra oyala'
+        ? [...new Set([...(Array.isArray(row.aliases) && row.aliases.every((alias) => typeof alias === 'string') ? row.aliases : [row.display_name]), 'Alejandra Olaya'])]
+        : Array.isArray(row.aliases) && row.aliases.every((alias) => typeof alias === 'string')
         ? row.aliases
         : [row.display_name],
       ...(row.hubspot_owner_id ? { hubspotOwnerId: row.hubspot_owner_id } : {}),

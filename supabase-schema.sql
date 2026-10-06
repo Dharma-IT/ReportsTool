@@ -105,7 +105,7 @@ values
   ('cs', 'Aline Strelow', null, '["Aline Strelow", "Ailene Nuevas", "Alice F"]', 20),
   ('cs', 'Brayam Zuluaga', null, '["Brayam Zuluaga", "Brayan Zuluaga"]', 30),
   ('cs', 'Edmilson Morales', null, '["Edmilson Morales", "Edmilson Velasquez"]', 40),
-  ('sales', 'Alejandra Oyala', '99223316', '["Alejandra Oyala"]', 30)
+  ('sales', 'Alejandra Oyala', '99223316', '["Alejandra Oyala", "Alejandra Olaya"]', 30)
 on conflict do nothing;
 
 create table if not exists public.refund_reports (
