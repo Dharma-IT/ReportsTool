@@ -123,6 +123,7 @@ type HeroChartPoint = {
   reportDate: string
   label: string
   metaLeads: number
+  enMetaLeads: number
   tiktokLeads: number
   totalLeads: number
   newLeads: number
@@ -552,6 +553,7 @@ function buildHeroChartPoint(report: BudgetResponse, respondIoEntry?: ReportEntr
     ? getReportEntryTotals(respondIoEntry)
     : { totalRespondMeta: 0, totalMetaAndTiktok: 0, newMetaAndTiktok: 0 }
   const respondMetaLeads = totalsForEntry.totalRespondMeta
+  const enMetaLeads = respondIoEntry ? parseEntryNumber(respondIoEntry.enMeta) : 0
   const respondTiktokLeads = respondIoEntry ? parseEntryNumber(respondIoEntry.totalRespondTiktok) : 0
   const totalRespondSpend = (spanishMetaSpend ?? 0) + (report.tiktokTotalSpending ?? 0)
 
@@ -559,6 +561,7 @@ function buildHeroChartPoint(report: BudgetResponse, respondIoEntry?: ReportEntr
     reportDate: report.reportDate,
     label: getShortDateLabel(report.reportDate),
     metaLeads: respondMetaLeads,
+    enMetaLeads,
     tiktokLeads: respondTiktokLeads,
     totalLeads: totalsForEntry.totalMetaAndTiktok,
     newLeads: totalsForEntry.newMetaAndTiktok,
@@ -574,6 +577,7 @@ function buildEmptyHeroChartPoint(reportDate: string): HeroChartPoint {
     reportDate,
     label: getShortDateLabel(reportDate),
     metaLeads: 0,
+    enMetaLeads: 0,
     tiktokLeads: 0,
     totalLeads: 0,
     newLeads: 0,
@@ -667,11 +671,14 @@ function PerformanceBarChart({
     selectedPoint && previousPoint ? selectedPoint.tiktokLeads - previousPoint.tiktokLeads : null
   const metaDelta =
     selectedPoint && previousPoint ? selectedPoint.metaLeads - previousPoint.metaLeads : null
+  const enMetaDelta =
+    selectedPoint && previousPoint ? selectedPoint.enMetaLeads - previousPoint.enMetaLeads : null
   const maxValue = Math.max(
     1,
     ...points.flatMap((point) => [
       point.tiktokLeads,
       point.metaLeads,
+      point.enMetaLeads,
       point.newLeads,
       point.totalLeads,
     ]),
@@ -685,6 +692,7 @@ function PerformanceBarChart({
   const series = [
     { key: 'tiktokLeads', label: 'TikTok Total', color: '#e67e6c' },
     { key: 'metaLeads', label: 'FB Total', color: '#3ba56f' },
+    { key: 'enMetaLeads', label: 'EN Meta Total', color: '#4f78c4' },
     { key: 'newLeads', label: 'Total New Leads', color: '#e6a740' },
     { key: 'totalLeads', label: 'Total Leads', color: '#183c2e' },
   ] as const
@@ -709,6 +717,10 @@ function PerformanceBarChart({
         <span>
           FB Total {selectedPoint ? formatSheetNumber(selectedPoint.metaLeads) : '0'}
           <DeltaBadge delta={metaDelta} />
+        </span>
+        <span>
+          EN Meta Total {selectedPoint ? formatSheetNumber(selectedPoint.enMetaLeads) : '0'}
+          <DeltaBadge delta={enMetaDelta} />
         </span>
         <span>
           Total New Leads (Meta &amp; TikTok) ={' '}
@@ -755,7 +767,8 @@ function PerformanceBarChart({
                 {series.map((item, seriesIndex) => {
                   const value = point[item.key]
                   const height = (value / maxValue) * chartAreaHeight
-                  const barX = x + (seriesIndex - 1.5) * (barWidth + 2)
+                  const barX =
+                    x + (seriesIndex - (series.length - 1) / 2) * (barWidth + 2)
                   const barY = chartTop + chartAreaHeight - height
                   const labelX = barX + barWidth / 2
                   const labelY = Math.max(8, barY - 3)
