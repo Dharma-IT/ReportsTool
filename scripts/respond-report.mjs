@@ -6,6 +6,8 @@ const statePath = resolve('.auth/respondio-state.json')
 const profilePath = resolve('.auth/respondio-profile')
 const reportDate = readArg('--date') ?? getTodayISO()
 const platform = readArg('--platform') ?? 'all'
+const suppliedEnMetaChannelId = readNumericArg('--en-meta-channel-id')
+const suppliedExcludedTiktokChannelId = readNumericArg('--excluded-tiktok-channel-id')
 const defaultMetaChannelIds = [
   494850, 493621, 439286, 433241, 433238, 426799, 396210, 396209, 376692, 333332, 333331,
   333330, 333328, 333321, 330509, 330347,
@@ -52,9 +54,9 @@ try {
   }
 
   const channelResponse = await firstSuccessfulAppFetch(page, [
-    '/workspace/channel',
-    '/api/v2/workspace/channel',
     '/api/v2/space/channel',
+    '/api/v2/workspace/channel',
+    '/workspace/channel',
   ])
   const channels = normalizeItems(channelResponse)
   const excludedTiktokChannel = channels.find((channel) => channel.name === 'PT - 2034') ?? null
@@ -63,7 +65,8 @@ try {
 
   const shouldFetchMeta = platform === 'all' || platform === 'meta'
   const shouldFetchTiktok = platform === 'all' || platform === 'tiktok'
-  const excludedChannelId = excludedTiktokChannel?.id ?? 333279
+  const excludedChannelId = suppliedExcludedTiktokChannelId ?? excludedTiktokChannel?.id ?? 333279
+  const enMetaChannelId = suppliedEnMetaChannelId ?? enMetaChannel?.id ?? null
   const includedMetaChannelIds = getIncludedMetaChannelIds(channels, excludedChannelId)
   const meta = shouldFetchMeta
     ? await fetchConversationOpenedMetrics(page, {
@@ -78,11 +81,11 @@ try {
         adPlatform: 'tiktok',
       })
     : null
-  const enMeta = shouldFetchMeta && enMetaChannel
+  const enMeta = shouldFetchMeta && enMetaChannelId
     ? await fetchConversationOpenedMetrics(page, {
         reportDate,
         adPlatform: 'meta',
-        includedChannelIds: [enMetaChannel.id],
+        includedChannelIds: [enMetaChannelId],
       })
     : null
 
@@ -301,6 +304,11 @@ function normalizeItems(payload) {
 function readArg(name) {
   const arg = process.argv.find((value) => value.startsWith(`${name}=`))
   return arg?.slice(name.length + 1)
+}
+
+function readNumericArg(name) {
+  const value = Number(readArg(name))
+  return Number.isFinite(value) && value > 0 ? value : null
 }
 
 function parseJson(value) {

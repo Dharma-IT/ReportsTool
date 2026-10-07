@@ -406,7 +406,12 @@ function respondIoReportMetricsApi(apiToken: string, analyticsToken: string): Pl
               return
             }
 
-            const report = await runRespondIoSessionReport(reportDate, platform)
+            const report = await runRespondIoSessionReport(
+              reportDate,
+              platform,
+              enMetaChannel?.id,
+              excludedTiktokChannel?.id,
+            )
             sendJson(response, 200, {
               ...report,
               excludedTiktokChannel: report.excludedTiktokChannel ?? excludedTiktokChannel,
@@ -514,10 +519,21 @@ function tiktokAdsManagerApi(): Plugin {
   }
 }
 
-async function runRespondIoSessionReport(reportDate: string, platform: string) {
+async function runRespondIoSessionReport(
+  reportDate: string,
+  platform: string,
+  enMetaChannelId?: number,
+  excludedTiktokChannelId?: number,
+) {
   try {
+    const channelArgs = [
+      ...(enMetaChannelId ? [`--en-meta-channel-id=${enMetaChannelId}`] : []),
+      ...(excludedTiktokChannelId
+        ? [`--excluded-tiktok-channel-id=${excludedTiktokChannelId}`]
+        : []),
+    ]
     const { stdout } = await execNodeScript(
-      ['respond-report.mjs', `--date=${reportDate}`, `--platform=${platform}`],
+      ['respond-report.mjs', `--date=${reportDate}`, `--platform=${platform}`, ...channelArgs],
       {
         cwd: getAppRoot(),
         timeout: 120_000,

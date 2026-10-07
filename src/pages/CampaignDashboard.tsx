@@ -249,10 +249,6 @@ function formatMoney(value: number | null) {
   return value === null ? 'No value' : currencyFormatter.format(value)
 }
 
-function formatMetric(value: number | null | undefined) {
-  return value === null || value === undefined ? 'Waiting' : numberFormatter.format(value)
-}
-
 function parseEntryNumber(value: string) {
   const parsed = Number(value)
 
@@ -598,8 +594,7 @@ function upsertBudgetReport(currentReports: BudgetResponse[], nextReport: Budget
 }
 
 function getReportEntryTotals(entry: ReportEntry) {
-  const totalRespondMeta =
-    parseEntryNumber(entry.totalRespondMeta) + parseEntryNumber(entry.enMeta)
+  const totalRespondMeta = parseEntryNumber(entry.totalRespondMeta)
 
   return {
     totalRespondMeta,
@@ -953,25 +948,30 @@ function mergeReportToEntry(
   entry: ReportEntry,
   report: RespondIoReportResponse,
   metaLeadsTotal?: number | null,
+  addEnMetaToTotal = false,
 ) {
+  const enMeta =
+    report.metrics.enMeta == null ? (entry.enMeta ?? '0') : String(report.metrics.enMeta)
+  const totalRespondMeta =
+    report.metrics.totalRespondMeta === null
+      ? entry.totalRespondMeta
+      : String(
+          report.metrics.totalRespondMeta +
+            (addEnMetaToTotal ? parseEntryNumber(enMeta) : 0),
+        )
+
   return {
     ...entry,
     meta:
       metaLeadsTotal !== undefined && metaLeadsTotal !== null
         ? String(metaLeadsTotal)
         : entry.meta,
-    totalRespondMeta:
-      report.metrics.totalRespondMeta === null
-        ? entry.totalRespondMeta
-        : String(report.metrics.totalRespondMeta),
+    totalRespondMeta,
     newRespondMeta:
       report.metrics.newRespondMeta === null
         ? entry.newRespondMeta
         : String(report.metrics.newRespondMeta),
-    enMeta:
-      report.metrics.enMeta == null
-        ? (entry.enMeta ?? '0')
-        : String(report.metrics.enMeta),
+    enMeta,
     totalRespondTiktok:
       report.metrics.totalRespondTiktok === null
         ? entry.totalRespondTiktok
@@ -1034,7 +1034,7 @@ async function saveRespondIoReport(
     timezone: report.timezone,
     meta: parseNullableEntryNumber(entry.meta) ?? currentRow?.meta ?? null,
     total_resp_meta:
-      report.metrics.totalRespondMeta ?? currentRow?.total_resp_meta ?? null,
+      parseNullableEntryNumber(entry.totalRespondMeta) ?? currentRow?.total_resp_meta ?? null,
     new_respond_meta:
       report.metrics.newRespondMeta ?? currentRow?.new_respond_meta ?? null,
     en_meta: report.metrics.enMeta ?? currentRow?.en_meta ?? null,
@@ -1690,7 +1690,12 @@ function App() {
         null
       const metaLeadsTotal = reportForMetaLeads ? getMetaLeadsTotal(reportForMetaLeads) : null
       const currentEntry = respondIoEntries[nextReport.reportDate] ?? emptyReportEntry
-      const mergedEntry = mergeReportToEntry(currentEntry, nextReport, metaLeadsTotal)
+      const mergedEntry = mergeReportToEntry(
+        currentEntry,
+        nextReport,
+        metaLeadsTotal,
+        platform === 'meta',
+      )
       const nextEntry = {
         ...mergedEntry,
         average: formatAverage(
@@ -2150,31 +2155,6 @@ function App() {
             </div>
           </div>
         </div>
-
-        {respondIoReport ? (
-          <section className="respond-metric-grid" aria-label="Fetched respond report metrics">
-            <div className="metric compact-metric">
-              <span>Fetched Total Meta</span>
-              <strong>{formatMetric(respondIoReport.metrics.totalRespondMeta)}</strong>
-            </div>
-            <div className="metric compact-metric">
-              <span>Fetched New Meta</span>
-              <strong>{formatMetric(respondIoReport.metrics.newRespondMeta)}</strong>
-            </div>
-            <div className="metric compact-metric">
-              <span>Fetched EN Meta</span>
-              <strong>{formatMetric(respondIoReport.metrics.enMeta)}</strong>
-            </div>
-            <div className="metric compact-metric">
-              <span>Fetched Total TikTok</span>
-              <strong>{formatMetric(respondIoReport.metrics.totalRespondTiktok)}</strong>
-            </div>
-            <div className="metric compact-metric">
-              <span>Fetched New TikTok</span>
-              <strong>{formatMetric(respondIoReport.metrics.newRespondTiktok)}</strong>
-            </div>
-          </section>
-        ) : null}
 
         {respondIoReport ? (
           <p className="sheet-note">
