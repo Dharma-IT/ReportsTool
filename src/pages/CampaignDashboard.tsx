@@ -124,6 +124,7 @@ type HeroChartPoint = {
   totalLeads: number
   newLeads: number
   metaCpr: number | null
+  enMetaCpr: number | null
   tiktokCpr: number | null
   respondCpr: number | null
 }
@@ -474,6 +475,17 @@ function isJobCampaign(campaign: CampaignBudget) {
   return /\bjob\b/i.test(campaign.campaignName)
 }
 
+function isEnglishCampaign(campaign: CampaignBudget) {
+  return /^\s*\{EN\}/i.test(campaign.campaignName)
+}
+
+function getCampaignCostPerResult(campaigns: CampaignBudget[]) {
+  return getCostPerResultValue(
+    sumNullableCampaignMetric(campaigns, 'spendYesterday'),
+    sumNullableCampaignMetric(campaigns, 'resultsYesterday'),
+  )
+}
+
 function getMetaTableSpending(report: BudgetResponse) {
   const totalSpending = getMetaTotalSpending(report)
 
@@ -530,14 +542,16 @@ function buildSpanishReportRow(report: BudgetResponse, respondIoEntry?: ReportEn
 }
 
 function buildHeroChartPoint(report: BudgetResponse, respondIoEntry?: ReportEntry): HeroChartPoint {
-  const metaSpend = getMetaTableSpending(report)
-  const metaLeads = getMetaLeadsTotal(report)
+  const nonJobCampaigns = (report.campaigns ?? []).filter((campaign) => !isJobCampaign(campaign))
+  const englishCampaigns = nonJobCampaigns.filter(isEnglishCampaign)
+  const spanishCampaigns = nonJobCampaigns.filter((campaign) => !isEnglishCampaign(campaign))
+  const spanishMetaSpend = sumNullableCampaignMetric(spanishCampaigns, 'spendYesterday')
   const totalsForEntry = respondIoEntry
     ? getReportEntryTotals(respondIoEntry)
     : { totalMetaAndTiktok: 0, newMetaAndTiktok: 0 }
   const respondMetaLeads = respondIoEntry ? parseEntryNumber(respondIoEntry.totalRespondMeta) : 0
   const respondTiktokLeads = respondIoEntry ? parseEntryNumber(respondIoEntry.totalRespondTiktok) : 0
-  const totalRespondSpend = (metaSpend ?? 0) + (report.tiktokTotalSpending ?? 0)
+  const totalRespondSpend = (spanishMetaSpend ?? 0) + (report.tiktokTotalSpending ?? 0)
 
   return {
     reportDate: report.reportDate,
@@ -546,7 +560,8 @@ function buildHeroChartPoint(report: BudgetResponse, respondIoEntry?: ReportEntr
     tiktokLeads: respondTiktokLeads,
     totalLeads: totalsForEntry.totalMetaAndTiktok,
     newLeads: totalsForEntry.newMetaAndTiktok,
-    metaCpr: getCostPerResultValue(metaSpend, metaLeads),
+    metaCpr: getCampaignCostPerResult(spanishCampaigns),
+    enMetaCpr: getCampaignCostPerResult(englishCampaigns),
     tiktokCpr: getCostPerResultValue(report.tiktokTotalSpending, report.tiktokLeadsTotal),
     respondCpr: getCostPerResultValue(totalRespondSpend, totalsForEntry.totalMetaAndTiktok),
   }
@@ -561,6 +576,7 @@ function buildEmptyHeroChartPoint(reportDate: string): HeroChartPoint {
     totalLeads: 0,
     newLeads: 0,
     metaCpr: null,
+    enMetaCpr: null,
     tiktokCpr: null,
     respondCpr: null,
   }
@@ -790,10 +806,11 @@ function CprLineChart({
   const chartAreaHeight = 116
   const series = [
     { key: 'metaCpr', label: 'SP Meta', color: '#3ba56f' },
+    { key: 'enMetaCpr', label: 'EN Meta', color: '#4f78c4' },
     { key: 'tiktokCpr', label: 'SP TikTok', color: '#e6a740' },
     { key: 'respondCpr', label: 'SP Respond Average', color: '#183c2e' },
   ] as const
-  const valueLabelOffsets = [-10, 13, -20]
+  const valueLabelOffsets = [-10, -20, 13, -30]
   const maxValue = Math.max(
     1,
     ...points.flatMap((point) => series.map((item) => point[item.key] ?? 0)),
@@ -805,12 +822,15 @@ function CprLineChart({
       <div className="chart-summary compact">
         <strong>Spend Per Lead - {selectedPoint ? getMonthDayLabel(selectedPoint.reportDate) : 'No reports'}</strong>
         <span style={{ '--summary-color': series[0].color } as CSSProperties}>
-          Meta {formatChartMoney(selectedPoint?.metaCpr ?? null)}
+          SP Meta {formatChartMoney(selectedPoint?.metaCpr ?? null)}
         </span>
         <span style={{ '--summary-color': series[1].color } as CSSProperties}>
-          TikTok {formatChartMoney(selectedPoint?.tiktokCpr ?? null)}
+          EN Meta {formatChartMoney(selectedPoint?.enMetaCpr ?? null)}
         </span>
         <span style={{ '--summary-color': series[2].color } as CSSProperties}>
+          TikTok {formatChartMoney(selectedPoint?.tiktokCpr ?? null)}
+        </span>
+        <span style={{ '--summary-color': series[3].color } as CSSProperties}>
           Respond {formatChartMoney(selectedPoint?.respondCpr ?? null)}
         </span>
       </div>
