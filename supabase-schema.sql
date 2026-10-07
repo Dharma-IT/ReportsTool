@@ -9,7 +9,7 @@ create table if not exists public.respond_io_conversations (
   new_tiktok integer,
   average numeric,
   meta_and_tiktok integer generated always as (
-    coalesce(total_resp_meta, 0) + coalesce(total_resp_tiktok, 0)
+    coalesce(total_resp_meta, 0) + coalesce(en_meta, 0) + coalesce(total_resp_tiktok, 0)
   ) stored,
   new_meta_and_tiktok integer generated always as (
     coalesce(new_respond_meta, 0) + coalesce(new_tiktok, 0)

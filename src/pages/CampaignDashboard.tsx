@@ -554,8 +554,8 @@ function buildHeroChartPoint(report: BudgetResponse, respondIoEntry?: ReportEntr
   const spanishMetaSpend = sumNullableCampaignMetric(spanishCampaigns, 'spendYesterday')
   const totalsForEntry = respondIoEntry
     ? getReportEntryTotals(respondIoEntry)
-    : { totalMetaAndTiktok: 0, newMetaAndTiktok: 0 }
-  const respondMetaLeads = respondIoEntry ? parseEntryNumber(respondIoEntry.totalRespondMeta) : 0
+    : { totalRespondMeta: 0, totalMetaAndTiktok: 0, newMetaAndTiktok: 0 }
+  const respondMetaLeads = totalsForEntry.totalRespondMeta
   const respondTiktokLeads = respondIoEntry ? parseEntryNumber(respondIoEntry.totalRespondTiktok) : 0
   const totalRespondSpend = (spanishMetaSpend ?? 0) + (report.tiktokTotalSpending ?? 0)
 
@@ -598,9 +598,13 @@ function upsertBudgetReport(currentReports: BudgetResponse[], nextReport: Budget
 }
 
 function getReportEntryTotals(entry: ReportEntry) {
+  const totalRespondMeta =
+    parseEntryNumber(entry.totalRespondMeta) + parseEntryNumber(entry.enMeta)
+
   return {
+    totalRespondMeta,
     totalMetaAndTiktok:
-      parseEntryNumber(entry.totalRespondMeta) + parseEntryNumber(entry.totalRespondTiktok),
+      totalRespondMeta + parseEntryNumber(entry.totalRespondTiktok),
     newMetaAndTiktok:
       parseEntryNumber(entry.newRespondMeta) + parseEntryNumber(entry.newRespondTiktok),
   }

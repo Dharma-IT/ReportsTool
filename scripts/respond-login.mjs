@@ -74,7 +74,14 @@ if (isProfileMode) {
   prompt.close()
 }
 
-await context.storageState({ path: statePath })
-await context.close()
-
-console.log(`Saved respond.io browser session to ${statePath}`)
+if (isProfileMode) {
+  // A persistent context writes cookies and local storage directly to the
+  // profile as the user browses. Closing its last window can also close the
+  // context, so do not try to export storage state afterward.
+  await context.close().catch(() => {})
+  console.log(`Saved respond.io browser session to ${profilePath}`)
+} else {
+  await context.storageState({ path: statePath })
+  await context.close()
+  console.log(`Saved respond.io browser session to ${statePath}`)
+}
