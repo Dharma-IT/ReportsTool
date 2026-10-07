@@ -393,6 +393,9 @@ function respondIoReportMetricsApi(apiToken: string, analyticsToken: string): Pl
           const excludedTiktokChannel = (channels.items ?? []).find(
             (channel) => channel.name === 'PT - 2034',
           )
+          const enMetaChannel = (channels.items ?? []).find(
+            (channel) => channel.name === '{EN} Dharma - (561) 884-4041',
+          )
 
           if (!analyticsToken) {
             if (process.env.RENDER) {
@@ -422,12 +425,21 @@ function respondIoReportMetricsApi(apiToken: string, analyticsToken: string): Pl
             reportDate,
             adPlatform: 'tiktok',
           })
+          const enMeta = enMetaChannel
+            ? await fetchRespondReportGroup({
+                token: analyticsToken,
+                reportDate,
+                adPlatform: 'meta',
+                includedChannelIds: [enMetaChannel.id],
+              })
+            : null
 
           sendJson(response, 200, {
             reportDate,
             timezone: 'America/New_York',
             excludedTiktokChannel,
             metrics: {
+              enMeta: enMeta?.totalCount ?? null,
               newRespondMeta: meta.newCount,
               totalRespondMeta: meta.totalCount,
               newRespondTiktok: tiktok.newCount,
@@ -517,6 +529,7 @@ async function runRespondIoSessionReport(reportDate: string, platform: string) {
       timezone: string
       excludedTiktokChannel?: RespondIoChannel
       metrics: {
+        enMeta: number | null
         newRespondMeta: number | null
         totalRespondMeta: number | null
         newRespondTiktok: number | null

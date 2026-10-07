@@ -4,6 +4,7 @@ create table if not exists public.respond_io_conversations (
   meta numeric,
   total_resp_meta integer,
   new_respond_meta integer,
+  en_meta integer,
   total_resp_tiktok integer,
   new_tiktok integer,
   average numeric,
@@ -18,6 +19,9 @@ create table if not exists public.respond_io_conversations (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.respond_io_conversations
+  add column if not exists en_meta integer;
 
 create table if not exists public.meta_budget_reports (
   report_date date primary key,

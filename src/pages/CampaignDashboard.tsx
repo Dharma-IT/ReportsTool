@@ -31,6 +31,7 @@ type BudgetResponse = {
 }
 
 type RespondIoReportMetrics = {
+  enMeta: number | null
   newRespondMeta: number | null
   totalRespondMeta: number | null
   newRespondTiktok: number | null
@@ -54,6 +55,7 @@ type RespondIoConversationRow = {
   meta: number | null
   total_resp_meta: number | null
   new_respond_meta: number | null
+  en_meta: number | null
   total_resp_tiktok: number | null
   new_tiktok: number | null
   average: number | null
@@ -97,6 +99,7 @@ type ReportEntryField =
   | 'meta'
   | 'totalRespondMeta'
   | 'newRespondMeta'
+  | 'enMeta'
   | 'totalRespondTiktok'
   | 'newRespondTiktok'
   | 'average'
@@ -135,6 +138,7 @@ const emptyReportEntry: ReportEntry = {
   meta: '',
   totalRespondMeta: '',
   newRespondMeta: '',
+  enMeta: '0',
   totalRespondTiktok: '',
   newRespondTiktok: '',
   average: '',
@@ -363,6 +367,7 @@ function mergeRespondIoReport(
   return {
     ...nextReport,
     metrics: {
+      enMeta: nextReport.metrics.enMeta ?? currentReport?.metrics.enMeta ?? null,
       newRespondMeta:
         nextReport.metrics.newRespondMeta ?? currentReport?.metrics.newRespondMeta ?? null,
       totalRespondMeta:
@@ -381,6 +386,7 @@ function buildRespondIoReportFromRow(row: RespondIoConversationRow): RespondIoRe
     timezone: row.timezone ?? 'America/New_York',
     excludedTiktokChannel: row.excluded_tiktok_channel ?? undefined,
     metrics: {
+      enMeta: row.en_meta ?? null,
       newRespondMeta: row.new_respond_meta,
       totalRespondMeta: row.total_resp_meta,
       newRespondTiktok: row.new_tiktok,
@@ -958,6 +964,10 @@ function mergeReportToEntry(
       report.metrics.newRespondMeta === null
         ? entry.newRespondMeta
         : String(report.metrics.newRespondMeta),
+    enMeta:
+      report.metrics.enMeta == null
+        ? (entry.enMeta ?? '0')
+        : String(report.metrics.enMeta),
     totalRespondTiktok:
       report.metrics.totalRespondTiktok === null
         ? entry.totalRespondTiktok
@@ -974,6 +984,7 @@ function buildRespondIoEntryFromRow(row: RespondIoConversationRow): ReportEntry 
     meta: row.meta === null ? '' : String(row.meta),
     totalRespondMeta: row.total_resp_meta === null ? '' : String(row.total_resp_meta),
     newRespondMeta: row.new_respond_meta === null ? '' : String(row.new_respond_meta),
+    enMeta: row.en_meta == null ? '0' : String(row.en_meta),
     totalRespondTiktok: row.total_resp_tiktok === null ? '' : String(row.total_resp_tiktok),
     newRespondTiktok: row.new_tiktok === null ? '' : String(row.new_tiktok),
     average: row.average === null ? '' : String(row.average),
@@ -1022,6 +1033,7 @@ async function saveRespondIoReport(
       report.metrics.totalRespondMeta ?? currentRow?.total_resp_meta ?? null,
     new_respond_meta:
       report.metrics.newRespondMeta ?? currentRow?.new_respond_meta ?? null,
+    en_meta: report.metrics.enMeta ?? currentRow?.en_meta ?? null,
     total_resp_tiktok:
       report.metrics.totalRespondTiktok ?? currentRow?.total_resp_tiktok ?? null,
     new_tiktok:
@@ -2017,6 +2029,7 @@ function App() {
                     <th>Meta</th>
                     <th>Total RespMeta</th>
                     <th>New respond Meta</th>
+                    <th>EN Meta</th>
                     <th>Total Resp TikTok</th>
                     <th>New TikTok</th>
                     <th>Average</th>
@@ -2061,6 +2074,17 @@ function App() {
                             value={entry.newRespondMeta}
                             onChange={(event) =>
                               updateRespondIoEntry(sheetDate, 'newRespondMeta', event.target.value)
+                            }
+                            placeholder="0"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            aria-label={`EN Meta ${sheetDate}`}
+                            inputMode="numeric"
+                            value={entry.enMeta ?? '0'}
+                            onChange={(event) =>
+                              updateRespondIoEntry(sheetDate, 'enMeta', event.target.value)
                             }
                             placeholder="0"
                           />
@@ -2132,6 +2156,10 @@ function App() {
             <div className="metric compact-metric">
               <span>Fetched New Meta</span>
               <strong>{formatMetric(respondIoReport.metrics.newRespondMeta)}</strong>
+            </div>
+            <div className="metric compact-metric">
+              <span>Fetched EN Meta</span>
+              <strong>{formatMetric(respondIoReport.metrics.enMeta)}</strong>
             </div>
             <div className="metric compact-metric">
               <span>Fetched Total TikTok</span>

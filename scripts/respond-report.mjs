@@ -58,6 +58,8 @@ try {
   ])
   const channels = normalizeItems(channelResponse)
   const excludedTiktokChannel = channels.find((channel) => channel.name === 'PT - 2034') ?? null
+  const enMetaChannel =
+    channels.find((channel) => channel.name === '{EN} Dharma - (561) 884-4041') ?? null
 
   const shouldFetchMeta = platform === 'all' || platform === 'meta'
   const shouldFetchTiktok = platform === 'all' || platform === 'tiktok'
@@ -76,6 +78,13 @@ try {
         adPlatform: 'tiktok',
       })
     : null
+  const enMeta = shouldFetchMeta && enMetaChannel
+    ? await fetchConversationOpenedMetrics(page, {
+        reportDate,
+        adPlatform: 'meta',
+        includedChannelIds: [enMetaChannel.id],
+      })
+    : null
 
   console.log(
     JSON.stringify({
@@ -83,6 +92,7 @@ try {
       timezone: 'America/New_York',
       excludedTiktokChannel,
       metrics: {
+        enMeta: enMeta?.totalCount ?? null,
         newRespondMeta: meta?.newCount ?? null,
         totalRespondMeta: meta?.totalCount ?? null,
         newRespondTiktok: tiktok?.newCount ?? null,
