@@ -3183,7 +3183,7 @@ function decimalStringToNumber(value?: string) {
 
 function isSmgCampaign(campaignName: string) {
   const normalizedName = normalizeCampaignName(campaignName)
-  return SMG_CAMPAIGN_PATTERNS.some((pattern) =>
+  return /^\{en\}\s*smg campaign\b/.test(normalizedName) || SMG_CAMPAIGN_PATTERNS.some((pattern) =>
     normalizedName.includes(normalizeCampaignName(pattern)),
   )
 }
