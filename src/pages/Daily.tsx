@@ -302,7 +302,7 @@ function Daily() {
           CS: payload.agents.cs.map((agent) => agent.name),
         }
         setTeamRoster(nextRoster)
-        setDoxyProviderAliases(Object.fromEntries(payload.agents.sales.flatMap((agent) => {
+        setDoxyProviderAliases(Object.fromEntries([...payload.agents.sales, ...payload.agents.cs].flatMap((agent) => {
           const canonical = normalizedDoxyName(agent.name)
           return [agent.name, ...(agent.aliases ?? [])].map((alias) => [normalizedDoxyName(alias), canonical])
         })))
@@ -475,14 +475,14 @@ function Daily() {
       if ([dateIndex, providerIndex, durationIndex].some((index) => index < 0)) throw new Error('This CSV needs Date, Provider name, and Duration columns.')
 
       const metrics = new Map<string, { calls: number; valid: number; validSeconds: number; totalSeconds: number }>()
-      const salesProviders = new Set(teamRoster.Sales.map(normalizedDoxyName))
+      const teamProviders = new Set(teamRoster[activeSection].map(normalizedDoxyName))
       let matchedCalls = 0
       for (const record of records) {
         const date = doxyDate(record[dateIndex] ?? '')
         if (!date || date < fromDate || date > toDate) continue
         const providerName = normalizedDoxyName(record[providerIndex] ?? '')
         const provider = doxyProviderAliases[providerName] ?? providerName
-        if (!salesProviders.has(provider)) continue
+        if (!teamProviders.has(provider)) continue
         const seconds = durationSeconds(record[durationIndex] ?? '')
         const metric = metrics.get(provider) ?? { calls: 0, valid: 0, validSeconds: 0, totalSeconds: 0 }
         metric.calls += 1
@@ -491,7 +491,7 @@ function Daily() {
         if (seconds > 60) { metric.valid += 1; metric.validSeconds += seconds }
         metrics.set(provider, metric)
       }
-      if (!matchedCalls) throw new Error(`No Sales provider calls were found between ${fromDate} and ${toDate}.`)
+      if (!matchedCalls) throw new Error(`No ${activeSection} provider calls were found between ${fromDate} and ${toDate}.`)
 
       const uploadedRows = rows.map((row) => {
         const metric = metrics.get(normalizedDoxyName(row.staff))
@@ -503,8 +503,8 @@ function Daily() {
       setHasLiveData(true)
       setDoxyUpload(`${file.name}: ${matchedCalls} calls matched the selected date range.`)
       try {
-        const saved: SavedDailyReport = { team: 'Sales', fromDate, toDate, rows: uploadedRows, sourceWarning, fetchedAt: new Date().toISOString() }
-        localStorage.setItem(reportCacheKey('Sales', fromDate, toDate), JSON.stringify(saved))
+        const saved: SavedDailyReport = { team: activeSection, fromDate, toDate, rows: uploadedRows, sourceWarning, fetchedAt: new Date().toISOString() }
+        localStorage.setItem(reportCacheKey(activeSection, fromDate, toDate), JSON.stringify(saved))
       } catch { /* The uploaded report still displays when browser storage is unavailable. */ }
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : 'Unable to read the Doxy CSV file.')
@@ -625,12 +625,12 @@ function Daily() {
               <b>{team === 'CS' ? 'CS' : 'SL'}</b><span>{team}</span>
             </button>
           ))}
-          {isSales && <div className="daily-doxy-upload">
+          <div className="daily-doxy-upload">
             <span>Doxy data</span>
             <input ref={doxyFileInput} type="file" accept=".csv,text/csv" onChange={uploadDoxyReport} />
             <button type="button" onClick={() => doxyFileInput.current?.click()} disabled={isLoading || !fromDate || !toDate}><b>CSV</b><span>Upload Doxy</span></button>
             <small>Uses the selected date range (EST).</small>
-          </div>}
+          </div>
         </aside>
 
         <div className="daily-content">
@@ -683,30 +683,30 @@ function Daily() {
             {error && <div className="daily-error" role="alert">{error}</div>}
             {sourceWarning && <div className="daily-warning" role="status">Aircall loaded, but HubSpot did not: {sourceWarning}</div>}
             {doxyUpload && <div className="daily-success" role="status">Doxy uploaded: {doxyUpload}</div>}
-            {hasLiveData && <div className="daily-source-note">Aircall supplies call activity. HubSpot supplies products, sales, and refund-adjusted balance.{isSales ? ' Doxy values come from the uploaded meeting-history CSV.' : ''}</div>}
+            {hasLiveData && <div className="daily-source-note">Aircall supplies call activity. HubSpot supplies products, sales, and refund-adjusted balance. Doxy values come from the uploaded meeting-history CSV.</div>}
             {hasLiveData ? <><div className="daily-table-scroll">
-              <table className={`daily-table ${isSales ? 'daily-sales-table' : ''}`}>
+              <table className="daily-table daily-sales-table">
                 <thead>
                   <tr className="daily-group-row">
                     <th rowSpan={2}>Staff</th><th colSpan={5}>Aircall</th>
-                    {isSales && <th colSpan={4}>Doxy</th>}
-                    {isSales && <th rowSpan={2}>Total time in call <small>Doxy + Aircall</small></th>}
+                    <th colSpan={4}>Doxy</th>
+                    <th rowSpan={2}>Total time in call <small>Doxy + Aircall</small></th>
                     <th colSpan={5}>Products sold</th><th colSpan={2}>Revenue</th><th rowSpan={2}>Observations</th>
                   </tr>
                   <tr>
                     <th>Numbers called</th><th>Total intents</th><th>Valid calls</th><th>Average call time <small>over 1 min</small></th><th>Total time</th>
-                    {isSales && <><th>Video calls</th><th>Valid video calls</th><th>Average call time <small>over 1 min</small></th><th>Total Doxy time</th></>}
+                    <th>Video calls</th><th>Valid video calls</th><th>Average call time <small>over 1 min</small></th><th>Total Doxy time</th>
                     <th>Injections</th><th>NAD+</th><th>Lipo Mino</th><th>Nutritional plan</th><th>Peptides</th><th>Total sales</th><th>Balance <small>after refunds</small></th>
                   </tr>
                 </thead>
                 <tbody>{rows.map((row) => <tr key={row.staff}>
                   <th scope="row"><span className="daily-avatar">{row.staff.split(' ').map((name) => name[0]).join('')}</span>{row.staff}</th>
                   <td>{row.called}</td><td>{row.intents}</td><td>{row.valid}</td><td>{row.average}</td><td>{row.aircall}</td>
-                  {isSales && <><td>{row.doxyCalls ?? 0}</td><td>{row.doxyValid ?? 0}</td><td>{row.doxyAverage || '—'}</td><td>{row.doxyTotal || '0:00:00'}</td><td>{formatDuration(durationSeconds(row.aircall) + durationSeconds(row.doxyTotal))}</td></>}
+                  <td>{row.doxyCalls ?? 0}</td><td>{row.doxyValid ?? 0}</td><td>{row.doxyAverage || '—'}</td><td>{row.doxyTotal || '0:00:00'}</td><td>{formatDuration(durationSeconds(row.aircall) + durationSeconds(row.doxyTotal))}</td>
                   <td>{row.injections}</td><td>{row.nad}</td><td>{row.lipoMino}</td><td>{row.plan}</td><td>{row.peptides}</td><td className="daily-money">{money.format(row.sales)}</td><td className="daily-money">{money.format(row.balance)}</td><td>{row.observation}</td>
                 </tr>)}</tbody>
                 <tfoot><tr><th>Total</th><td>{totals.called}</td><td>{totals.intents}</td><td>{totals.valid}</td><td>{averageTotal}</td><td>{formatDuration(totals.talk)}</td>
-                  {isSales && <><td>{totals.doxyCalls}</td><td>{totals.doxyValid}</td><td>{doxyAverageTotal}</td><td>{formatDuration(totals.doxyTalk)}</td><td>{formatDuration(totals.talk + totals.doxyTalk)}</td></>}
+                  <td>{totals.doxyCalls}</td><td>{totals.doxyValid}</td><td>{doxyAverageTotal}</td><td>{formatDuration(totals.doxyTalk)}</td><td>{formatDuration(totals.talk + totals.doxyTalk)}</td>
                   <td>{totals.injections}</td><td>{totals.nad}</td><td>{totals.lipoMino}</td><td>{totals.plan}</td><td>{totals.peptides}</td><td>{money.format(totals.sales)}</td><td>{money.format(totals.balance)}</td><td /></tr></tfoot>
               </table>
             </div>
