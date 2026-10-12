@@ -271,6 +271,8 @@ function Daily() {
   const [doxyProviderAliases, setDoxyProviderAliases] = useState<Record<string, string>>({
     'alejandra oyala': 'alejandra oyala',
     'alejandra olaya': 'alejandra oyala',
+    'alice strelow': 'aline strelow',
+    'alice f': 'aline strelow',
   })
   const [isTeamManagerOpen, setIsTeamManagerOpen] = useState(false)
   const [hubspotOwners, setHubspotOwners] = useState<HubSpotOwnerOption[]>([])
@@ -302,10 +304,10 @@ function Daily() {
           CS: payload.agents.cs.map((agent) => agent.name),
         }
         setTeamRoster(nextRoster)
-        setDoxyProviderAliases(Object.fromEntries([...payload.agents.sales, ...payload.agents.cs].flatMap((agent) => {
+        setDoxyProviderAliases({ ...Object.fromEntries([...payload.agents.sales, ...payload.agents.cs].flatMap((agent) => {
           const canonical = normalizedDoxyName(agent.name)
           return [agent.name, ...(agent.aliases ?? [])].map((alias) => [normalizedDoxyName(alias), canonical])
-        })))
+        })), 'alice strelow': 'aline strelow', 'alice f': 'aline strelow' })
         setHubspotOwners(payload.hubspotOwners ?? [])
         setConfiguredOwnerIds(new Set(payload.configuredOwnerIds ?? []))
       } catch { /* The built-in roster remains available if management is offline. */ }

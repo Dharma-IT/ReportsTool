@@ -106,7 +106,7 @@ where lower(display_name) in ('natasha lopez', 'erika vargas', 'maria claudia', 
 insert into public.daily_report_agents (team, display_name, hubspot_owner_id, aliases, sort_order)
 values
   ('cs', 'Arles Martinez', null, '["Arles Martinez"]', 10),
-  ('cs', 'Aline Strelow', null, '["Aline Strelow", "Ailene Nuevas", "Alice F"]', 20),
+  ('cs', 'Aline Strelow', null, '["Aline Strelow", "Ailene Nuevas", "Alice F", "Alice Strelow"]', 20),
   ('cs', 'Brayam Zuluaga', null, '["Brayam Zuluaga", "Brayan Zuluaga"]', 30),
   ('cs', 'Edmilson Morales', null, '["Edmilson Morales", "Edmilson Velasquez"]', 40),
   ('sales', 'Alejandra Oyala', '99223316', '["Alejandra Oyala", "Alejandra Olaya"]', 30)

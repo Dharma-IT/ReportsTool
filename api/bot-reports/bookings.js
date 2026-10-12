@@ -83,7 +83,7 @@ async function fetchManualAppointments(fromDate, toDate, dateField, fromTime, to
     { team: 'nutritionist', name: 'Maria Sandoval', aliases: ['maria sandoval'] },
     { team: 'nutritionist', name: 'Paula Alfonso', aliases: ['paula alfonso'] },
     { team: 'cs', name: 'Arles Martinez', aliases: ['arles martinez'] },
-    { team: 'cs', name: 'Aline Strelow', aliases: ['aline strelow', 'ailene nuevas', 'alice f'] },
+    { team: 'cs', name: 'Aline Strelow', aliases: ['aline strelow', 'ailene nuevas', 'alice f', 'alice strelow'] },
     { team: 'cs', name: 'Brayam Zuluaga', aliases: ['brayam zuluaga', 'brayan zuluaga'] },
     { team: 'cs', name: 'Edmilson Morales', aliases: ['edmilson morales', 'edmilson velasquez'] },
   ]
