@@ -688,6 +688,16 @@ function Daily() {
             {hasLiveData && <div className="daily-source-note">Aircall supplies call activity. HubSpot supplies products, sales, and refund-adjusted balance. Doxy values come from the uploaded meeting-history CSV.</div>}
             {hasLiveData ? <><div className="daily-table-scroll">
               <table className="daily-table daily-sales-table">
+                <colgroup>
+                  <col className="daily-col-staff" />
+                  {Array.from({ length: 5 }, (_, index) => <col className="daily-col-aircall" key={`aircall-${index}`} />)}
+                  {Array.from({ length: 4 }, (_, index) => <col className="daily-col-doxy" key={`doxy-${index}`} />)}
+                  <col className="daily-col-total-time" />
+                  {Array.from({ length: 5 }, (_, index) => <col className="daily-col-product" key={`product-${index}`} />)}
+                  <col className="daily-col-revenue" />
+                  <col className="daily-col-revenue" />
+                  <col className="daily-col-observations" />
+                </colgroup>
                 <thead>
                   <tr className="daily-group-row">
                     <th rowSpan={2}>Staff</th><th colSpan={5}>Aircall</th>
@@ -709,7 +719,7 @@ function Daily() {
                 </tr>)}</tbody>
                 <tfoot><tr><th>Total</th><td>{totals.called}</td><td>{totals.intents}</td><td>{totals.valid}</td><td>{averageTotal}</td><td>{formatDuration(totals.talk)}</td>
                   <td>{totals.doxyCalls}</td><td>{totals.doxyValid}</td><td>{doxyAverageTotal}</td><td>{formatDuration(totals.doxyTalk)}</td><td>{formatDuration(totals.talk + totals.doxyTalk)}</td>
-                  <td>{totals.injections}</td><td>{totals.nad}</td><td>{totals.lipoMino}</td><td>{totals.plan}</td><td>{totals.peptides}</td><td>{money.format(totals.sales)}</td><td>{money.format(totals.balance)}</td><td /></tr></tfoot>
+                  <td>{totals.injections}</td><td>{totals.nad}</td><td>{totals.lipoMino}</td><td>{totals.plan}</td><td>{totals.peptides}</td><td className="daily-money">{money.format(totals.sales)}</td><td className="daily-money">{money.format(totals.balance)}</td><td /></tr></tfoot>
               </table>
             </div>
             <section className="daily-supplements" aria-labelledby="daily-supplements-title">
