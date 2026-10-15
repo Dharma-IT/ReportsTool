@@ -3408,6 +3408,26 @@ function canonicalClientEmail(value: string) {
   return local && domain ? `${local}@${domain}` : ''
 }
 
+async function crawlStripeDashboardPhones(ids: string[]) {
+  if (!ids.length) return { phones: {} as Record<string, string>, warning: '' }
+  try {
+    const result = await execNodeScript(
+      ['stripe-phones.mjs', `--ids=${ids.join(',')}`, '--headless'],
+      { cwd: getAppRoot(), timeout: 180_000, maxBuffer: 1024 * 1024 },
+    )
+    const payload = JSON.parse(String(result.stdout)) as { phones?: Record<string, string> }
+    return { phones: payload.phones ?? {}, warning: '' }
+  } catch (error) {
+    const stderr = error && typeof error === 'object' && 'stderr' in error ? String(error.stderr) : ''
+    try {
+      const payload = JSON.parse(stderr) as { message?: string }
+      return { phones: {} as Record<string, string>, warning: payload.message || 'Stripe Dashboard phone recovery failed.' }
+    } catch {
+      return { phones: {} as Record<string, string>, warning: stderr.trim() || 'Stripe Dashboard phone recovery failed.' }
+    }
+  }
+}
+
 const STRIPE_RECOVERY_STATUSES = new Set(['failed', 'expired', 'incomplete'])
 
 async function stripeGet(secretKey: string, path: string, params: URLSearchParams = new URLSearchParams()) {
@@ -3495,6 +3515,17 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
       server.middlewares.use('/api/ac-automation', async (request, response) => {
         try {
           const url = new URL(request.url ?? '', 'http://localhost')
+          if (url.searchParams.get('action') === 'connect') {
+            const stdout = openSync('stripe-login.out.log', 'a')
+            const stderr = openSync('stripe-login.err.log', 'a')
+            const child = spawnNodeScript(['stripe-login.mjs'], {
+              cwd: getAppRoot(),
+              detached: true,
+              stdio: ['ignore', stdout, stderr],
+            })
+            child.unref()
+            return sendJson(response, 202, { message: 'Stripe login opened. Sign in, then click “Save Stripe session & close” in the browser window.' })
+          }
           if (!stripeSecretKey) return sendJson(response, 500, { message: 'STRIPE_SECRET_KEY is not configured.' })
           const selectedDate = url.searchParams.get('date') ?? ''
           if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) {
@@ -3576,7 +3607,7 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
             return sessionDetailCache.get(id)!
           }
           const closestSession = (options: StripeObject[], created: number) => options.toSorted((left, right) => Math.abs(Number(left.created ?? 0) - created) - Math.abs(Number(right.created ?? 0) - created))[0]
-          const resolved: Array<ReturnType<typeof stripeContact> & { status: string; customerId: string; phoneSource: string }> = []
+          const resolved: Array<ReturnType<typeof stripeContact> & { status: string; customerId: string; phoneSource: string; lookupId: string }> = []
           for (const candidate of candidates) {
             let customer: StripeObject = candidate.source.customer && typeof candidate.source.customer === 'object' ? candidate.source.customer : {}
             if (candidate.customerId) {
@@ -3607,7 +3638,7 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
             const phone = checkout.phone || customerPhone || customerShippingPhone || chargePhone || failedPhone || paymentMethodPhone || metadataPhone
             const phoneSource = checkout.phone ? 'checkout_session' : customerPhone ? 'customer' : customerShippingPhone ? 'customer_shipping' : chargePhone ? 'charge' : failedPhone ? 'failed_payment' : paymentMethodPhone ? 'payment_method' : metadataPhone ? 'metadata' : 'unavailable'
             const enriched = stripeContact({ ...candidate.source, customer: { ...customer, name: customer.name || checkout.name, email: customer.email || checkout.email, phone } })
-            resolved.push({ ...enriched, status: candidate.status, customerId: candidate.customerId, phoneSource })
+            resolved.push({ ...enriched, status: candidate.status, customerId: candidate.customerId, phoneSource, lookupId: candidate.paymentIntentId || objectId(candidate.source) })
           }
 
           // Some payment methods (notably Affirm) show a phone in Stripe's
@@ -3649,6 +3680,20 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
             }
           }
 
+          // A few payment methods expose the phone only in Stripe's authenticated
+          // Dashboard. Crawl just the remaining unresolved abandoned payments.
+          // Failure is intentionally non-fatal so hosted/API results still load.
+          const dashboardCandidates = resolved.filter((contact) => contact.status !== 'succeeded' && !contact.phone && contact.lookupId)
+          const dashboardIds = [...new Set(dashboardCandidates.map((contact) => contact.lookupId))]
+          const dashboardRecovery = await crawlStripeDashboardPhones(dashboardIds)
+          for (const contact of dashboardCandidates) {
+            const phone = stripePhone(dashboardRecovery.phones[contact.lookupId])
+            if (phone) {
+              contact.phone = phone
+              contact.phoneSource = 'stripe_dashboard'
+            }
+          }
+
           const contacts: Array<ReturnType<typeof stripeContact> & { customerId: string; phoneSource: string }> = []
           const aliases = new Map<string, number>()
           const identityKeys = (contact: ReturnType<typeof stripeContact> & { customerId: string }) => {
@@ -3678,7 +3723,7 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
           const unavailablePhones = output.filter((contact) => !contact.phone).length
           const phoneRecovery = Object.fromEntries([...new Set(contacts.map((contact) => contact.phoneSource))].map((source) => [source, contacts.filter((contact) => contact.phoneSource === source).length]))
           for (const failure of failures) console.warn(`[AC Automation] Stripe lookup failed: ${failure}`)
-          sendJson(response, 200, { date: selectedDate, timezone: 'America/New_York', statuses: selectedStatuses, contacts: output, unavailablePhones, unusableContacts, phoneRecovery, lookupFailures: failures.length, message: `${output.length} unique contacts imported. ${unavailablePhones} phone numbers unavailable.${unusableContacts ? ` ${unusableContacts} Stripe records without an email or phone were skipped.` : ''}` })
+          sendJson(response, 200, { date: selectedDate, timezone: 'America/New_York', statuses: selectedStatuses, contacts: output, unavailablePhones, unusableContacts, phoneRecovery, lookupFailures: failures.length, dashboardWarning: dashboardRecovery.warning, message: `${output.length} unique contacts imported. ${unavailablePhones} phone numbers unavailable.${unusableContacts ? ` ${unusableContacts} Stripe records without an email or phone were skipped.` : ''}${dashboardRecovery.warning ? ` Dashboard recovery unavailable: ${dashboardRecovery.warning}` : ''}` })
         } catch (error) {
           sendJson(response, 500, { message: error instanceof Error ? error.message : 'Unable to load Stripe abandoned carts.' })
         }

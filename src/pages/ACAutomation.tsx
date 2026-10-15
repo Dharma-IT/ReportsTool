@@ -38,6 +38,7 @@ function ACAutomation() {
   const [rows, setRows] = useState<Record<string, string>[]>([])
   const [query, setQuery] = useState(''), [filtering, setFiltering] = useState(false), [exportOpen, setExportOpen] = useState(false)
   const [loading, setLoading] = useState(false), [error, setError] = useState('')
+  const [connectingStripe, setConnectingStripe] = useState(false)
   const [summary, setSummary] = useState('')
   const [supplementDate, setSupplementDate] = useState(today)
   const [supplementRows, setSupplementRows] = useState<Record<string, string>[]>([])
@@ -94,6 +95,17 @@ function ACAutomation() {
     finally { setSupplementLoading(false) }
   }
 
+  const connectStripe = async () => {
+    setConnectingStripe(true); setError('')
+    try {
+      const response = await fetch(getApiUrl('/api/ac-automation?action=connect'))
+      const payload = await response.json() as AcResponse
+      if (!response.ok) throw new Error(payload.message || 'Unable to open Stripe login.')
+      setSummary(payload.message || 'Stripe login opened.')
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to open Stripe login.') }
+    finally { setConnectingStripe(false) }
+  }
+
   return <main className="ac-sheet-shell ac-automation-layout">
     <aside className="ac-automation-sidebar" aria-label="AC automation sections">
       <span>Automation section</span>
@@ -111,6 +123,7 @@ function ACAutomation() {
       <div className="ac-sheet-toolbar"><div><span>ABANDONED CART DATABASE</span><h2 id="ac-sheet-title">Recovery contacts</h2></div><div className="ac-sheet-actions">
         <label className="ac-date-field">Date equals <input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
         <fieldset className="ac-status-filter"><legend>Status</legend>{stripeStatuses.map((status) => <label key={status}><input type="checkbox" checked={statuses.includes(status)} onChange={() => setStatuses((current) => current.includes(status) ? current.filter((item) => item !== status) : [...current, status])} /><span>{status}</span></label>)}</fieldset>
+        <button type="button" onClick={connectStripe} disabled={connectingStripe}>{connectingStripe ? 'Opening...' : 'Connect Stripe'}</button>
         <button type="button" onClick={loadContacts} disabled={loading || !date}>{loading ? 'Loading...' : 'Apply'}</button>
         {filtering ? <label className="ac-sheet-search"><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter contacts..." /><button type="button" onClick={() => { setFiltering(false); setQuery('') }}>×</button></label> : null}
         <button type="button" onClick={() => setFiltering(true)}><FilterIcon /> Filter</button>

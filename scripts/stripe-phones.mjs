@@ -6,7 +6,8 @@ const profilePath = resolve('.auth/stripe-profile')
 if (!existsSync(profilePath)) fail('Stripe Dashboard is not connected. Click Connect Stripe first.')
 const ids = (readArg('--ids') ?? '').split(',').filter(Boolean)
 const debug = process.argv.includes('--debug')
-const context = await chromium.launchPersistentContext(profilePath, { headless: false })
+const headless = process.argv.includes('--headless')
+const context = await chromium.launchPersistentContext(profilePath, { headless })
 const phones = {}
 
 try {
