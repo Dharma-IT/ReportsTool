@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { chromium } from 'playwright'
 
@@ -29,3 +29,4 @@ const timer = setInterval(addButton, 1000)
 await finished
 clearInterval(timer)
 await context.close()
+await writeFile(resolve('.auth/stripe-session-ready.json'), JSON.stringify({ connectedAt: new Date().toISOString() }))

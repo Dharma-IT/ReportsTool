@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
-import { openSync } from 'node:fs'
+import { existsSync, openSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -3521,6 +3521,11 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
       server.middlewares.use('/api/ac-automation', async (request, response) => {
         try {
           const url = new URL(request.url ?? '', 'http://localhost')
+          if (url.searchParams.get('action') === 'status') {
+            return sendJson(response, 200, {
+              connected: existsSync(resolve(getAppRoot(), '.auth', 'stripe-session-ready.json')),
+            })
+          }
           if (url.searchParams.get('action') === 'connect') {
             const host = request.headers.host?.split(':')[0] ?? ''
             if (process.env.RENDER || !['localhost', '127.0.0.1'].includes(host)) {

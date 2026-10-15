@@ -102,7 +102,17 @@ function ACAutomation() {
       const response = await fetch(getApiUrl('/api/ac-automation?action=connect'))
       const payload = await response.json() as AcResponse
       if (!response.ok) throw new Error(payload.message || 'Unable to open Stripe login.')
-      setSummary(payload.message || 'Stripe login opened.')
+      setSummary(payload.message || 'Stripe login opened. Waiting for the session to be saved...')
+      for (let attempt = 0; attempt < 90; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2_000))
+        const statusResponse = await fetch(getApiUrl('/api/ac-automation?action=status'))
+        const status = await statusResponse.json() as { connected?: boolean }
+        if (status.connected) {
+          setSummary('Stripe connected. Click Apply to fetch API, HubSpot, and Dashboard phone numbers.')
+          return
+        }
+      }
+      setSummary('Stripe login is still waiting. In the Stripe browser window, click “Save Stripe session & close”, then click Apply.')
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to open Stripe login.') }
     finally { setConnectingStripe(false) }
   }
