@@ -3410,6 +3410,12 @@ function canonicalClientEmail(value: string) {
 
 async function crawlStripeDashboardPhones(ids: string[]) {
   if (!ids.length) return { phones: {} as Record<string, string>, warning: '' }
+  if (process.env.RENDER) {
+    return {
+      phones: {} as Record<string, string>,
+      warning: 'Stripe Dashboard crawling is available only in the local or desktop dashboard.',
+    }
+  }
   try {
     const result = await execNodeScript(
       ['stripe-phones.mjs', `--ids=${ids.join(',')}`, '--headless'],
@@ -3516,6 +3522,12 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
         try {
           const url = new URL(request.url ?? '', 'http://localhost')
           if (url.searchParams.get('action') === 'connect') {
+            const host = request.headers.host?.split(':')[0] ?? ''
+            if (process.env.RENDER || !['localhost', '127.0.0.1'].includes(host)) {
+              return sendJson(response, 400, {
+                message: 'Stripe login can only open from the local or desktop dashboard. The hosted Vercel page cannot open a browser on your computer.',
+              })
+            }
             const stdout = openSync('stripe-login.out.log', 'a')
             const stderr = openSync('stripe-login.err.log', 'a')
             const child = spawnNodeScript(['stripe-login.mjs'], {

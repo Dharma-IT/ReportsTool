@@ -17,6 +17,7 @@ const columns: Column[] = [
 const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
 const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 const getApiUrl = (path: string) => `${['localhost', '127.0.0.1'].includes(window.location.hostname) ? '' : configuredApiBaseUrl}${path}`
+const isLocalDashboard = ['localhost', '127.0.0.1'].includes(window.location.hostname)
 const easternToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 const displayDate = (date: string) => { const [year, month, day] = date.split('-'); return `${Number(month)}/${Number(day)}/${year}` }
 const formatSupplementPhone = (phone: string) => { const value = phone.trim(); return value ? (value.startsWith('+') ? value : `+1${value.replace(/\D/g, '')}`) : '' }
@@ -123,7 +124,9 @@ function ACAutomation() {
       <div className="ac-sheet-toolbar"><div><span>ABANDONED CART DATABASE</span><h2 id="ac-sheet-title">Recovery contacts</h2></div><div className="ac-sheet-actions">
         <label className="ac-date-field">Date equals <input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
         <fieldset className="ac-status-filter"><legend>Status</legend>{stripeStatuses.map((status) => <label key={status}><input type="checkbox" checked={statuses.includes(status)} onChange={() => setStatuses((current) => current.includes(status) ? current.filter((item) => item !== status) : [...current, status])} /><span>{status}</span></label>)}</fieldset>
-        <button type="button" onClick={connectStripe} disabled={connectingStripe}>{connectingStripe ? 'Opening...' : 'Connect Stripe'}</button>
+        {isLocalDashboard
+          ? <button type="button" onClick={connectStripe} disabled={connectingStripe}>{connectingStripe ? 'Opening...' : 'Connect Stripe'}</button>
+          : <button type="button" disabled title="Stripe Dashboard login and crawling require the desktop dashboard.">Stripe crawl: desktop only</button>}
         <button type="button" onClick={loadContacts} disabled={loading || !date}>{loading ? 'Loading...' : 'Apply'}</button>
         {filtering ? <label className="ac-sheet-search"><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter contacts..." /><button type="button" onClick={() => { setFiltering(false); setQuery('') }}>×</button></label> : null}
         <button type="button" onClick={() => setFiltering(true)}><FilterIcon /> Filter</button>
