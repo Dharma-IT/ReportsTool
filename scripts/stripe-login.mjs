@@ -1,9 +1,11 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { chromium } from 'playwright'
 
 const profilePath = resolve('.auth/stripe-profile')
+const readyPath = resolve('.auth/stripe-session-ready.json')
 await mkdir(profilePath, { recursive: true })
+await rm(readyPath, { force: true })
 const context = await chromium.launchPersistentContext(profilePath, { headless: false })
 const page = await context.newPage()
 await page.goto('https://dashboard.stripe.com/payments', { waitUntil: 'domcontentloaded' })
@@ -15,6 +17,11 @@ await page.exposeFunction('__saveDharmaStripeSession', () => finish())
 const addButton = async () => {
   if (page.isClosed()) return
   await page.evaluate(() => {
+    const authenticatedPaymentsPage = location.hostname === 'dashboard.stripe.com' && location.pathname.startsWith('/payments')
+    if (!authenticatedPaymentsPage) {
+      document.querySelector('#dharma-save-stripe-session')?.remove()
+      return
+    }
     if (document.querySelector('#dharma-save-stripe-session')) return
     const button = document.createElement('button')
     button.id = 'dharma-save-stripe-session'
@@ -29,4 +36,4 @@ const timer = setInterval(addButton, 1000)
 await finished
 clearInterval(timer)
 await context.close()
-await writeFile(resolve('.auth/stripe-session-ready.json'), JSON.stringify({ connectedAt: new Date().toISOString() }))
+await writeFile(readyPath, JSON.stringify({ connectedAt: new Date().toISOString() }))

@@ -3425,11 +3425,12 @@ async function crawlStripeDashboardPhones(ids: string[]) {
     return { phones: payload.phones ?? {}, warning: '' }
   } catch (error) {
     const stderr = error && typeof error === 'object' && 'stderr' in error ? String(error.stderr) : ''
+    const processMessage = error instanceof Error ? error.message : ''
     try {
       const payload = JSON.parse(stderr) as { message?: string }
       return { phones: {} as Record<string, string>, warning: payload.message || 'Stripe Dashboard phone recovery failed.' }
     } catch {
-      return { phones: {} as Record<string, string>, warning: stderr.trim() || 'Stripe Dashboard phone recovery failed.' }
+      return { phones: {} as Record<string, string>, warning: stderr.trim() || processMessage || 'Stripe Dashboard phone recovery failed.' }
     }
   }
 }
@@ -3700,7 +3701,12 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
           // A few payment methods expose the phone only in Stripe's authenticated
           // Dashboard. Crawl just the remaining unresolved abandoned payments.
           // Failure is intentionally non-fatal so hosted/API results still load.
-          const dashboardCandidates = resolved.filter((contact) => contact.status !== 'succeeded' && !contact.phone && contact.lookupId)
+          const dashboardCandidates = resolved.filter((contact) =>
+            contact.status !== 'succeeded' &&
+            !contact.phone &&
+            Boolean(canonicalClientEmail(contact.email)) &&
+            contact.lookupId,
+          )
           const dashboardIds = [...new Set(dashboardCandidates.map((contact) => contact.lookupId))]
           const dashboardRecovery = await crawlStripeDashboardPhones(dashboardIds)
           for (const contact of dashboardCandidates) {

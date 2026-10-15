@@ -16,24 +16,30 @@ try {
     const page = await context.newPage()
     while (nextIndex < ids.length) {
       const id = ids[nextIndex++]
-    let text = ''
-      for (let attempt = 0; attempt < 2 && !/Checkout summary/i.test(text); attempt += 1) {
-      await page.goto(`https://dashboard.stripe.com/payments/${encodeURIComponent(id)}`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
-        await page.getByText('Checkout summary', { exact: true }).waitFor({ timeout: 10_000 }).catch(() => {})
-      text = await page.locator('body').innerText()
-    }
-    if (/login|signin/i.test(page.url())) fail('Saved Stripe session expired. Click Connect Stripe and sign in again.')
-    if (debug) {
-      await page.screenshot({ path: resolve(`.auth/stripe-${id}.png`), fullPage: true })
-      console.error(JSON.stringify({ id, url: page.url(), text: text.slice(0, 4000) }))
-    }
-    const summary = text.match(/Checkout summary([\s\S]{0,1200}?)(?:Items|Payment breakdown|Details)/i)?.[1] ?? text
-    const matches = [...summary.matchAll(/(?:\+?1[\s.-]?)?\(?([2-9]\d{2})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})/g)]
-    if (matches[0]) phones[id] = `1${matches[0][1]}${matches[0][2]}${matches[0][3]}`
+      let text = ''
+      try {
+        // Stripe is a long-lived SPA and frequently never reaches
+        // `domcontentloaded`. `commit` confirms navigation without waiting for
+        // every Dashboard request to settle.
+        await page.goto(`https://dashboard.stripe.com/payments/${encodeURIComponent(id)}`, { waitUntil: 'commit', timeout: 20_000 })
+        await page.getByText('Checkout summary', { exact: true }).waitFor({ timeout: 15_000 }).catch(() => {})
+        await page.waitForTimeout(1_000)
+        text = await page.locator('body').innerText()
+        if (/login|signin/i.test(page.url())) fail('Saved Stripe session expired. Click Connect Stripe and sign in again.')
+        if (debug) {
+          await page.screenshot({ path: resolve(`.auth/stripe-${id}.png`), fullPage: true })
+          console.error(JSON.stringify({ id, url: page.url(), text: text.slice(0, 4000) }))
+        }
+        const summary = text.match(/Checkout summary([\s\S]{0,1600}?)(?:Items|Payment breakdown|Details)/i)?.[1] ?? text
+        const matches = [...summary.matchAll(/(?:\+?1[\s.-]?)?\(?([2-9]\d{2})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})/g)]
+        if (matches[0]) phones[id] = `1${matches[0][1]}${matches[0][2]}${matches[0][3]}`
+      } catch (error) {
+        if (debug) console.error(JSON.stringify({ id, message: error instanceof Error ? error.message : String(error) }))
+      }
     }
     await page.close()
   }
-  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker))
+  await Promise.all(Array.from({ length: Math.min(6, ids.length) }, worker))
   console.log(JSON.stringify({ phones }))
 } finally {
   await context.close()
