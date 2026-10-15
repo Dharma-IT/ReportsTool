@@ -3408,6 +3408,48 @@ function canonicalClientEmail(value: string) {
   return local && domain ? `${local}@${domain}` : ''
 }
 
+function comparableIdentity(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+function editDistance(left: string, right: string) {
+  const row = Array.from({ length: right.length + 1 }, (_, index) => index)
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    let diagonal = row[0]
+    row[0] = leftIndex
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const above = row[rightIndex]
+      row[rightIndex] = Math.min(
+        row[rightIndex] + 1,
+        row[rightIndex - 1] + 1,
+        diagonal + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      )
+      diagonal = above
+    }
+  }
+  return row[right.length]
+}
+
+function likelySameStripeContact(
+  left: { email: string; firstName: string; lastName: string },
+  right: { email: string; firstName: string; lastName: string },
+) {
+  const leftEmail = canonicalClientEmail(left.email)
+  const rightEmail = canonicalClientEmail(right.email)
+  const [leftLocal, leftDomain] = leftEmail.split('@')
+  const [rightLocal, rightDomain] = rightEmail.split('@')
+  if (!leftLocal || !rightLocal || leftDomain !== rightDomain) return false
+  const leftName = comparableIdentity(`${left.firstName}${left.lastName}`)
+  const rightName = comparableIdentity(`${right.firstName}${right.lastName}`)
+  if (leftName.length < 6 || rightName.length < 6) return false
+  const nameDistance = editDistance(leftName, rightName)
+  const namesMatch = nameDistance <= Math.max(2, Math.floor(Math.max(leftName.length, rightName.length) * 0.18))
+  if (!namesMatch) return false
+  const emailDistance = editDistance(leftLocal, rightLocal)
+  const emailsMatch = emailDistance <= 2 || (nameDistance <= 2 && emailDistance <= 3) || leftLocal.includes(rightLocal) || rightLocal.includes(leftLocal)
+  return emailsMatch
+}
+
 async function crawlStripeDashboardPhones(ids: string[]) {
   if (!ids.length) return { phones: {} as Record<string, string>, warning: '' }
   if (process.env.RENDER) {
@@ -3719,6 +3761,7 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
 
           const contacts: Array<ReturnType<typeof stripeContact> & { customerId: string; phoneSource: string }> = []
           const aliases = new Map<string, number>()
+          let fuzzyDuplicates = 0
           const identityKeys = (contact: ReturnType<typeof stripeContact> & { customerId: string }) => {
             const email = canonicalClientEmail(contact.email)
             const name = `${contact.firstName} ${contact.lastName}`.trim().toLowerCase().replace(/\s+/g, ' ')
@@ -3738,15 +3781,33 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
             const keys = identityKeys(contact)
             if (keys.some((key) => succeededKeys.has(key))) continue
             let index = keys.map((key) => aliases.get(key)).find((value) => value !== undefined)
+            if (index === undefined) {
+              const fuzzyIndex = contacts.findIndex((existing) => likelySameStripeContact(existing, contact))
+              if (fuzzyIndex >= 0) {
+                index = fuzzyIndex
+                fuzzyDuplicates += 1
+              }
+            }
             if (index === undefined) { index = contacts.length; contacts.push(contact) }
-            else contacts[index] = { customerId: contacts[index].customerId || contact.customerId, email: contacts[index].email || contact.email, phone: contacts[index].phone || contact.phone, firstName: contacts[index].firstName || contact.firstName, lastName: contacts[index].lastName || contact.lastName, phoneSource: contacts[index].phone ? contacts[index].phoneSource : contact.phoneSource }
+            else {
+              const existing = contacts[index]
+              const preferIncomingIdentity = Boolean(contact.phone && !existing.phone) || (!existing.phone && !contact.phone)
+              contacts[index] = {
+                customerId: existing.customerId || contact.customerId,
+                email: preferIncomingIdentity ? contact.email || existing.email : existing.email || contact.email,
+                phone: existing.phone || contact.phone,
+                firstName: preferIncomingIdentity ? contact.firstName || existing.firstName : existing.firstName || contact.firstName,
+                lastName: preferIncomingIdentity ? contact.lastName || existing.lastName : existing.lastName || contact.lastName,
+                phoneSource: existing.phone ? existing.phoneSource : contact.phoneSource,
+              }
+            }
             for (const key of keys) aliases.set(key, index)
           }
           const output = contacts.map((contact) => ({ email: contact.email, phone: contact.phone, firstName: contact.firstName, lastName: contact.lastName }))
           const unavailablePhones = output.filter((contact) => !contact.phone).length
           const phoneRecovery = Object.fromEntries([...new Set(contacts.map((contact) => contact.phoneSource))].map((source) => [source, contacts.filter((contact) => contact.phoneSource === source).length]))
           for (const failure of failures) console.warn(`[AC Automation] Stripe lookup failed: ${failure}`)
-          sendJson(response, 200, { date: selectedDate, timezone: 'America/New_York', statuses: selectedStatuses, contacts: output, unavailablePhones, unusableContacts, phoneRecovery, lookupFailures: failures.length, dashboardWarning: dashboardRecovery.warning, message: `${output.length} unique contacts imported. ${unavailablePhones} phone numbers unavailable.${unusableContacts ? ` ${unusableContacts} Stripe records without an email or phone were skipped.` : ''}${dashboardRecovery.warning ? ` Dashboard recovery unavailable: ${dashboardRecovery.warning}` : ''}` })
+          sendJson(response, 200, { date: selectedDate, timezone: 'America/New_York', statuses: selectedStatuses, contacts: output, unavailablePhones, unusableContacts, fuzzyDuplicates, phoneRecovery, lookupFailures: failures.length, dashboardWarning: dashboardRecovery.warning, message: `${output.length} unique contacts imported. ${unavailablePhones} phone numbers unavailable.${fuzzyDuplicates ? ` ${fuzzyDuplicates} probable duplicate${fuzzyDuplicates === 1 ? '' : 's'} merged.` : ''}${unusableContacts ? ` ${unusableContacts} Stripe records without an email or phone were skipped.` : ''}${dashboardRecovery.warning ? ` Dashboard recovery unavailable: ${dashboardRecovery.warning}` : ''}` })
         } catch (error) {
           sendJson(response, 500, { message: error instanceof Error ? error.message : 'Unable to load Stripe abandoned carts.' })
         }

@@ -11,11 +11,12 @@ const context = await chromium.launchPersistentContext(profilePath, { headless }
 const phones = {}
 
 try {
-  let nextIndex = 0
-  const worker = async () => {
-    const page = await context.newPage()
-    while (nextIndex < ids.length) {
-      const id = ids[nextIndex++]
+  const runBatch = async (batch) => {
+    let nextIndex = 0
+    const worker = async () => {
+      const page = await context.newPage()
+      while (nextIndex < batch.length) {
+        const id = batch[nextIndex++]
       let text = ''
       try {
         // Stripe is a long-lived SPA and frequently never reaches
@@ -36,10 +37,15 @@ try {
       } catch (error) {
         if (debug) console.error(JSON.stringify({ id, message: error instanceof Error ? error.message : String(error) }))
       }
+      }
+      await page.close()
     }
-    await page.close()
+    await Promise.all(Array.from({ length: Math.min(6, batch.length) }, worker))
   }
-  await Promise.all(Array.from({ length: Math.min(6, ids.length) }, worker))
+  await runBatch(ids)
+  // Stripe occasionally renders an empty shell on the first SPA navigation.
+  // Retry only unresolved pages rather than repeating the entire crawl.
+  await runBatch(ids.filter((id) => !phones[id]))
   console.log(JSON.stringify({ phones }))
 } finally {
   await context.close()
