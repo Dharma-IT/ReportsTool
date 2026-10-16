@@ -59,6 +59,17 @@ const STAFF_PERFORMANCE_REPORT = [
   { name: 'Kathering Silva', respondAliases: ['Kathering Silva'], hubSpotAliases: ['Kathering Silva'], hasCalls: true },
   { name: 'Zara Meza', respondAliases: ['Zara Meza'], hubSpotAliases: ['Zara Meza'], hasCalls: true },
 ]
+const WEEKLY_LM_AGENTS = [
+  { name: 'Ailene Nuevas', aliases: ['Ailene Nuevas', 'Aline Strelow', 'Alice Strelow', 'Alice F'] },
+  { name: 'Laura Sanchez', aliases: ['Laura Sanchez', 'Laura Alejandra Sanchez Pinto'] },
+  { name: 'William Carcamo', aliases: ['William Carcamo'] },
+  { name: 'Belizabett Gonzalez', aliases: ['Belizabett Gonzalez'] },
+  { name: 'Ivan Baez', aliases: ['Ivan Baez'] },
+]
+const WEEKLY_CC_AGENTS = [
+  { name: 'Kathering Silva', aliases: ['Kathering Silva'] },
+  { name: 'Zara Meza', aliases: ['Zara Meza'] },
+]
 // The Public Calls API marks these as missed, but dashboard review confirmed that
 // an agent attempted to answer after the caller had already disconnected.
 const EXCLUDED_MISSED_CALL_IDS = new Set([3979734082])
@@ -1141,6 +1152,81 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
   return { fromDate, toDate, revenue: roundMoney(revenue), refunds: roundMoney(refunds), dealCount: deals.length, bySeller, refundsBySeller, products }
 }
 
+type WeeklyLeadAgent = { name: string; messages: number; calls: number; bookings: number; callSeconds: number }
+
+async function fetchWeeklyLeadManagementPeriod(fromDate: string, toDate: string, token: string, teamAgents = WEEKLY_LM_AGENTS) {
+  if (!token) throw new Error('HubSpot reporting is not configured.')
+  const from = zonedTimeToUtc(fromDate, 0, 0, 0, 'America/New_York').getTime()
+  const to = zonedTimeToUtc(toDate, 23, 59, 59, 'America/New_York').getTime()
+  const owners = await fetchHubSpotOwners(token)
+  const ownerNames = new Map(owners.map((owner) => [String(owner.id), `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim()]))
+  const activityQuery = (timestampProperty: string, properties: string[]) => ({
+    filterGroups: [{ filters: [{ propertyName: timestampProperty, operator: 'BETWEEN', value: String(from), highValue: String(to) }] }],
+    properties,
+  })
+  const meetings = await searchAllHubSpotObjects<{ id: string; properties: { hs_createdate?: string | null } }>('meetings', activityQuery('hs_createdate', ['hs_createdate']), token)
+  const meetingAgents = new Map<string, string>()
+  for (let index = 0; index < meetings.length; index += 100) {
+    const batch = meetings.slice(index, index + 100)
+    const associations = await hubSpotPost<{ results?: Array<{ from: { id: string }; to: Array<{ toObjectId: number }> }> }>('/crm/v4/associations/meetings/contacts/batch/read', { inputs: batch.map((meeting) => ({ id: meeting.id })) }, token)
+    const meetingToContact = new Map<string, string>()
+    for (const association of associations.results ?? []) {
+      const contactId = association.to[0]?.toObjectId
+      if (contactId) meetingToContact.set(String(association.from.id), String(contactId))
+    }
+    const contactIds = [...new Set(meetingToContact.values())]
+    if (!contactIds.length) continue
+    const contacts = await hubSpotPost<{ results?: Array<{ id: string; properties: { agent_lead_management?: string | null } }> }>('/crm/v3/objects/contacts/batch/read', { properties: ['agent_lead_management'], inputs: contactIds.map((id) => ({ id })) }, token)
+    const agentsByContact = new Map((contacts.results ?? []).map((contact) => [String(contact.id), contact.properties.agent_lead_management?.trim() ?? '']))
+    for (const [meetingId, contactId] of meetingToContact) {
+      const agent = agentsByContact.get(contactId)
+      if (agent) meetingAgents.set(meetingId, agent)
+    }
+  }
+  const calls = await searchAllHubSpotObjects<{ properties: { hubspot_owner_id?: string | null; hs_timestamp?: string | null; hs_call_duration?: string | null } }>('calls', activityQuery('hs_timestamp', ['hubspot_owner_id', 'hs_timestamp', 'hs_call_duration']), token).catch(() => [])
+  const communications = await searchAllHubSpotObjects<{ properties: { hubspot_owner_id?: string | null; hs_timestamp?: string | null } }>('communications', activityQuery('hs_timestamp', ['hubspot_owner_id', 'hs_timestamp']), token).catch(() => [])
+  const rows = new Map<string, WeeklyLeadAgent>()
+  const days = new Map<string, { date: string; messages: number; calls: number; bookings: number; callSeconds: number }>()
+  for (let date = fromDate; date <= toDate; date = shiftIsoDate(date, 1)) days.set(date, { date, messages: 0, calls: 0, bookings: 0, callSeconds: 0 })
+  const activityDay = (timestamp?: string | null) => timestamp ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(timestamp)) : ''
+  const getNamedRow = (hubSpotName: string) => {
+    const name = teamAgents.find((agent) => agent.aliases.some((alias) => namesMatch(alias, hubSpotName)))?.name || 'Unassigned'
+    const row = rows.get(name) ?? { name, messages: 0, calls: 0, bookings: 0, callSeconds: 0 }
+    rows.set(name, row)
+    return row
+  }
+  const getRow = (ownerId?: string | null) => {
+    const hubSpotName = ownerNames.get(String(ownerId ?? '')) || ''
+    return getNamedRow(hubSpotName)
+  }
+  for (const meeting of meetings) {
+    const row = getNamedRow(meetingAgents.get(meeting.id) ?? '')
+    if (row.name === 'Unassigned') continue
+    row.bookings += 1
+    const day = days.get(activityDay(meeting.properties.hs_createdate)); if (day) day.bookings += 1
+  }
+  for (const call of calls) {
+    const row = getRow(call.properties.hubspot_owner_id)
+    const duration = Math.max(0, Math.round(finiteNumber(call.properties.hs_call_duration) / 1000))
+    row.calls += 1
+    // HubSpot stores call duration in milliseconds.
+    row.callSeconds += duration
+    const day = days.get(activityDay(call.properties.hs_timestamp)); if (day) { day.calls += 1; day.callSeconds += duration }
+  }
+  for (const communication of communications) {
+    getRow(communication.properties.hubspot_owner_id).messages += 1
+    const day = days.get(activityDay(communication.properties.hs_timestamp)); if (day) day.messages += 1
+  }
+  const agents = [...rows.values()].filter((row) => row.name !== 'Unassigned').sort((a, b) => b.bookings - a.bookings || b.messages - a.messages || b.calls - a.calls)
+  return {
+    fromDate,
+    toDate,
+    agents,
+    days: [...days.values()],
+    totals: agents.reduce((total, row) => ({ messages: total.messages + row.messages, calls: total.calls + row.calls, bookings: total.bookings + row.bookings, callSeconds: total.callSeconds + row.callSeconds }), { messages: 0, calls: 0, bookings: 0, callSeconds: 0 }),
+  }
+}
+
 function completedEasternWeeks() {
   const today = getTodayInNewYork()
   const day = new Date(`${today}T12:00:00Z`).getUTCDay()
@@ -1662,10 +1748,15 @@ function agentReportApi(
       server.middlewares.use('/api/weekly-report', async (_request, response) => {
         try {
           const weeks = completedEasternWeeks()
-          const [lastWeek, twoWeeksAgo] = await Promise.all([
-            fetchWeeklyHubSpotPeriod(weeks.last.from, weeks.last.to, hubSpotToken),
-            fetchWeeklyHubSpotPeriod(weeks.prior.from, weeks.prior.to, hubSpotToken),
-          ])
+          // Run the four report periods in sequence. Each period can involve
+          // paginated searches and association reads, so parallel execution can
+          // exceed HubSpot's per-second burst allowance.
+          const lastWeek = await fetchWeeklyHubSpotPeriod(weeks.last.from, weeks.last.to, hubSpotToken)
+          const twoWeeksAgo = await fetchWeeklyHubSpotPeriod(weeks.prior.from, weeks.prior.to, hubSpotToken)
+          const leadManagementLastWeek = await fetchWeeklyLeadManagementPeriod(weeks.last.from, weeks.last.to, hubSpotToken)
+          const leadManagementTwoWeeksAgo = await fetchWeeklyLeadManagementPeriod(weeks.prior.from, weeks.prior.to, hubSpotToken)
+          const customerCareLastWeek = await fetchWeeklyLeadManagementPeriod(weeks.last.from, weeks.last.to, hubSpotToken, WEEKLY_CC_AGENTS)
+          const customerCareTwoWeeksAgo = await fetchWeeklyLeadManagementPeriod(weeks.prior.from, weeks.prior.to, hubSpotToken, WEEKLY_CC_AGENTS)
           const revenueDelta = roundMoney(lastWeek.revenue - twoWeeksAgo.revenue)
           const lastUnits = Object.values(lastWeek.products).reduce((sum, product) => sum + product.units, 0)
           const priorUnits = Object.values(twoWeeksAgo.products).reduce((sum, product) => sum + product.units, 0)
@@ -1673,6 +1764,8 @@ function agentReportApi(
           const weeklyMoney = (value: number) => value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
           sendJson(response, 200, {
             timezone: 'America/New_York', lastWeek, twoWeeksAgo,
+            leadManagement: { lastWeek: leadManagementLastWeek, twoWeeksAgo: leadManagementTwoWeeksAgo },
+            customerCare: { lastWeek: customerCareLastWeek, twoWeeksAgo: customerCareTwoWeeksAgo },
             insights: [
               { kind: revenueDelta >= 0 ? 'up' : 'down', title: `Revenue ${revenueDelta >= 0 ? 'increased' : 'decreased'} by $${weeklyMoney(Math.abs(revenueDelta))} last week`, detail: `Revenue was $${weeklyMoney(lastWeek.revenue)} versus $${weeklyMoney(twoWeeksAgo.revenue)} two weeks ago.` },
               { kind: lastUnits >= priorUnits ? 'up' : 'down', title: `Product units ${lastUnits >= priorUnits ? 'increased' : 'decreased'} by ${Math.abs(lastUnits - priorUnits)}`, detail: `${lastUnits.toLocaleString('en-US')} units were sold last week versus ${priorUnits.toLocaleString('en-US')} two weeks ago.` },
@@ -2590,7 +2683,23 @@ async function fetchHubSpotBotBookings(reportDate: string, token: string) {
   return totalBookings
 }
 
+let hubSpotOwnerCache: { token: string; expiresAt: number; owners: HubSpotOwner[] } | null = null
+let hubSpotRequestQueue = Promise.resolve()
+let lastHubSpotRequestAt = 0
+
+async function paceHubSpotRequest() {
+  const previous = hubSpotRequestQueue
+  let release = () => {}
+  hubSpotRequestQueue = new Promise<void>((resolve) => { release = resolve })
+  await previous
+  const wait = Math.max(0, 250 - (Date.now() - lastHubSpotRequestAt))
+  if (wait) await new Promise((resolve) => setTimeout(resolve, wait))
+  lastHubSpotRequestAt = Date.now()
+  release()
+}
+
 async function fetchHubSpotOwners(token: string) {
+  if (hubSpotOwnerCache?.token === token && hubSpotOwnerCache.expiresAt > Date.now()) return hubSpotOwnerCache.owners
   const ownersById = new Map<string, HubSpotOwner>()
 
   // Deals retain their original owner ID after that owner is deactivated.
@@ -2611,33 +2720,39 @@ async function fetchHubSpotOwners(token: string) {
     } while (after)
   }
 
-  return [...ownersById.values()]
+  const owners = [...ownersById.values()]
+  hubSpotOwnerCache = { token, owners, expiresAt: Date.now() + 5 * 60_000 }
+  return owners
 }
 
 async function hubSpotGet<T>(url: string, token: string): Promise<T> {
-  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-  const payload = (await response.json().catch(() => ({}))) as T & { message?: string }
-
-  if (!response.ok) {
-    throw new Error(payload.message ?? `HubSpot API failed with ${response.status}.`)
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await paceHubSpotRequest()
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    const payload = (await response.json().catch(() => ({}))) as T & { message?: string }
+    if (response.ok) return payload
+    if (response.status !== 429 || attempt === 3) throw new Error(payload.message ?? `HubSpot API failed with ${response.status}.`)
+    const retryAfter = Number(response.headers.get('retry-after'))
+    await new Promise((resolve) => setTimeout(resolve, Number.isFinite(retryAfter) ? retryAfter * 1000 : 1000 * (attempt + 1)))
   }
-
-  return payload
+  throw new Error('HubSpot API request could not be completed.')
 }
 
 async function hubSpotPost<T>(path: string, body: unknown, token: string): Promise<T> {
-  const response = await fetch(`https://api.hubapi.com${path}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  const payload = (await response.json().catch(() => ({}))) as T & { message?: string }
-
-  if (!response.ok) {
-    throw new Error(payload.message ?? `HubSpot API failed with ${response.status}.`)
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await paceHubSpotRequest()
+    const response = await fetch(`https://api.hubapi.com${path}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const payload = (await response.json().catch(() => ({}))) as T & { message?: string }
+    if (response.ok) return payload
+    if (response.status !== 429 || attempt === 3) throw new Error(payload.message ?? `HubSpot API failed with ${response.status}.`)
+    const retryAfter = Number(response.headers.get('retry-after'))
+    await new Promise((resolve) => setTimeout(resolve, Number.isFinite(retryAfter) ? retryAfter * 1000 : 1000 * (attempt + 1)))
   }
-
-  return payload
+  throw new Error('HubSpot API request could not be completed.')
 }
 
 async function searchAllHubSpotObjects<T>(
