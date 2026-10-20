@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
-import { existsSync, openSync } from 'node:fs'
+import { existsSync, openSync, rmSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -3585,7 +3585,11 @@ async function crawlStripeDashboardPhones(ids: string[]) {
     const processMessage = error instanceof Error ? error.message : ''
     try {
       const payload = JSON.parse(stderr) as { message?: string }
-      return { phones: {} as Record<string, string>, warning: payload.message || 'Stripe Dashboard phone recovery failed.' }
+      const warning = payload.message || 'Stripe Dashboard phone recovery failed.'
+      if (/session expired|not connected/i.test(warning)) {
+        rmSync(resolve(getAppRoot(), '.auth', 'stripe-session-ready.json'), { force: true })
+      }
+      return { phones: {} as Record<string, string>, warning }
     } catch {
       return { phones: {} as Record<string, string>, warning: stderr.trim() || processMessage || 'Stripe Dashboard phone recovery failed.' }
     }
@@ -3691,6 +3695,9 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
                 message: 'Stripe login can only open from the local or desktop dashboard. The hosted Vercel page cannot open a browser on your computer.',
               })
             }
+            // Clear the previous marker before opening the browser so status
+            // cannot mistake an older session for the one being saved now.
+            rmSync(resolve(getAppRoot(), '.auth', 'stripe-session-ready.json'), { force: true })
             const stdout = openSync('stripe-login.out.log', 'a')
             const stderr = openSync('stripe-login.err.log', 'a')
             const child = spawnNodeScript(['stripe-login.mjs'], {
