@@ -21,7 +21,7 @@ const isLocalDashboard = ['localhost', '127.0.0.1'].includes(window.location.hos
 const easternToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 const displayDate = (date: string) => { const [year, month, day] = date.split('-'); return `${Number(month)}/${Number(day)}/${year}` }
 const formatSupplementPhone = (phone: string) => { const value = phone.trim(); return value ? (value.startsWith('+') ? value : `+1${value.replace(/\D/g, '')}`) : '' }
-const contactOwners = ['Alice F', 'Arles Martinez', 'Edmilson Velasquez', 'Brayam Zuluaga', 'Maria Roa']
+const contactOwners = ['Alice F', 'Arles Martinez', 'Brayam Zuluaga']
 
 function downloadFile(contents: BlobPart, type: string, extension: string) {
   const url = URL.createObjectURL(new Blob([contents], { type }))
