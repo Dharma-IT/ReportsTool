@@ -41,9 +41,9 @@ const DAILY_CS_AGENTS = [
   { name: 'Edmilson Morales', aliases: ['Edmilson Morales', 'Edmilson Velasquez'] },
 ]
 const DAILY_SALES_AGENTS = [
-  { name: 'Andres Castro', aliases: ['Andres Castro', 'Andrés Castro'] },
+  { name: 'Andres Castro', aliases: ['Andres Castro', 'AndrÃ©s Castro'] },
   { name: 'Alejandra Oyala', aliases: ['Alejandra Oyala', 'Alejandra Olaya'] },
-  { name: 'Ailin Isabel', aliases: ['Ailin Isabel', 'Ailín Isabel'] },
+  { name: 'Ailin Isabel', aliases: ['Ailin Isabel', 'AilÃ­n Isabel'] },
 ]
 const APPOINTMENT_NUTRITIONISTS = [
   { name: 'Maria Sandoval', aliases: ['Maria Sandoval'] },
@@ -1875,9 +1875,9 @@ function agentReportApi(
             noShows: { lastWeek: selectedStored.noShows, twoWeeksAgo: priorStored.noShows },
             calls: { sales: { lastWeek: salesCalls, twoWeeksAgo: salesPriorCalls }, cs: { lastWeek: csCalls, twoWeeksAgo: csPriorCalls } },
             insights: [
-              { kind: revenueDelta >= 0 ? 'up' : 'down', title: `Revenue ${revenueDelta >= 0 ? 'increased' : 'decreased'} by $${weeklyMoney(Math.abs(revenueDelta))} last week`, detail: `Revenue was $${weeklyMoney(lastWeek.revenue)} versus $${weeklyMoney(twoWeeksAgo.revenue)} two weeks ago.` },
-              { kind: lastUnits >= priorUnits ? 'up' : 'down', title: `Product units ${lastUnits >= priorUnits ? 'increased' : 'decreased'} by ${Math.abs(lastUnits - priorUnits)}`, detail: `${lastUnits.toLocaleString('en-US')} units were sold last week versus ${priorUnits.toLocaleString('en-US')} two weeks ago.` },
-              { kind: 'seller', title: `${topSeller[0]} led last week's revenue`, detail: `$${weeklyMoney(Number(topSeller[1]))} in paid HubSpot deals.` },
+              { kind: revenueDelta >= 0 ? 'up' : 'down', title: `Revenue ${revenueDelta >= 0 ? 'increased' : 'decreased'} by $${weeklyMoney(Math.abs(revenueDelta))} this week`, detail: `Revenue was $${weeklyMoney(lastWeek.revenue)} versus $${weeklyMoney(twoWeeksAgo.revenue)} last week.` },
+              { kind: lastUnits >= priorUnits ? 'up' : 'down', title: `Product units ${lastUnits >= priorUnits ? 'increased' : 'decreased'} by ${Math.abs(lastUnits - priorUnits)}`, detail: `${lastUnits.toLocaleString('en-US')} units were sold this week versus ${priorUnits.toLocaleString('en-US')} last week.` },
+              { kind: 'seller', title: `${topSeller[0]} led this week's revenue`, detail: `$${weeklyMoney(Number(topSeller[1]))} in paid HubSpot deals.` },
             ],
           })
         } catch (error) {
@@ -3830,7 +3830,7 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
               stdio: ['ignore', stdout, stderr],
             })
             child.unref()
-            return sendJson(response, 202, { message: 'Stripe login opened. Sign in, then click “Save Stripe session & close” in the browser window.' })
+            return sendJson(response, 202, { message: 'Stripe login opened. Sign in, then click â€œSave Stripe session & closeâ€ in the browser window.' })
           }
           if (!stripeSecretKey) return sendJson(response, 500, { message: 'STRIPE_SECRET_KEY is not configured.' })
           const selectedDate = url.searchParams.get('date') ?? ''
