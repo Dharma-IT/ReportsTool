@@ -1288,20 +1288,40 @@ async function loadStoredWeeklyPeriod(weekStart: string, supabaseUrl: string, se
   const response = await supabaseRest(supabaseUrl, serviceRoleKey, `weekly_reports?week_start=eq.${weekStart}&select=report_data&limit=1`)
   const rows = await response.json() as Array<{ report_data: StoredWeeklyPeriod }>
   const stored = rows[0]?.report_data
-  return stored?.version === 3 ? stored : null
+  return stored && stored.version >= 2 ? stored : null
+}
+
+async function upgradeStoredWeeklyPeriod(stored: StoredWeeklyPeriod, from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string) {
+  if (stored.version >= 3) return stored
+  const noShows = await fetchWeeklyNoShows(from, to, hubSpotToken)
+  const hubSpot = stored.hubSpot
+  if (!hubSpot.averageTicketBySeller) {
+    hubSpot.averageTicketBySeller = Object.fromEntries(Object.entries(hubSpot.bySeller).map(([name, revenue]) => [name, roundMoney(revenue / Math.max(1, hubSpot.dealCountsBySeller?.[name] ?? 0))]))
+  }
+  const upgraded: StoredWeeklyPeriod = { ...stored, version: 3, hubSpot, noShows }
+  await supabaseRest(supabaseUrl, serviceRoleKey, 'weekly_reports?on_conflict=week_start', {
+    method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({ week_start: from, week_end: shiftIsoDate(from, 6), timezone: 'America/New_York', report_data: upgraded, fetched_at: new Date().toISOString() }),
+  })
+  return upgraded
 }
 
 async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string) {
-  const hubSpot = await fetchWeeklyHubSpotPeriod(from, to, hubSpotToken)
-  const leadManagement = await fetchWeeklyLeadManagementPeriod(from, to, hubSpotToken)
-  const customerCare = await fetchWeeklyLeadManagementPeriod(from, to, hubSpotToken, WEEKLY_CC_AGENTS)
-  const noShows = await fetchWeeklyNoShows(from, to, hubSpotToken)
+  const [hubSpot, leadManagement, customerCare, noShows] = await Promise.all([
+    fetchWeeklyHubSpotPeriod(from, to, hubSpotToken),
+    fetchWeeklyLeadManagementPeriod(from, to, hubSpotToken),
+    fetchWeeklyLeadManagementPeriod(from, to, hubSpotToken, WEEKLY_CC_AGENTS),
+    fetchWeeklyNoShows(from, to, hubSpotToken),
+  ])
   const reportData: StoredWeeklyPeriod = { version: 3, hubSpot, leadManagement, customerCare, noShows }
   if (supabaseUrl && serviceRoleKey) {
     await supabaseRest(supabaseUrl, serviceRoleKey, 'weekly_reports?on_conflict=week_start', {
       method: 'POST',
       headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify({ week_start: from, week_end: to, timezone: 'America/New_York', report_data: reportData, fetched_at: new Date().toISOString() }),
+      // Keep the storage key as the full Monday-Sunday calendar week for
+      // compatibility with existing Supabase constraints. Report data itself
+      // intentionally covers the Monday-Saturday business reporting period.
+      body: JSON.stringify({ week_start: from, week_end: shiftIsoDate(from, 6), timezone: 'America/New_York', report_data: reportData, fetched_at: new Date().toISOString() }),
     })
   }
   return reportData
@@ -1847,12 +1867,25 @@ function agentReportApi(
           const prior = { from: shiftIsoDate(selectedStart, -7), to: shiftIsoDate(selectedStart, -2) }
           let selectedStored = await loadStoredWeeklyPeriod(selected.from, supabaseUrl, supabaseServiceRoleKey)
           let priorStored = await loadStoredWeeklyPeriod(prior.from, supabaseUrl, supabaseServiceRoleKey)
+          ;[selectedStored, priorStored] = await Promise.all([
+            selectedStored ? upgradeStoredWeeklyPeriod(selectedStored, selected.from, selected.to, hubSpotToken, supabaseUrl, supabaseServiceRoleKey) : null,
+            priorStored ? upgradeStoredWeeklyPeriod(priorStored, prior.from, prior.to, hubSpotToken, supabaseUrl, supabaseServiceRoleKey) : null,
+          ])
           const selectedSource = selectedStored ? 'saved' : 'live'
           const priorSource = priorStored ? 'saved' : 'live'
-          if (!selectedStored) selectedStored = await buildAndStoreWeeklyPeriod(selected.from, selected.to, hubSpotToken, supabaseUrl, supabaseServiceRoleKey)
-          if (!priorStored) priorStored = await buildAndStoreWeeklyPeriod(prior.from, prior.to, hubSpotToken, supabaseUrl, supabaseServiceRoleKey)
+          if (!selectedStored && !priorStored) {
+            ;[selectedStored, priorStored] = await Promise.all([
+              buildAndStoreWeeklyPeriod(selected.from, selected.to, hubSpotToken, supabaseUrl, supabaseServiceRoleKey),
+              buildAndStoreWeeklyPeriod(prior.from, prior.to, hubSpotToken, supabaseUrl, supabaseServiceRoleKey),
+            ])
+          } else {
+            if (!selectedStored) selectedStored = await buildAndStoreWeeklyPeriod(selected.from, selected.to, hubSpotToken, supabaseUrl, supabaseServiceRoleKey)
+            if (!priorStored) priorStored = await buildAndStoreWeeklyPeriod(prior.from, prior.to, hubSpotToken, supabaseUrl, supabaseServiceRoleKey)
+          }
           const lastWeek = selectedStored.hubSpot
           const twoWeeksAgo = priorStored.hubSpot
+          lastWeek.toDate = selected.to
+          twoWeeksAgo.toDate = prior.to
           const leadManagementLastWeek = selectedStored.leadManagement
           const leadManagementTwoWeeksAgo = priorStored.leadManagement
           const customerCareLastWeek = selectedStored.customerCare
