@@ -31,6 +31,10 @@ type DailyResponse = {
     validCalls: number
     averageCallSeconds: number
     totalTalkSeconds: number
+    doxyCalls?: number
+    doxyValid?: number
+    doxyAverageSeconds?: number
+    doxyTotalSeconds?: number
     injections: number
     nad: number
     lipoMino: number
@@ -169,6 +173,9 @@ function rowsFromDailyResponse(team: DailySection, payload: DailyResponse, staff
       called: safeNumber(agent.numbersCalled), intents: safeNumber(agent.totalIntents), valid: safeNumber(agent.validCalls),
       average: safeNumber(agent.validCalls) ? formatDuration(safeNumber(agent.averageCallSeconds)) : '—',
       aircall: formatDuration(safeNumber(agent.totalTalkSeconds)), injections: safeNumber(agent.injections), nad: safeNumber(agent.nad),
+      doxyCalls: safeNumber(agent.doxyCalls), doxyValid: safeNumber(agent.doxyValid),
+      doxyAverage: safeNumber(agent.doxyValid) ? formatDuration(safeNumber(agent.doxyAverageSeconds)) : '—',
+      doxyTotal: formatDuration(safeNumber(agent.doxyTotalSeconds)),
       lipoMino: safeNumber(agent.lipoMino), plan: safeNumber(agent.plan), peptides: safeNumber(agent.peptides), sales: safeNumber(agent.sales), balance: safeNumber(agent.balance),
     } : row
   })
@@ -504,6 +511,13 @@ function Daily() {
       setRows(uploadedRows)
       setHasLiveData(true)
       setDoxyUpload(`${file.name}: ${matchedCalls} calls matched the selected date range.`)
+      const saveParams = new URLSearchParams({ from: fromDate, to: toDate, team: activeSection.toLowerCase(), mode: 'doxy' })
+      const saveResponse = await fetch(getApiUrl(`/api/daily-cs-report?${saveParams}`), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agents: uploadedRows.map((row) => ({ name: row.staff, doxyCalls: row.doxyCalls, doxyValid: row.doxyValid, doxyAverageSeconds: durationSeconds(row.doxyAverage), doxyTotalSeconds: durationSeconds(row.doxyTotal) })) }),
+      })
+      const savePayload = await saveResponse.json() as { message?: string }
+      if (!saveResponse.ok) throw new Error(savePayload.message ?? 'Doxy data displayed but could not be saved.')
       try {
         const saved: SavedDailyReport = { team: activeSection, fromDate, toDate, rows: uploadedRows, sourceWarning, fetchedAt: new Date().toISOString() }
         localStorage.setItem(reportCacheKey(activeSection, fromDate, toDate), JSON.stringify(saved))

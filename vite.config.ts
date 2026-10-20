@@ -1237,6 +1237,53 @@ function completedEasternWeeks() {
   }
 }
 
+type StoredWeeklyPeriod = {
+  hubSpot: Awaited<ReturnType<typeof fetchWeeklyHubSpotPeriod>>
+  leadManagement: Awaited<ReturnType<typeof fetchWeeklyLeadManagementPeriod>>
+  customerCare: Awaited<ReturnType<typeof fetchWeeklyLeadManagementPeriod>>
+}
+
+async function loadStoredWeeklyPeriod(weekStart: string, supabaseUrl: string, serviceRoleKey: string) {
+  if (!supabaseUrl || !serviceRoleKey) return null
+  const response = await supabaseRest(supabaseUrl, serviceRoleKey, `weekly_reports?week_start=eq.${weekStart}&select=report_data&limit=1`)
+  const rows = await response.json() as Array<{ report_data: StoredWeeklyPeriod }>
+  return rows[0]?.report_data ?? null
+}
+
+async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string) {
+  const hubSpot = await fetchWeeklyHubSpotPeriod(from, to, hubSpotToken)
+  const leadManagement = await fetchWeeklyLeadManagementPeriod(from, to, hubSpotToken)
+  const customerCare = await fetchWeeklyLeadManagementPeriod(from, to, hubSpotToken, WEEKLY_CC_AGENTS)
+  const reportData: StoredWeeklyPeriod = { hubSpot, leadManagement, customerCare }
+  if (supabaseUrl && serviceRoleKey) {
+    await supabaseRest(supabaseUrl, serviceRoleKey, 'weekly_reports?on_conflict=week_start', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ week_start: from, week_end: to, timezone: 'America/New_York', report_data: reportData, fetched_at: new Date().toISOString() }),
+    })
+  }
+  return reportData
+}
+
+async function loadWeeklyCallTotals(from: string, to: string, team: 'sales' | 'cs', supabaseUrl: string, serviceRoleKey: string) {
+  if (!supabaseUrl || !serviceRoleKey) return { agents: [], savedDays: 0 }
+  const response = await supabaseRest(supabaseUrl, serviceRoleKey, `daily_reports?team=eq.${team}&from_date=gte.${from}&to_date=lte.${to}&select=from_date,to_date,report_data`)
+  const rows = await response.json() as Array<{ from_date: string; to_date: string; report_data?: { agents?: Array<Record<string, unknown>> } }>
+  const exactRange = rows.find((row) => row.from_date === from && row.to_date === to)
+  const sourceRows = exactRange ? [exactRange] : rows.filter((row) => row.from_date === row.to_date)
+  const agents = new Map<string, { name: string; aircallSeconds: number; aircallCalls: number; doxySeconds: number; doxyCalls: number }>()
+  for (const stored of sourceRows) for (const raw of stored.report_data?.agents ?? []) {
+    const name = String(raw.name ?? 'Unassigned')
+    const row = agents.get(name) ?? { name, aircallSeconds: 0, aircallCalls: 0, doxySeconds: 0, doxyCalls: 0 }
+    row.aircallSeconds += finiteNumber(String(raw.totalTalkSeconds ?? '0'))
+    row.aircallCalls += finiteNumber(String(raw.totalIntents ?? '0'))
+    row.doxySeconds += finiteNumber(String(raw.doxyTotalSeconds ?? '0'))
+    row.doxyCalls += finiteNumber(String(raw.doxyCalls ?? '0'))
+    agents.set(name, row)
+  }
+  return { agents: [...agents.values()], savedDays: exactRange ? 7 : new Set(sourceRows.map((row) => row.from_date)).size }
+}
+
 function normalizeAppointmentSalesSource(value: string | null | undefined) {
   const source = (value ?? '').trim().toLowerCase()
   if (source.includes('facebook') || source.includes('instagram') || source.includes('meta')) return 'meta'
@@ -1745,27 +1792,45 @@ function agentReportApi(
   return {
     name: 'aircall-agent-report-api',
     configureServer(server) {
-      server.middlewares.use('/api/weekly-report', async (_request, response) => {
+      server.middlewares.use('/api/weekly-report', async (request, response) => {
         try {
           const weeks = completedEasternWeeks()
-          // Run the four report periods in sequence. Each period can involve
-          // paginated searches and association reads, so parallel execution can
-          // exceed HubSpot's per-second burst allowance.
-          const lastWeek = await fetchWeeklyHubSpotPeriod(weeks.last.from, weeks.last.to, hubSpotToken)
-          const twoWeeksAgo = await fetchWeeklyHubSpotPeriod(weeks.prior.from, weeks.prior.to, hubSpotToken)
-          const leadManagementLastWeek = await fetchWeeklyLeadManagementPeriod(weeks.last.from, weeks.last.to, hubSpotToken)
-          const leadManagementTwoWeeksAgo = await fetchWeeklyLeadManagementPeriod(weeks.prior.from, weeks.prior.to, hubSpotToken)
-          const customerCareLastWeek = await fetchWeeklyLeadManagementPeriod(weeks.last.from, weeks.last.to, hubSpotToken, WEEKLY_CC_AGENTS)
-          const customerCareTwoWeeksAgo = await fetchWeeklyLeadManagementPeriod(weeks.prior.from, weeks.prior.to, hubSpotToken, WEEKLY_CC_AGENTS)
+          const requestUrl = new URL(request.url ?? '', 'http://localhost')
+          const selectedStart = requestUrl.searchParams.get('week') || weeks.last.from
+          const selectedDay = new Date(`${selectedStart}T12:00:00Z`).getUTCDay()
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedStart) || selectedDay !== 1 || selectedStart > weeks.last.from) {
+            return sendJson(response, 400, { message: 'Choose a completed week beginning on Monday.' })
+          }
+          const selected = { from: selectedStart, to: shiftIsoDate(selectedStart, 6) }
+          const prior = { from: shiftIsoDate(selectedStart, -7), to: shiftIsoDate(selectedStart, -1) }
+          let selectedStored = await loadStoredWeeklyPeriod(selected.from, supabaseUrl, supabaseServiceRoleKey)
+          let priorStored = await loadStoredWeeklyPeriod(prior.from, supabaseUrl, supabaseServiceRoleKey)
+          const selectedSource = selectedStored ? 'saved' : 'live'
+          const priorSource = priorStored ? 'saved' : 'live'
+          if (!selectedStored) selectedStored = await buildAndStoreWeeklyPeriod(selected.from, selected.to, hubSpotToken, supabaseUrl, supabaseServiceRoleKey)
+          if (!priorStored) priorStored = await buildAndStoreWeeklyPeriod(prior.from, prior.to, hubSpotToken, supabaseUrl, supabaseServiceRoleKey)
+          const lastWeek = selectedStored.hubSpot
+          const twoWeeksAgo = priorStored.hubSpot
+          const leadManagementLastWeek = selectedStored.leadManagement
+          const leadManagementTwoWeeksAgo = priorStored.leadManagement
+          const customerCareLastWeek = selectedStored.customerCare
+          const customerCareTwoWeeksAgo = priorStored.customerCare
+          const [salesCalls, salesPriorCalls, csCalls, csPriorCalls] = await Promise.all([
+            loadWeeklyCallTotals(selected.from, selected.to, 'sales', supabaseUrl, supabaseServiceRoleKey),
+            loadWeeklyCallTotals(prior.from, prior.to, 'sales', supabaseUrl, supabaseServiceRoleKey),
+            loadWeeklyCallTotals(selected.from, selected.to, 'cs', supabaseUrl, supabaseServiceRoleKey),
+            loadWeeklyCallTotals(prior.from, prior.to, 'cs', supabaseUrl, supabaseServiceRoleKey),
+          ])
           const revenueDelta = roundMoney(lastWeek.revenue - twoWeeksAgo.revenue)
           const lastUnits = Object.values(lastWeek.products).reduce((sum, product) => sum + product.units, 0)
           const priorUnits = Object.values(twoWeeksAgo.products).reduce((sum, product) => sum + product.units, 0)
           const topSeller = Object.entries(lastWeek.bySeller).sort((left, right) => right[1] - left[1])[0] ?? ['No seller', 0]
           const weeklyMoney = (value: number) => value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
           sendJson(response, 200, {
-            timezone: 'America/New_York', lastWeek, twoWeeksAgo,
+            timezone: 'America/New_York', lastWeek, twoWeeksAgo, source: { selected: selectedSource, prior: priorSource },
             leadManagement: { lastWeek: leadManagementLastWeek, twoWeeksAgo: leadManagementTwoWeeksAgo },
             customerCare: { lastWeek: customerCareLastWeek, twoWeeksAgo: customerCareTwoWeeksAgo },
+            calls: { sales: { lastWeek: salesCalls, twoWeeksAgo: salesPriorCalls }, cs: { lastWeek: csCalls, twoWeeksAgo: csPriorCalls } },
             insights: [
               { kind: revenueDelta >= 0 ? 'up' : 'down', title: `Revenue ${revenueDelta >= 0 ? 'increased' : 'decreased'} by $${weeklyMoney(Math.abs(revenueDelta))} last week`, detail: `Revenue was $${weeklyMoney(lastWeek.revenue)} versus $${weeklyMoney(twoWeeksAgo.revenue)} two weeks ago.` },
               { kind: lastUnits >= priorUnits ? 'up' : 'down', title: `Product units ${lastUnits >= priorUnits ? 'increased' : 'decreased'} by ${Math.abs(lastUnits - priorUnits)}`, detail: `${lastUnits.toLocaleString('en-US')} units were sold last week versus ${priorUnits.toLocaleString('en-US')} two weeks ago.` },
@@ -1805,6 +1870,22 @@ function agentReportApi(
             ])
             sendJson(response, 200, { fromDate, toDate, timezone: 'America/New_York', ...sales, validAppointments })
             return
+          }
+
+          if (requestUrl.searchParams.get('mode') === 'doxy' && request.method === 'POST') {
+            if (!supabaseUrl || !supabaseServiceRoleKey) return sendJson(response, 500, { message: 'Daily report storage is not configured.' })
+            const body = await readJsonRequest<{ agents?: Array<{ name: string; doxyCalls: number; doxyValid: number; doxyAverageSeconds: number; doxyTotalSeconds: number }> }>(request)
+            const savedResponse = await supabaseRest(supabaseUrl, supabaseServiceRoleKey, `daily_reports?team=eq.${team}&from_date=eq.${encodeURIComponent(fromDate)}&to_date=eq.${encodeURIComponent(toDate)}&select=report_data&limit=1`)
+            const savedRows = await savedResponse.json() as Array<{ report_data: { agents?: Array<Record<string, unknown>>; [key: string]: unknown } }>
+            if (!savedRows.length) return sendJson(response, 409, { message: 'Fetch this Daily report before uploading Doxy data.' })
+            const reportData = savedRows[0].report_data
+            const doxyByName = new Map((body.agents ?? []).map((agent) => [agent.name.toLowerCase(), agent]))
+            reportData.agents = (reportData.agents ?? []).map((agent) => ({ ...agent, ...(doxyByName.get(String(agent.name ?? '').toLowerCase()) ?? {}) }))
+            await supabaseRest(supabaseUrl, supabaseServiceRoleKey, 'daily_reports?on_conflict=team,from_date,to_date', {
+              method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+              body: JSON.stringify({ team, from_date: fromDate, to_date: toDate, timezone: 'America/New_York', report_data: reportData, fetched_at: new Date().toISOString() }),
+            })
+            return sendJson(response, 200, { saved: true })
           }
 
           if (requestUrl.searchParams.get('mode') === 'saved') {

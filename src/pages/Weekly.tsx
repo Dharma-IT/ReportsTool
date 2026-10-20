@@ -19,7 +19,9 @@ type WeeklyProductTotals = { revenue: number; units: number; bySeller: Record<st
 type LeadMetrics = { messages: number; calls: number; bookings: number; callSeconds: number }
 type LeadPeriod = { fromDate: string; toDate: string; agents: Array<LeadMetrics & { name: string }>; days: Array<LeadMetrics & { date: string }>; totals: LeadMetrics }
 type WeeklyActivityReport = { lastWeek: LeadPeriod; twoWeeksAgo: LeadPeriod }
-type WeeklyReport = { timezone: string; lastWeek: WeeklyPeriod; twoWeeksAgo: WeeklyPeriod; insights: Array<{ kind: string; title: string; detail: string }>; leadManagement?: WeeklyActivityReport; customerCare?: WeeklyActivityReport }
+type WeeklyCallAgent = { name: string; aircallSeconds: number; aircallCalls: number; doxySeconds: number; doxyCalls: number }
+type WeeklyCalls = { lastWeek: { agents: WeeklyCallAgent[]; savedDays: number }; twoWeeksAgo: { agents: WeeklyCallAgent[]; savedDays: number } }
+type WeeklyReport = { timezone: string; lastWeek: WeeklyPeriod; twoWeeksAgo: WeeklyPeriod; source?: { selected: 'live' | 'saved'; prior: 'live' | 'saved' }; calls?: { sales: WeeklyCalls; cs: WeeklyCalls }; insights: Array<{ kind: string; title: string; detail: string }>; leadManagement?: WeeklyActivityReport; customerCare?: WeeklyActivityReport }
 type WeeklyTeam = 'sales' | 'cs' | 'lm' | 'cc'
 
 const csWeeklyNames = ['arles martinez', 'brayam zuluaga', 'brayan zuluaga', 'edmilson velasquez', 'edmilson morales', 'alice f', 'aline strelow', 'ailene nuevas']
@@ -29,6 +31,10 @@ const isExcludedWeeklySeller = (name: string) => excludedWeeklyNames.includes(na
 
 const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 function weeklyApiUrl(path: string) { return ['localhost', '127.0.0.1'].includes(window.location.hostname) ? path : `${configuredApiBaseUrl}${path}` }
+const shiftDate = (date: string, days: number) => { const value = new Date(`${date}T12:00:00Z`); value.setUTCDate(value.getUTCDate() + days); return value.toISOString().slice(0, 10) }
+function latestCompletedMonday() { const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); const day = new Date(`${today}T12:00:00Z`).getUTCDay(); return shiftDate(today, -((day + 6) % 7) - 7) }
+const weekOptions = Array.from({ length: 26 }, (_, index) => shiftDate(latestCompletedMonday(), -index * 7))
+const weekLabel = (monday: string) => `${new Date(`${monday}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(`${shiftDate(monday, 6)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
 
 type ProductComparison = {
   title: string
@@ -140,13 +146,15 @@ function Weekly() {
   const [report, setReport] = useState<WeeklyReport | null>(null)
   const [error, setError] = useState('')
   const [activeTeam, setActiveTeam] = useState<WeeklyTeam>('sales')
+  const [selectedWeek, setSelectedWeek] = useState(latestCompletedMonday)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [loadSeconds, setLoadSeconds] = useState<number | null>(null)
   useEffect(() => {
+    setReport(null); setError(''); setLoadSeconds(null); setElapsedSeconds(0)
     const controller = new AbortController()
     const startedAt = Date.now()
     const timer = window.setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000)
-    fetch(weeklyApiUrl('/api/weekly-report'), { signal: controller.signal }).then(async (response) => {
+    fetch(weeklyApiUrl(`/api/weekly-report?week=${encodeURIComponent(selectedWeek)}`), { signal: controller.signal }).then(async (response) => {
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.message ?? 'Unable to load the weekly report.')
       return payload as WeeklyReport
@@ -160,7 +168,7 @@ function Weekly() {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load the weekly report.')
     })
     return () => { controller.abort(); window.clearInterval(timer) }
-  }, [])
+  }, [selectedWeek])
 
   const estimatedSeconds = 50
   const etaSeconds = Math.max(0, estimatedSeconds - elapsedSeconds)
@@ -229,6 +237,10 @@ function Weekly() {
     return rows.length ? rows : [{ name: 'No refunds', last: 0, prior: 0 }]
   }, [activeReport])
   const refundMaximum = Math.max(100, ...refundSellers.flatMap((seller) => [seller.last, seller.prior]))
+  const weeklyCalls = report?.calls?.[activeTeam === 'cs' ? 'cs' : 'sales']
+  const weeklyCallRows = weeklyCalls?.lastWeek.agents ?? []
+  const weeklyAircallSeconds = weeklyCallRows.reduce((sum, row) => sum + row.aircallSeconds, 0)
+  const weeklyDoxySeconds = weeklyCallRows.reduce((sum, row) => sum + row.doxySeconds, 0)
   const donut = `conic-gradient(${revenueProducts.map((item, index) => {
     const start = revenueProducts.slice(0, index).reduce((sum, current) => sum + current.share, 0)
     return `${item.color} ${start}% ${start + item.share}%`
@@ -244,6 +256,7 @@ function Weekly() {
         <button type="button" className={activeTeam === 'cc' ? 'active' : ''} onClick={() => setActiveTeam('cc')}><b>CC</b><span>CC Report<small>Customer Care</small></span></button>
       </aside>
       <div className="weekly-content">
+      <div className="weekly-week-picker"><label>Report week<select value={selectedWeek} onChange={(event) => setSelectedWeek(event.target.value)}>{weekOptions.map((week) => <option value={week} key={week}>{weekLabel(week)}</option>)}</select></label>{report ? <span>{report.source?.selected === 'saved' ? 'Saved weekly data' : 'Fetched live and saved'} · comparison {report.source?.prior === 'saved' ? 'loaded from database' : 'fetched live and saved'}</span> : null}</div>
       {!report && !error ? <section className="weekly-load-status" aria-live="polite"><div><span className="weekly-load-spinner" aria-hidden="true" /><p><strong>Loading all weekly reports</strong><small>{loadingLabel}</small></p><b>ETA {etaSeconds ? `~${etaSeconds}s` : 'soon'}</b></div><i><span style={{ width: `${Math.min(94, Math.max(4, elapsedSeconds / estimatedSeconds * 100))}%` }} /></i><small>Fetching Sales, Customer Service, Lead Management, and Customer Care from HubSpot at a rate-safe pace.</small></section> : null}
       {report && loadSeconds !== null ? <div className="weekly-load-complete">✓ All weekly reports loaded in {loadSeconds}s</div> : null}
       {activeTeam === 'lm' || activeTeam === 'cc' ? <TeamActivityReport report={report} error={error} loadingLabel={loadingLabel} team={activeTeam} /> : <>
@@ -256,6 +269,8 @@ function Weekly() {
         <div><span>Total revenue this week</span><strong>{activeReport ? money.format(activeReport.lastWeek.revenue) : 'Loading…'}</strong><small>{activeTeam === 'sales' ? 'Sales team' : 'Customer Service team'} · Paid HubSpot deals</small></div>
         <div className="weekly-total-comparison"><span>Two weeks ago</span><strong>{activeReport ? money.format(activeReport.twoWeeksAgo.revenue) : '—'}</strong>{activeReport ? <small className={activeReport.lastWeek.revenue >= activeReport.twoWeeksAgo.revenue ? 'positive' : 'negative'}>{activeReport.lastWeek.revenue >= activeReport.twoWeeksAgo.revenue ? '↗' : '↘'} {money.format(Math.abs(activeReport.lastWeek.revenue - activeReport.twoWeeksAgo.revenue))}</small> : null}</div>
       </section>
+
+      <section className="lm-table-card weekly-calls-card"><div className="weekly-section-heading"><span>Customer contact</span><h2>Aircall and Doxy</h2><p>Aggregated from saved Daily dashboard reports for the selected week.</p></div><div className="lm-kpi-grid"><article><strong>{duration(weeklyAircallSeconds)}</strong><span>Aircall time</span></article><article><strong>{duration(weeklyDoxySeconds)}</strong><span>Doxy time</span></article><article><strong>{duration(weeklyAircallSeconds + weeklyDoxySeconds)}</strong><span>Total connected time</span></article><article><strong>{weeklyCalls?.lastWeek.savedDays ?? 0}/7</strong><span>Saved days included</span></article></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>Aircall calls</th><th>Aircall time</th><th>Doxy calls</th><th>Doxy time</th><th>Total time</th></tr></thead><tbody>{weeklyCallRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{count.format(row.aircallCalls)}</td><td>{duration(row.aircallSeconds)}</td><td>{count.format(row.doxyCalls)}</td><td>{duration(row.doxySeconds)}</td><td>{duration(row.aircallSeconds + row.doxySeconds)}</td></tr>)}{weeklyCalls && !weeklyCallRows.length ? <tr><td colSpan={6}>No saved Daily Aircall or Doxy data exists for this week.</td></tr> : null}</tbody></table></div></section>
 
       <section className="weekly-major-points" aria-labelledby="weekly-major-points-title">
         <h2 id="weekly-major-points-title">Major Points</h2>
