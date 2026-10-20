@@ -1086,6 +1086,7 @@ async function fetchDailyCsHubSpot(
 }
 
 type WeeklyProductTotals = { revenue: number; units: number; bySeller: Record<string, { revenue: number; units: number }> }
+type WeeklyNoShowBucket = { total: number; noShows: number; rate: number }
 
 function weeklyProductCategory(name: string) {
   const product = name.toLowerCase()
@@ -1122,6 +1123,7 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
     for (const item of payload.results ?? []) items.set(item.id, item)
   }
   const bySeller: Record<string, number> = {}
+  const dealCountsBySeller: Record<string, number> = {}
   const refundsBySeller: Record<string, number> = {}
   const products: Record<string, WeeklyProductTotals> = {}
   let revenue = 0
@@ -1133,6 +1135,7 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
     revenue += dealRevenue
     refunds += dealRefund
     bySeller[seller] = roundMoney((bySeller[seller] ?? 0) + dealRevenue)
+    dealCountsBySeller[seller] = (dealCountsBySeller[seller] ?? 0) + 1
     refundsBySeller[seller] = roundMoney((refundsBySeller[seller] ?? 0) + dealRefund)
     const associated = (dealToItems.get(deal.id) ?? []).map((id) => items.get(id)).filter(Boolean) as HubSpotLineItem[]
     const parsed = associated.length ? associated.map((item) => ({ name: item.properties.name ?? '', quantity: finiteNumber(item.properties.quantity, 1), amount: finiteNumber(item.properties.amount, finiteNumber(item.properties.price) * finiteNumber(item.properties.quantity, 1)) })) : parseDailyCsDealDescription(deal.properties.deal_description_items__test ?? '').map((item) => ({ ...item, amount: 0 }))
@@ -1149,7 +1152,34 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
       products[category] = row
     }
   }
-  return { fromDate, toDate, revenue: roundMoney(revenue), refunds: roundMoney(refunds), dealCount: deals.length, bySeller, refundsBySeller, products }
+  return { fromDate, toDate, revenue: roundMoney(revenue), refunds: roundMoney(refunds), dealCount: deals.length, bySeller, dealCountsBySeller, refundsBySeller, products }
+}
+
+async function fetchWeeklyNoShows(fromDate: string, toDate: string, token: string) {
+  const from = getNewYorkUnixDayRange(fromDate).from * 1000
+  const to = getNewYorkUnixDayRange(toDate).to * 1000
+  const meetings = await searchAllHubSpotObjects<{ properties: { hs_meeting_start_time?: string | null; hs_meeting_outcome?: string | null; hubspot_owner_id?: string | null } }>('meetings', {
+    filterGroups: [{ filters: [{ propertyName: 'hs_meeting_start_time', operator: 'GTE', value: String(from) }, { propertyName: 'hs_meeting_start_time', operator: 'LTE', value: String(to) }] }],
+    properties: ['hs_meeting_start_time', 'hs_meeting_outcome', 'hubspot_owner_id'],
+  }, token)
+  const owners = await fetchHubSpotOwners(token)
+  const names = new Map(owners.map((owner) => [owner.id, `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim()]))
+  const bySeller: Record<string, WeeklyNoShowBucket> = {}
+  const byWeekday: Record<string, WeeklyNoShowBucket> = {}
+  const add = (buckets: Record<string, WeeklyNoShowBucket>, key: string, noShow: boolean) => {
+    const bucket = buckets[key] ?? { total: 0, noShows: 0, rate: 0 }
+    bucket.total += 1; if (noShow) bucket.noShows += 1; bucket.rate = bucket.total ? bucket.noShows / bucket.total * 100 : 0; buckets[key] = bucket
+  }
+  for (const meeting of meetings) {
+    const outcome = String(meeting.properties.hs_meeting_outcome ?? '').toUpperCase()
+    if (outcome === 'CANCELED') continue
+    const seller = names.get(meeting.properties.hubspot_owner_id ?? '') || 'Unassigned'
+    const date = meeting.properties.hs_meeting_start_time ? new Date(meeting.properties.hs_meeting_start_time) : null
+    const weekday = date ? new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'long' }).format(date) : 'Unknown'
+    const noShow = outcome === 'NO_SHOW'
+    add(bySeller, seller, noShow); add(byWeekday, weekday, noShow)
+  }
+  return { fromDate, toDate, bySeller, byWeekday }
 }
 
 type WeeklyLeadAgent = { name: string; messages: number; calls: number; bookings: number; callSeconds: number }
@@ -1238,23 +1268,27 @@ function completedEasternWeeks() {
 }
 
 type StoredWeeklyPeriod = {
+  version: number
   hubSpot: Awaited<ReturnType<typeof fetchWeeklyHubSpotPeriod>>
   leadManagement: Awaited<ReturnType<typeof fetchWeeklyLeadManagementPeriod>>
   customerCare: Awaited<ReturnType<typeof fetchWeeklyLeadManagementPeriod>>
+  noShows: Awaited<ReturnType<typeof fetchWeeklyNoShows>>
 }
 
 async function loadStoredWeeklyPeriod(weekStart: string, supabaseUrl: string, serviceRoleKey: string) {
   if (!supabaseUrl || !serviceRoleKey) return null
   const response = await supabaseRest(supabaseUrl, serviceRoleKey, `weekly_reports?week_start=eq.${weekStart}&select=report_data&limit=1`)
   const rows = await response.json() as Array<{ report_data: StoredWeeklyPeriod }>
-  return rows[0]?.report_data ?? null
+  const stored = rows[0]?.report_data
+  return stored?.version === 2 ? stored : null
 }
 
 async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string) {
   const hubSpot = await fetchWeeklyHubSpotPeriod(from, to, hubSpotToken)
   const leadManagement = await fetchWeeklyLeadManagementPeriod(from, to, hubSpotToken)
   const customerCare = await fetchWeeklyLeadManagementPeriod(from, to, hubSpotToken, WEEKLY_CC_AGENTS)
-  const reportData: StoredWeeklyPeriod = { hubSpot, leadManagement, customerCare }
+  const noShows = await fetchWeeklyNoShows(from, to, hubSpotToken)
+  const reportData: StoredWeeklyPeriod = { version: 2, hubSpot, leadManagement, customerCare, noShows }
   if (supabaseUrl && serviceRoleKey) {
     await supabaseRest(supabaseUrl, serviceRoleKey, 'weekly_reports?on_conflict=week_start', {
       method: 'POST',
@@ -1830,6 +1864,7 @@ function agentReportApi(
             timezone: 'America/New_York', lastWeek, twoWeeksAgo, source: { selected: selectedSource, prior: priorSource },
             leadManagement: { lastWeek: leadManagementLastWeek, twoWeeksAgo: leadManagementTwoWeeksAgo },
             customerCare: { lastWeek: customerCareLastWeek, twoWeeksAgo: customerCareTwoWeeksAgo },
+            noShows: { lastWeek: selectedStored.noShows, twoWeeksAgo: priorStored.noShows },
             calls: { sales: { lastWeek: salesCalls, twoWeeksAgo: salesPriorCalls }, cs: { lastWeek: csCalls, twoWeeksAgo: csPriorCalls } },
             insights: [
               { kind: revenueDelta >= 0 ? 'up' : 'down', title: `Revenue ${revenueDelta >= 0 ? 'increased' : 'decreased'} by $${weeklyMoney(Math.abs(revenueDelta))} last week`, detail: `Revenue was $${weeklyMoney(lastWeek.revenue)} versus $${weeklyMoney(twoWeeksAgo.revenue)} two weeks ago.` },
