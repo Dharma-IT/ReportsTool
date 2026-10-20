@@ -8,8 +8,8 @@ const productRevenue = [
 
 const weeklySales = [
   { name: 'Alejandro', lastWeek: 11200, twoWeeksAgo: 4800, average: 8000, highest: 11200, lastSales: 8, priorSales: 3 },
-  { name: 'AndrÃ©s', lastWeek: 12400, twoWeeksAgo: 11200, average: 11800, highest: 15800, lastSales: 5, priorSales: 7 },
-  { name: 'MarÃ­a C.', lastWeek: 7400, twoWeeksAgo: 11600, average: 9500, highest: 19500, lastSales: 7, priorSales: 4 },
+  { name: 'Andrés', lastWeek: 12400, twoWeeksAgo: 11200, average: 11800, highest: 15800, lastSales: 5, priorSales: 7 },
+  { name: 'María C.', lastWeek: 7400, twoWeeksAgo: 11600, average: 9500, highest: 19500, lastSales: 7, priorSales: 4 },
   { name: 'Meribet', lastWeek: 11100, twoWeeksAgo: 17100, average: 14100, highest: 32700, lastSales: 5, priorSales: 5 },
 ]
 
@@ -38,7 +38,7 @@ const shiftDate = (date: string, days: number) => { const value = new Date(`${da
 function latestCompletedMonday() { const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); const day = new Date(`${today}T12:00:00Z`).getUTCDay(); return shiftDate(today, -((day + 6) % 7) - 7) }
 const weeklyHistoryStart = '2026-09-28'
 const weekOptions = Array.from({ length: 104 }, (_, index) => shiftDate(latestCompletedMonday(), -index * 7)).filter((week) => week >= weeklyHistoryStart)
-const weekLabel = (monday: string) => `${new Date(`${monday}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} â€“ ${new Date(`${shiftDate(monday, 5)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+const weekLabel = (monday: string) => `${new Date(`${monday}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(`${shiftDate(monday, 5)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
 
 type ProductComparison = {
   title: string
@@ -52,22 +52,22 @@ type ProductComparison = {
 
 const productComparisons: ProductComparison[] = [
   { title: 'Slim Boost', subtitle: 'Compared to Injections', direction: 'flat', summary: 'Slim Boost revenue stayed equal by $801 compared to last week', detail: 'This week we sold 9 slim boosts, compared to 9 units last week.', maximum: 100, agents: [
-    { name: 'AndrÃ©s', last: 50, prior: 38, lastSales: 4, priorSales: 3 }, { name: 'Alejandro', last: 0, prior: 0 }, { name: 'MarÃ­a C.', last: 40, prior: 80, lastSales: 2, priorSales: 4 }, { name: 'Meribet', last: 60, prior: 40, lastSales: 3, priorSales: 2 }, { name: 'Avrg', last: 32, prior: 32 },
+    { name: 'Andrés', last: 50, prior: 38, lastSales: 4, priorSales: 3 }, { name: 'Alejandro', last: 0, prior: 0 }, { name: 'María C.', last: 40, prior: 80, lastSales: 2, priorSales: 4 }, { name: 'Meribet', last: 60, prior: 40, lastSales: 3, priorSales: 2 }, { name: 'Avrg', last: 32, prior: 32 },
   ] },
   { title: 'Nutr. Plan', subtitle: 'Compared to Injections', direction: 'down', summary: 'Nutritional Plan revenue decreased by $551 compared to last week', detail: 'We sold 11 nutritional plans, compared to 15 units last week.', maximum: 140, agents: [
-    { name: 'AndrÃ©s', last: 0, prior: 40, lastSales: 0, priorSales: 4 }, { name: 'Alejandro', last: 0, prior: 60, lastSales: 0, priorSales: 3 }, { name: 'MarÃ­a C.', last: 70, prior: 125, lastSales: 5, priorSales: 2 }, { name: 'Meribet', last: 90, prior: 78, lastSales: 6, priorSales: 5 }, { name: 'Avrg', last: 70, prior: 81 },
+    { name: 'Andrés', last: 0, prior: 40, lastSales: 0, priorSales: 4 }, { name: 'Alejandro', last: 0, prior: 60, lastSales: 0, priorSales: 3 }, { name: 'María C.', last: 70, prior: 125, lastSales: 5, priorSales: 2 }, { name: 'Meribet', last: 90, prior: 78, lastSales: 6, priorSales: 5 }, { name: 'Avrg', last: 70, prior: 81 },
   ] },
   { title: 'NAD+', subtitle: 'Sales per Seller', direction: 'down', summary: 'NAD+ revenue increased by $282 compared to last week', detail: 'This week we sold 3 NAD+ injections, compared to 5 units last week.', maximum: 70, agents: [
-    { name: 'AndrÃ©s', last: 33, prior: 50, lastSales: 1, priorSales: 4 }, { name: 'Alejandro', last: 0, prior: 0 }, { name: 'MarÃ­a C.', last: 0, prior: 0 }, { name: 'Meribet', last: 66, prior: 20, lastSales: 2, priorSales: 1 }, { name: 'Avrg', last: 14, prior: 14 },
+    { name: 'Andrés', last: 33, prior: 50, lastSales: 1, priorSales: 4 }, { name: 'Alejandro', last: 0, prior: 0 }, { name: 'María C.', last: 0, prior: 0 }, { name: 'Meribet', last: 66, prior: 20, lastSales: 2, priorSales: 1 }, { name: 'Avrg', last: 14, prior: 14 },
   ] },
   { title: 'Sermorelin', subtitle: 'Compared to Injections', direction: 'up', summary: 'Sermorelin revenue increased by $2,247 compared to last week', detail: 'This week we sold 17 Sermorelin, compared to 9 units last week.', maximum: 70, agents: [
-    { name: 'AndrÃ©s', last: 0, prior: 63, priorSales: 5 }, { name: 'Alejandro', last: 0, prior: 0 }, { name: 'MarÃ­a C.', last: 40, prior: 40, lastSales: 8, priorSales: 2 }, { name: 'Meribet', last: 50, prior: 40, lastSales: 9, priorSales: 2 }, { name: 'Avrg', last: 29, prior: 29 },
+    { name: 'Andrés', last: 0, prior: 63, priorSales: 5 }, { name: 'Alejandro', last: 0, prior: 0 }, { name: 'María C.', last: 40, prior: 40, lastSales: 8, priorSales: 2 }, { name: 'Meribet', last: 50, prior: 40, lastSales: 9, priorSales: 2 }, { name: 'Avrg', last: 29, prior: 29 },
   ] },
   { title: 'GHK-Cu Troches', subtitle: 'Compared to Injections', direction: 'down', summary: 'No GHK revenue for the past two weeks.', maximum: 100, agents: [
-    { name: 'AndrÃ©s', last: 0, prior: 0 }, { name: 'Alejandro', last: 0, prior: 0 }, { name: 'Leonardo G.', last: 0, prior: 0 }, { name: 'MarÃ­a C.', last: 0, prior: 0 }, { name: 'Meribet', last: 0, prior: 0 }, { name: 'Avrg', last: 0, prior: 0 },
+    { name: 'Andrés', last: 0, prior: 0 }, { name: 'Alejandro', last: 0, prior: 0 }, { name: 'Leonardo G.', last: 0, prior: 0 }, { name: 'María C.', last: 0, prior: 0 }, { name: 'Meribet', last: 0, prior: 0 }, { name: 'Avrg', last: 0, prior: 0 },
   ] },
   { title: 'Glutathione', subtitle: 'Compared to Injections', direction: 'flat', summary: 'Just one Glutathione revenue for the past two weeks.', maximum: 100, agents: [
-    { name: 'AndrÃ©s', last: 0, prior: 0 }, { name: 'Alejandro', last: 0, prior: 0 }, { name: 'MarÃ­a C.', last: 0, prior: 0 }, { name: 'Meribet', last: 100, prior: 0, lastSales: 1 }, { name: 'Avrg', last: 0, prior: 0 },
+    { name: 'Andrés', last: 0, prior: 0 }, { name: 'Alejandro', last: 0, prior: 0 }, { name: 'María C.', last: 0, prior: 0 }, { name: 'Meribet', last: 100, prior: 0, lastSales: 1 }, { name: 'Avrg', last: 0, prior: 0 },
   ] },
 ]
 
@@ -76,7 +76,7 @@ function ProductComparisonCard({ product }: { product: ProductComparison }) {
   return <section className="weekly-product-card" aria-label={`${product.title} weekly comparison`}>
     <aside className="weekly-product-copy">
       <div><h2>{product.title}</h2><strong>{product.subtitle}</strong></div>
-      <div className="weekly-product-summary"><span className={product.direction} aria-hidden="true">{product.direction === 'up' ? 'â†—' : product.direction === 'down' ? 'â†˜' : 'â†’'}</span><strong>{product.summary}</strong>{product.detail ? <p>{product.detail}</p> : null}</div>
+      <div className="weekly-product-summary"><span className={product.direction} aria-hidden="true">{product.direction === 'up' ? '↗' : product.direction === 'down' ? '↘' : '→'}</span><strong>{product.summary}</strong>{product.detail ? <p>{product.detail}</p> : null}</div>
     </aside>
     <div className="weekly-product-chart-area">
       <div className="weekly-chart-legend"><span><i className="last" />This week</span><span><i className="average" />Last week</span></div>
@@ -131,10 +131,10 @@ function TeamActivityReport({ report, error, loadingLabel, team }: { report: Wee
   const activityTotal = activityMix.reduce((sum, item) => sum + item.value, 0)
   const activityDonut = activityTotal ? `conic-gradient(${activityMix.map((item, index) => { const start = activityMix.slice(0, index).reduce((sum, row) => sum + row.value, 0) / activityTotal * 100; return `${item.color} ${start}% ${start + item.value / activityTotal * 100}%` }).join(',')})` : '#e8efe9'
   return <>
-    <header className="weekly-heading"><div><p className="eyebrow">Weekly {teamName.toLowerCase()} report</p><h1>{teamName} performance</h1><p>{period ? `${period.fromDate} through ${period.toDate} Â· Eastern Time` : 'Loading the latest completed HubSpot weekâ€¦'}</p></div><span>HubSpot {teamShortName} overview</span></header>
+    <header className="weekly-heading"><div><p className="eyebrow">Weekly {teamName.toLowerCase()} report</p><h1>{teamName} performance</h1><p>{period ? `${period.fromDate} through ${period.toDate} · Eastern Time` : 'Loading the latest completed HubSpot week…'}</p></div><span>HubSpot {teamShortName} overview</span></header>
     {error ? <div className="daily-error" role="alert">HubSpot weekly report unavailable: {error}</div> : null}
-    <section className="lm-volume-section"><div className="weekly-section-heading"><span>Activity snapshot</span><h2>High-level volumes</h2><p>{teamName} activity recorded in HubSpot for the latest completed week.</p></div><div className="lm-kpi-grid">{cards.map((card) => { const delta = card.current - card.previous; return <article key={card.label}><strong>{period ? card.value : 'â€”'}</strong><span>{card.label}</span>{period && prior ? <small className={delta >= 0 ? 'positive' : 'negative'}>{delta >= 0 ? 'â†—' : 'â†˜'} {card.format(Math.abs(delta))} vs last week</small> : !error ? <small>{loadingLabel}</small> : null}</article> })}</div></section>
-    <section className="lm-visual-card lm-booking-chart-card"><aside><div><h2>Appointments</h2><strong>Set by LM agent</strong></div><div className="lm-chart-note"><span aria-hidden="true">â†—</span><strong>{period ? `${count.format(totals.bookings)} appointments set this week` : 'Loading appointment performanceâ€¦'}</strong><p>{prior ? `Compared with ${count.format(prior.totals.bookings)} appointments last week.` : 'Comparing the latest completed HubSpot weeks.'}</p></div></aside><div className="lm-booking-chart-area"><div className="weekly-chart-legend"><span><i className="last" />This week</span><span><i className="average" />Last week</span></div><div className="lm-booking-chart">{bookingRows.length ? bookingRows.map((row) => <div className="lm-booking-group" key={row.name}><div><span className="last" style={{ height: `${row.last / bookingMaximum * 100}%` }}>{row.last ? <em>{row.last}</em> : null}</span><span className="prior" style={{ height: `${row.prior / bookingMaximum * 100}%` }}>{row.prior ? <em>{row.prior}</em> : null}</span></div><strong>{row.name}</strong></div>) : <p>Appointment chart will appear when HubSpot finishes loading.</p>}</div></div></section>
+    <section className="lm-volume-section"><div className="weekly-section-heading"><span>Activity snapshot</span><h2>High-level volumes</h2><p>{teamName} activity recorded in HubSpot for the latest completed week.</p></div><div className="lm-kpi-grid">{cards.map((card) => { const delta = card.current - card.previous; return <article key={card.label}><strong>{period ? card.value : '—'}</strong><span>{card.label}</span>{period && prior ? <small className={delta >= 0 ? 'positive' : 'negative'}>{delta >= 0 ? '↗' : '↘'} {card.format(Math.abs(delta))} vs last week</small> : !error ? <small>{loadingLabel}</small> : null}</article> })}</div></section>
+    <section className="lm-visual-card lm-booking-chart-card"><aside><div><h2>Appointments</h2><strong>Set by LM agent</strong></div><div className="lm-chart-note"><span aria-hidden="true">↗</span><strong>{period ? `${count.format(totals.bookings)} appointments set this week` : 'Loading appointment performance…'}</strong><p>{prior ? `Compared with ${count.format(prior.totals.bookings)} appointments last week.` : 'Comparing the latest completed HubSpot weeks.'}</p></div></aside><div className="lm-booking-chart-area"><div className="weekly-chart-legend"><span><i className="last" />This week</span><span><i className="average" />Last week</span></div><div className="lm-booking-chart">{bookingRows.length ? bookingRows.map((row) => <div className="lm-booking-group" key={row.name}><div><span className="last" style={{ height: `${row.last / bookingMaximum * 100}%` }}>{row.last ? <em>{row.last}</em> : null}</span><span className="prior" style={{ height: `${row.prior / bookingMaximum * 100}%` }}>{row.prior ? <em>{row.prior}</em> : null}</span></div><strong>{row.name}</strong></div>) : <p>Appointment chart will appear when HubSpot finishes loading.</p>}</div></div></section>
     <section className="lm-visual-card lm-mix-card"><aside><div><h2>Activity<br />Mix</h2><strong>By HubSpot activity</strong></div><p>See how {teamName} activity is distributed across messages, calls, and appointments.</p></aside><div className="lm-mix-visual"><div className="lm-activity-donut" style={{ background: activityDonut }} role="img" aria-label={`${teamName} activity distribution`}><span><strong>{count.format(activityTotal)}</strong><small>Total activities</small></span></div><div className="lm-mix-legend">{activityMix.map((item) => <div key={item.label}><i style={{ background: item.color }} /><span>{item.label}<strong>{count.format(item.value)}</strong><small>{activityTotal ? `${(item.value / activityTotal * 100).toFixed(1)}%` : '0.0%'}</small></span></div>)}</div></div></section>
     <section className="lm-table-card"><div className="weekly-section-heading"><span>Team performance</span><h2>Agent overview</h2></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>Messages</th><th>Calls</th><th>Bookings</th><th>Time in Call (TIC)</th></tr></thead><tbody>{(period?.agents ?? []).map((agent) => <tr key={agent.name}><th scope="row">{agent.name}</th><td>{count.format(agent.messages)}</td><td>{count.format(agent.calls)}</td><td>{count.format(agent.bookings)}</td><td>{duration(agent.callSeconds)}</td></tr>)}{period && !period.agents.length ? <tr><td colSpan={5}>No {teamName} activity was found for this week.</td></tr> : null}</tbody>{period ? <tfoot><tr><th scope="row">Team total</th><td>{count.format(totals.messages)}</td><td>{count.format(totals.calls)}</td><td>{count.format(totals.bookings)}</td><td>{duration(totals.callSeconds)}</td></tr></tfoot> : null}</table></div></section>
     <section className="weekly-major-points"><h2>Major Points</h2><div className="weekly-insight-grid">{[
@@ -176,7 +176,7 @@ function Weekly() {
 
   const estimatedSeconds = 50
   const etaSeconds = Math.max(0, estimatedSeconds - elapsedSeconds)
-  const loadingLabel = etaSeconds ? `${elapsedSeconds}s elapsed Â· about ${etaSeconds}s remaining` : `${elapsedSeconds}s elapsed Â· finishing upâ€¦`
+  const loadingLabel = etaSeconds ? `${elapsedSeconds}s elapsed · about ${etaSeconds}s remaining` : `${elapsedSeconds}s elapsed · finishing up…`
 
   const activeReport = useMemo(() => {
     if (!report) return null
@@ -267,23 +267,23 @@ function Weekly() {
         <button type="button" className={activeTeam === 'cc' ? 'active' : ''} onClick={() => setActiveTeam('cc')}><b>CC</b><span>CC Report<small>Customer Care</small></span></button>
       </aside>
       <div className="weekly-content">
-      <div className="weekly-week-picker"><label>Report week<select value={selectedWeek} onChange={(event) => setSelectedWeek(event.target.value)}>{weekOptions.map((week) => <option value={week} key={week}>{weekLabel(week)}</option>)}</select></label>{report ? <span>{report.source?.selected === 'saved' ? 'Saved weekly data' : 'Fetched live and saved'} Â· comparison {report.source?.prior === 'saved' ? 'loaded from database' : 'fetched live and saved'}</span> : null}</div>
+      <div className="weekly-week-picker"><label>Report week<select value={selectedWeek} onChange={(event) => setSelectedWeek(event.target.value)}>{weekOptions.map((week) => <option value={week} key={week}>{weekLabel(week)}</option>)}</select></label>{report ? <span>{report.source?.selected === 'saved' ? 'Saved weekly data' : 'Fetched live and saved'} · comparison {report.source?.prior === 'saved' ? 'loaded from database' : 'fetched live and saved'}</span> : null}</div>
       {!report && !error ? <section className="weekly-load-status" aria-live="polite"><div><span className="weekly-load-spinner" aria-hidden="true" /><p><strong>Loading all weekly reports</strong><small>{loadingLabel}</small></p><b>ETA {etaSeconds ? `~${etaSeconds}s` : 'soon'}</b></div><i><span style={{ width: `${Math.min(94, Math.max(4, elapsedSeconds / estimatedSeconds * 100))}%` }} /></i><small>Fetching Sales, Customer Service, Lead Management, and Customer Care from HubSpot at a rate-safe pace.</small></section> : null}
-      {report && loadSeconds !== null ? <div className="weekly-load-complete">âœ“ All weekly reports loaded in {loadSeconds}s</div> : null}
+      {report && loadSeconds !== null ? <div className="weekly-load-complete">✓ All weekly reports loaded in {loadSeconds}s</div> : null}
       {activeTeam === 'lm' || activeTeam === 'cc' ? <TeamActivityReport report={report} error={error} loadingLabel={loadingLabel} team={activeTeam} /> : <>
       <header className="weekly-heading">
-          <div><p className="eyebrow">Weekly {activeTeam === 'sales' ? 'sales' : 'customer service'} report</p><h1>{activeTeam === 'sales' ? 'Sales' : 'Customer Service'} performance</h1><p>{activeReport ? `${activeReport.lastWeek.fromDate} through ${activeReport.lastWeek.toDate} Â· Eastern Time` : 'Loading the latest completed HubSpot weekâ€¦'}</p></div>
+          <div><p className="eyebrow">Weekly {activeTeam === 'sales' ? 'sales' : 'customer service'} report</p><h1>{activeTeam === 'sales' ? 'Sales' : 'Customer Service'} performance</h1><p>{activeReport ? `${activeReport.lastWeek.fromDate} through ${activeReport.lastWeek.toDate} · Eastern Time` : 'Loading the latest completed HubSpot week…'}</p></div>
         <span>HubSpot {activeTeam === 'sales' ? 'sales' : 'CS'} overview</span>
       </header>
 
       <section className="weekly-total-revenue" aria-label="Total revenue this week">
-        <div><span>Total revenue this week</span><strong>{activeReport ? money.format(activeReport.lastWeek.revenue) : 'Loadingâ€¦'}</strong><small>{activeTeam === 'sales' ? 'Sales team' : 'Customer Service team'} Â· Paid HubSpot deals</small></div>
-        <div className="weekly-total-comparison"><span>Last week</span><strong>{activeReport ? money.format(activeReport.twoWeeksAgo.revenue) : 'â€”'}</strong>{activeReport ? <small className={activeReport.lastWeek.revenue >= activeReport.twoWeeksAgo.revenue ? 'positive' : 'negative'}>{activeReport.lastWeek.revenue >= activeReport.twoWeeksAgo.revenue ? 'â†—' : 'â†˜'} {money.format(Math.abs(activeReport.lastWeek.revenue - activeReport.twoWeeksAgo.revenue))}</small> : null}</div>
+        <div><span>Total revenue this week</span><strong>{activeReport ? money.format(activeReport.lastWeek.revenue) : 'Loading…'}</strong><small>{activeTeam === 'sales' ? 'Sales team' : 'Customer Service team'} · Paid HubSpot deals</small></div>
+        <div className="weekly-total-comparison"><span>Last week</span><strong>{activeReport ? money.format(activeReport.twoWeeksAgo.revenue) : '—'}</strong>{activeReport ? <small className={activeReport.lastWeek.revenue >= activeReport.twoWeeksAgo.revenue ? 'positive' : 'negative'}>{activeReport.lastWeek.revenue >= activeReport.twoWeeksAgo.revenue ? '↗' : '↘'} {money.format(Math.abs(activeReport.lastWeek.revenue - activeReport.twoWeeksAgo.revenue))}</small> : null}</div>
       </section>
 
       <section className="lm-table-card weekly-calls-card"><div className="weekly-section-heading"><span>Customer contact</span><h2>Aircall and Doxy</h2><p>Aggregated from saved Daily dashboard reports for the selected week.</p></div><div className="lm-kpi-grid"><article><strong>{duration(weeklyAircallSeconds)}</strong><span>Aircall time</span></article><article><strong>{duration(weeklyDoxySeconds)}</strong><span>Doxy time</span></article><article><strong>{duration(weeklyAircallSeconds + weeklyDoxySeconds)}</strong><span>Total connected time</span></article><article><strong>{weeklyCalls?.lastWeek.savedDays ?? 0}/6</strong><span>Saved days included</span></article></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>Aircall calls</th><th>Aircall time</th><th>Doxy calls</th><th>Doxy time</th><th>Total time</th></tr></thead><tbody>{weeklyCallRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{count.format(row.aircallCalls)}</td><td>{duration(row.aircallSeconds)}</td><td>{count.format(row.doxyCalls)}</td><td>{duration(row.doxySeconds)}</td><td>{duration(row.aircallSeconds + row.doxySeconds)}</td></tr>)}{weeklyCalls && !weeklyCallRows.length ? <tr><td colSpan={6}>No saved Daily Aircall or Doxy data exists for this week.</td></tr> : null}</tbody></table></div></section>
 
-      <section className="lm-table-card"><div className="weekly-section-heading"><span>HubSpot sales quality</span><h2>Average ticket</h2><p>Paid HubSpot revenue divided by paid deals, compared with last week.</p></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>This week</th><th>Last week</th><th>Change</th></tr></thead><tbody>{averageTicketRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{money.format(row.last)}</td><td>{money.format(row.prior)}</td><td className={row.last >= row.prior ? 'positive' : 'negative'}>{row.last >= row.prior ? 'â†—' : 'â†˜'} {money.format(Math.abs(row.last - row.prior))}</td></tr>)}{activeReport && !averageTicketRows.length ? <tr><td colSpan={4}>No paid deals were found for this team.</td></tr> : null}</tbody></table></div></section>
+      <section className="lm-table-card"><div className="weekly-section-heading"><span>HubSpot sales quality</span><h2>Average ticket</h2><p>Paid HubSpot revenue divided by paid deals, compared with last week.</p></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>This week</th><th>Last week</th><th>Change</th></tr></thead><tbody>{averageTicketRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{money.format(row.last)}</td><td>{money.format(row.prior)}</td><td className={row.last >= row.prior ? 'positive' : 'negative'}>{row.last >= row.prior ? '↗' : '↘'} {money.format(Math.abs(row.last - row.prior))}</td></tr>)}{activeReport && !averageTicketRows.length ? <tr><td colSpan={4}>No paid deals were found for this team.</td></tr> : null}</tbody></table></div></section>
 
       <section className="lm-table-card"><div className="weekly-section-heading"><span>HubSpot appointments</span><h2>No-show report</h2><p>HubSpot No Show Rate: canceled meetings as a percentage of all meetings.</p></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>This week</th><th>Last week</th><th>Appointments reviewed</th></tr></thead><tbody>{noShowRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{row.last.toFixed(1)}%</td><td>{row.prior.toFixed(1)}%</td><td>{count.format(row.total)}</td></tr>)}{report && !noShowRows.length ? <tr><td colSpan={4}>No HubSpot appointments were found for this team.</td></tr> : null}</tbody></table></div></section>
 
@@ -291,9 +291,9 @@ function Weekly() {
         <h2 id="weekly-major-points-title">Major Points</h2>
         <div className="weekly-insight-grid">
           {(activeReport?.insights ?? [
-            { kind: 'down', title: 'Loading weekly revenue insightâ€¦', detail: 'Comparing the latest two completed weeks in HubSpot.' },
-            { kind: 'up', title: 'Loading product performanceâ€¦', detail: 'Calculating unit changes from associated line items.' },
-            { kind: 'seller', title: 'Loading seller performanceâ€¦', detail: 'Finding the leading paid-deal owner.' },
+            { kind: 'down', title: 'Loading weekly revenue insight…', detail: 'Comparing the latest two completed weeks in HubSpot.' },
+            { kind: 'up', title: 'Loading product performance…', detail: 'Calculating unit changes from associated line items.' },
+            { kind: 'seller', title: 'Loading seller performance…', detail: 'Finding the leading paid-deal owner.' },
           ]).map((insight) => <article key={insight.title}>
             <div className="weekly-insight-icon" aria-hidden="true"><span className="insight-bars"><i /><i /><i /></span></div>
             <strong>{insight.title}</strong><p>{insight.detail}</p>
@@ -320,7 +320,7 @@ function Weekly() {
       <section className="weekly-profit-card" aria-labelledby="weekly-profit-title">
         <aside className="weekly-profit-copy">
           <div><h2 id="weekly-profit-title">Profit</h2><strong>Weekly sales growth</strong></div>
-          <div className="weekly-growth-note"><span aria-hidden="true">â†—</span><strong>We increased in revenue<br />by $7,330 this week</strong><p>We reached $44,901 in revenue this week, compared to $37,571 last week.</p></div>
+          <div className="weekly-growth-note"><span aria-hidden="true">↗</span><strong>We increased in revenue<br />by $7,330 this week</strong><p>We reached $44,901 in revenue this week, compared to $37,571 last week.</p></div>
         </aside>
         <div className="weekly-chart-area">
           <div className="weekly-chart-legend"><span><i className="last" />This week</span><span><i className="prior" />Last week</span><span><i className="average" />Average</span><span><i className="highest" />Highest</span></div>
@@ -347,7 +347,7 @@ function Weekly() {
       {comparisonProducts.map((product) => <ProductComparisonCard product={product} key={product.title} />)}
 
       <section className="weekly-product-card weekly-refund-card" aria-label="Refunds by seller">
-        <aside className="weekly-product-copy"><div><h2>Refunds</h2><strong>Per seller</strong></div><div className="weekly-product-summary"><span className={activeReport?.lastWeek.refunds ? 'down' : 'up'} aria-hidden="true">{activeReport?.lastWeek.refunds ? 'â†˜' : 'âœ“'}</span><strong>{activeReport?.lastWeek.refunds ? `${money.format(activeReport.lastWeek.refunds)} was refunded this week` : 'There were no refunds this week'}</strong><p>{activeReport ? `Last week refunds totaled ${money.format(activeReport.twoWeeksAgo.refunds)} across paid HubSpot deals.` : 'Loading refund totals from HubSpot.'}</p></div></aside>
+        <aside className="weekly-product-copy"><div><h2>Refunds</h2><strong>Per seller</strong></div><div className="weekly-product-summary"><span className={activeReport?.lastWeek.refunds ? 'down' : 'up'} aria-hidden="true">{activeReport?.lastWeek.refunds ? '↘' : '✓'}</span><strong>{activeReport?.lastWeek.refunds ? `${money.format(activeReport.lastWeek.refunds)} was refunded this week` : 'There were no refunds this week'}</strong><p>{activeReport ? `Last week refunds totaled ${money.format(activeReport.twoWeeksAgo.refunds)} across paid HubSpot deals.` : 'Loading refund totals from HubSpot.'}</p></div></aside>
         <div className="weekly-product-chart-area"><div className="weekly-chart-legend"><span><i className="refund-last" />This week</span><span><i className="refund-prior" />Last week</span></div><div className="weekly-refund-plot"><div className="weekly-refund-groups">{refundSellers.map((seller) => <div className="weekly-refund-group" key={seller.name}><div><span className="refund-current" style={{ height: `${(seller.last / refundMaximum) * 100}%` }}>{seller.last ? <em>{money.format(seller.last)}</em> : null}</span><span className="refund-previous" style={{ height: `${(seller.prior / refundMaximum) * 100}%` }}>{seller.prior ? <em>{money.format(seller.prior)}</em> : null}</span></div><strong>{seller.name}</strong></div>)}</div></div></div>
       </section>
       </>}

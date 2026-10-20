@@ -41,9 +41,9 @@ const DAILY_CS_AGENTS = [
   { name: 'Edmilson Morales', aliases: ['Edmilson Morales', 'Edmilson Velasquez'] },
 ]
 const DAILY_SALES_AGENTS = [
-  { name: 'Andres Castro', aliases: ['Andres Castro', 'AndrÃ©s Castro'] },
+  { name: 'Andres Castro', aliases: ['Andres Castro', 'Andrés Castro'] },
   { name: 'Alejandra Oyala', aliases: ['Alejandra Oyala', 'Alejandra Olaya'] },
-  { name: 'Ailin Isabel', aliases: ['Ailin Isabel', 'AilÃ­n Isabel'] },
+  { name: 'Ailin Isabel', aliases: ['Ailin Isabel', 'Ailín Isabel'] },
 ]
 const APPOINTMENT_NUTRITIONISTS = [
   { name: 'Maria Sandoval', aliases: ['Maria Sandoval'] },
@@ -3830,7 +3830,7 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
               stdio: ['ignore', stdout, stderr],
             })
             child.unref()
-            return sendJson(response, 202, { message: 'Stripe login opened. Sign in, then click â€œSave Stripe session & closeâ€ in the browser window.' })
+            return sendJson(response, 202, { message: 'Stripe login opened. Sign in, then click “Save Stripe session & close” in the browser window.' })
           }
           if (!stripeSecretKey) return sendJson(response, 500, { message: 'STRIPE_SECRET_KEY is not configured.' })
           const selectedDate = url.searchParams.get('date') ?? ''
