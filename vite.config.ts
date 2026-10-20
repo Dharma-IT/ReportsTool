@@ -70,6 +70,8 @@ const WEEKLY_CC_AGENTS = [
   { name: 'Kathering Silva', aliases: ['Kathering Silva'] },
   { name: 'Zara Meza', aliases: ['Zara Meza'] },
 ]
+// Weekly history begins with the Monday-Sunday week containing October 1, 2026.
+const WEEKLY_HISTORY_START = '2026-09-28'
 // The Public Calls API marks these as missed, but dashboard review confirmed that
 // an agent attempted to answer after the caller had already disconnected.
 const EXCLUDED_MISSED_CALL_IDS = new Set([3979734082])
@@ -1832,8 +1834,8 @@ function agentReportApi(
           const requestUrl = new URL(request.url ?? '', 'http://localhost')
           const selectedStart = requestUrl.searchParams.get('week') || weeks.last.from
           const selectedDay = new Date(`${selectedStart}T12:00:00Z`).getUTCDay()
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedStart) || selectedDay !== 1 || selectedStart > weeks.last.from) {
-            return sendJson(response, 400, { message: 'Choose a completed week beginning on Monday.' })
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedStart) || selectedDay !== 1 || selectedStart > weeks.last.from || selectedStart < WEEKLY_HISTORY_START) {
+            return sendJson(response, 400, { message: 'Choose a completed week beginning on Monday, starting with September 28, 2026.' })
           }
           const selected = { from: selectedStart, to: shiftIsoDate(selectedStart, 6) }
           const prior = { from: shiftIsoDate(selectedStart, -7), to: shiftIsoDate(selectedStart, -1) }

@@ -34,7 +34,8 @@ const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | unde
 function weeklyApiUrl(path: string) { return ['localhost', '127.0.0.1'].includes(window.location.hostname) ? path : `${configuredApiBaseUrl}${path}` }
 const shiftDate = (date: string, days: number) => { const value = new Date(`${date}T12:00:00Z`); value.setUTCDate(value.getUTCDate() + days); return value.toISOString().slice(0, 10) }
 function latestCompletedMonday() { const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); const day = new Date(`${today}T12:00:00Z`).getUTCDay(); return shiftDate(today, -((day + 6) % 7) - 7) }
-const weekOptions = Array.from({ length: 26 }, (_, index) => shiftDate(latestCompletedMonday(), -index * 7))
+const weeklyHistoryStart = '2026-09-28'
+const weekOptions = Array.from({ length: 104 }, (_, index) => shiftDate(latestCompletedMonday(), -index * 7)).filter((week) => week >= weeklyHistoryStart)
 const weekLabel = (monday: string) => `${new Date(`${monday}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(`${shiftDate(monday, 6)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
 
 type ProductComparison = {
