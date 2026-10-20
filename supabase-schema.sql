@@ -87,7 +87,7 @@ create table if not exists public.weekly_reports (
   fetched_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint weekly_reports_valid_range check (week_end = week_start + 6),
+  constraint weekly_reports_valid_range check (week_end = week_start + 5),
   constraint weekly_reports_data_is_object check (jsonb_typeof(report_data) = 'object')
 );
 

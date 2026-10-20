@@ -1126,18 +1126,25 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
   }
   const bySeller: Record<string, number> = {}
   const dealCountsBySeller: Record<string, number> = {}
+  const averageTicketBySeller: Record<string, number> = {}
+  const ticketAmountsBySeller: Record<string, number> = {}
   const refundsBySeller: Record<string, number> = {}
   const products: Record<string, WeeklyProductTotals> = {}
   let revenue = 0
   let refunds = 0
   for (const deal of deals) {
     const seller = ownerNames.get(deal.properties.hubspot_owner_id ?? '') || 'Unassigned'
-    const dealRevenue = Math.abs(finiteNumber(deal.properties.amount))
+    const rawAmount = deal.properties.amount
+    const dealRevenue = Math.abs(finiteNumber(rawAmount))
     const dealRefund = Math.abs(finiteNumber(deal.properties.value_refund))
     revenue += dealRevenue
     refunds += dealRefund
     bySeller[seller] = roundMoney((bySeller[seller] ?? 0) + dealRevenue)
-    dealCountsBySeller[seller] = (dealCountsBySeller[seller] ?? 0) + 1
+    if (rawAmount !== null && rawAmount !== undefined && String(rawAmount).trim() !== '' && Number.isFinite(Number(rawAmount))) {
+      dealCountsBySeller[seller] = (dealCountsBySeller[seller] ?? 0) + 1
+      ticketAmountsBySeller[seller] = (ticketAmountsBySeller[seller] ?? 0) + Number(rawAmount)
+      averageTicketBySeller[seller] = roundMoney(ticketAmountsBySeller[seller] / dealCountsBySeller[seller])
+    }
     refundsBySeller[seller] = roundMoney((refundsBySeller[seller] ?? 0) + dealRefund)
     const associated = (dealToItems.get(deal.id) ?? []).map((id) => items.get(id)).filter(Boolean) as HubSpotLineItem[]
     const parsed = associated.length ? associated.map((item) => ({ name: item.properties.name ?? '', quantity: finiteNumber(item.properties.quantity, 1), amount: finiteNumber(item.properties.amount, finiteNumber(item.properties.price) * finiteNumber(item.properties.quantity, 1)) })) : parseDailyCsDealDescription(deal.properties.deal_description_items__test ?? '').map((item) => ({ ...item, amount: 0 }))
@@ -1154,7 +1161,7 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
       products[category] = row
     }
   }
-  return { fromDate, toDate, revenue: roundMoney(revenue), refunds: roundMoney(refunds), dealCount: deals.length, bySeller, dealCountsBySeller, refundsBySeller, products }
+  return { fromDate, toDate, revenue: roundMoney(revenue), refunds: roundMoney(refunds), dealCount: deals.length, bySeller, dealCountsBySeller, averageTicketBySeller, refundsBySeller, products }
 }
 
 async function fetchWeeklyNoShows(fromDate: string, toDate: string, token: string) {
@@ -1174,11 +1181,10 @@ async function fetchWeeklyNoShows(fromDate: string, toDate: string, token: strin
   }
   for (const meeting of meetings) {
     const outcome = String(meeting.properties.hs_meeting_outcome ?? '').toUpperCase()
-    if (outcome === 'CANCELED') continue
     const seller = names.get(meeting.properties.hubspot_owner_id ?? '') || 'Unassigned'
     const date = meeting.properties.hs_meeting_start_time ? new Date(meeting.properties.hs_meeting_start_time) : null
     const weekday = date ? new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'long' }).format(date) : 'Unknown'
-    const noShow = outcome === 'NO_SHOW'
+    const noShow = outcome === 'CANCELED'
     add(bySeller, seller, noShow); add(byWeekday, weekday, noShow)
   }
   return { fromDate, toDate, bySeller, byWeekday }
@@ -1264,8 +1270,8 @@ function completedEasternWeeks() {
   const day = new Date(`${today}T12:00:00Z`).getUTCDay()
   const currentMonday = shiftIsoDate(today, -((day + 6) % 7))
   return {
-    last: { from: shiftIsoDate(currentMonday, -7), to: shiftIsoDate(currentMonday, -1) },
-    prior: { from: shiftIsoDate(currentMonday, -14), to: shiftIsoDate(currentMonday, -8) },
+    last: { from: shiftIsoDate(currentMonday, -7), to: shiftIsoDate(currentMonday, -2) },
+    prior: { from: shiftIsoDate(currentMonday, -14), to: shiftIsoDate(currentMonday, -9) },
   }
 }
 
@@ -1282,7 +1288,7 @@ async function loadStoredWeeklyPeriod(weekStart: string, supabaseUrl: string, se
   const response = await supabaseRest(supabaseUrl, serviceRoleKey, `weekly_reports?week_start=eq.${weekStart}&select=report_data&limit=1`)
   const rows = await response.json() as Array<{ report_data: StoredWeeklyPeriod }>
   const stored = rows[0]?.report_data
-  return stored?.version === 2 ? stored : null
+  return stored?.version === 3 ? stored : null
 }
 
 async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string) {
@@ -1290,7 +1296,7 @@ async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken:
   const leadManagement = await fetchWeeklyLeadManagementPeriod(from, to, hubSpotToken)
   const customerCare = await fetchWeeklyLeadManagementPeriod(from, to, hubSpotToken, WEEKLY_CC_AGENTS)
   const noShows = await fetchWeeklyNoShows(from, to, hubSpotToken)
-  const reportData: StoredWeeklyPeriod = { version: 2, hubSpot, leadManagement, customerCare, noShows }
+  const reportData: StoredWeeklyPeriod = { version: 3, hubSpot, leadManagement, customerCare, noShows }
   if (supabaseUrl && serviceRoleKey) {
     await supabaseRest(supabaseUrl, serviceRoleKey, 'weekly_reports?on_conflict=week_start', {
       method: 'POST',
@@ -1837,8 +1843,8 @@ function agentReportApi(
           if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedStart) || selectedDay !== 1 || selectedStart > weeks.last.from || selectedStart < WEEKLY_HISTORY_START) {
             return sendJson(response, 400, { message: 'Choose a completed week beginning on Monday, starting with September 28, 2026.' })
           }
-          const selected = { from: selectedStart, to: shiftIsoDate(selectedStart, 6) }
-          const prior = { from: shiftIsoDate(selectedStart, -7), to: shiftIsoDate(selectedStart, -1) }
+          const selected = { from: selectedStart, to: shiftIsoDate(selectedStart, 5) }
+          const prior = { from: shiftIsoDate(selectedStart, -7), to: shiftIsoDate(selectedStart, -2) }
           let selectedStored = await loadStoredWeeklyPeriod(selected.from, supabaseUrl, supabaseServiceRoleKey)
           let priorStored = await loadStoredWeeklyPeriod(prior.from, supabaseUrl, supabaseServiceRoleKey)
           const selectedSource = selectedStored ? 'saved' : 'live'

@@ -14,7 +14,7 @@ const weeklySales = [
 ]
 
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 })
-type WeeklyPeriod = { fromDate: string; toDate: string; revenue: number; refunds: number; dealCount: number; bySeller: Record<string, number>; dealCountsBySeller: Record<string, number>; refundsBySeller: Record<string, number>; products: Record<string, WeeklyProductTotals> }
+type WeeklyPeriod = { fromDate: string; toDate: string; revenue: number; refunds: number; dealCount: number; bySeller: Record<string, number>; dealCountsBySeller: Record<string, number>; averageTicketBySeller: Record<string, number>; refundsBySeller: Record<string, number>; products: Record<string, WeeklyProductTotals> }
 type WeeklyProductTotals = { revenue: number; units: number; bySeller: Record<string, { revenue: number; units: number }> }
 type LeadMetrics = { messages: number; calls: number; bookings: number; callSeconds: number }
 type LeadPeriod = { fromDate: string; toDate: string; agents: Array<LeadMetrics & { name: string }>; days: Array<LeadMetrics & { date: string }>; totals: LeadMetrics }
@@ -26,8 +26,10 @@ type WeeklyReport = { timezone: string; lastWeek: WeeklyPeriod; twoWeeksAgo: Wee
 type WeeklyTeam = 'sales' | 'cs' | 'lm' | 'cc'
 
 const csWeeklyNames = ['arles martinez', 'brayam zuluaga', 'brayan zuluaga', 'edmilson velasquez', 'edmilson morales', 'alice f', 'aline strelow', 'ailene nuevas']
+const salesWeeklyNames = ['alejandra oyala', 'alejandra olaya', 'carlos vargas', 'yaneth rodriguez', 'diana villalobos']
 const excludedWeeklyNames = ['denis reis', 'paula alfonso', 'maria sandoval']
 const isCsWeeklySeller = (name: string) => csWeeklyNames.includes(name.trim().toLowerCase())
+const isSalesWeeklySeller = (name: string) => salesWeeklyNames.includes(name.trim().toLowerCase())
 const isExcludedWeeklySeller = (name: string) => excludedWeeklyNames.includes(name.trim().toLowerCase())
 
 const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
@@ -36,7 +38,7 @@ const shiftDate = (date: string, days: number) => { const value = new Date(`${da
 function latestCompletedMonday() { const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); const day = new Date(`${today}T12:00:00Z`).getUTCDay(); return shiftDate(today, -((day + 6) % 7) - 7) }
 const weeklyHistoryStart = '2026-09-28'
 const weekOptions = Array.from({ length: 104 }, (_, index) => shiftDate(latestCompletedMonday(), -index * 7)).filter((week) => week >= weeklyHistoryStart)
-const weekLabel = (monday: string) => `${new Date(`${monday}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(`${shiftDate(monday, 6)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+const weekLabel = (monday: string) => `${new Date(`${monday}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(`${shiftDate(monday, 5)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
 
 type ProductComparison = {
   title: string
@@ -179,15 +181,16 @@ function Weekly() {
   const activeReport = useMemo(() => {
     if (!report) return null
     const filterPeriod = (period: WeeklyPeriod): WeeklyPeriod => {
-      const keep = (name: string) => !isExcludedWeeklySeller(name) && (activeTeam === 'cs' ? isCsWeeklySeller(name) : !isCsWeeklySeller(name))
+      const keep = (name: string) => !isExcludedWeeklySeller(name) && (activeTeam === 'cs' ? isCsWeeklySeller(name) : isSalesWeeklySeller(name))
       const bySeller = Object.fromEntries(Object.entries(period.bySeller).filter(([name]) => keep(name)))
       const dealCountsBySeller = Object.fromEntries(Object.entries(period.dealCountsBySeller ?? {}).filter(([name]) => keep(name)))
+      const averageTicketBySeller = Object.fromEntries(Object.entries(period.averageTicketBySeller ?? {}).filter(([name]) => keep(name)))
       const refundsBySeller = Object.fromEntries(Object.entries(period.refundsBySeller).filter(([name]) => keep(name)))
       const products = Object.fromEntries(Object.entries(period.products).map(([name, product]) => {
         const productSellers = Object.fromEntries(Object.entries(product.bySeller).filter(([seller]) => keep(seller)))
         return [name, { revenue: Object.values(productSellers).reduce((sum, row) => sum + row.revenue, 0), units: Object.values(productSellers).reduce((sum, row) => sum + row.units, 0), bySeller: productSellers }]
       }))
-      return { ...period, revenue: Object.values(bySeller).reduce((sum, value) => sum + value, 0), refunds: Object.values(refundsBySeller).reduce((sum, value) => sum + value, 0), bySeller, dealCountsBySeller, refundsBySeller, products }
+      return { ...period, revenue: Object.values(bySeller).reduce((sum, value) => sum + value, 0), refunds: Object.values(refundsBySeller).reduce((sum, value) => sum + value, 0), bySeller, dealCountsBySeller, averageTicketBySeller, refundsBySeller, products }
     }
     const lastWeek = filterPeriod(report.lastWeek)
     const twoWeeksAgo = filterPeriod(report.twoWeeksAgo)
@@ -244,9 +247,9 @@ function Weekly() {
   const weeklyCallRows = weeklyCalls?.lastWeek.agents ?? []
   const weeklyAircallSeconds = weeklyCallRows.reduce((sum, row) => sum + row.aircallSeconds, 0)
   const weeklyDoxySeconds = weeklyCallRows.reduce((sum, row) => sum + row.doxySeconds, 0)
-  const teamSeller = (name: string) => !isExcludedWeeklySeller(name) && (activeTeam === 'cs' ? isCsWeeklySeller(name) : !isCsWeeklySeller(name))
+  const teamSeller = (name: string) => !isExcludedWeeklySeller(name) && (activeTeam === 'cs' ? isCsWeeklySeller(name) : isSalesWeeklySeller(name))
   const comparisonNames = activeReport ? [...new Set([...Object.keys(activeReport.lastWeek.bySeller), ...Object.keys(activeReport.twoWeeksAgo.bySeller)])].filter(teamSeller) : []
-  const averageTicketRows = comparisonNames.map((name) => ({ name, last: (activeReport!.lastWeek.bySeller[name] ?? 0) / Math.max(1, activeReport!.lastWeek.dealCountsBySeller[name] ?? 0), prior: (activeReport!.twoWeeksAgo.bySeller[name] ?? 0) / Math.max(1, activeReport!.twoWeeksAgo.dealCountsBySeller[name] ?? 0) }))
+  const averageTicketRows = comparisonNames.map((name) => ({ name, last: activeReport!.lastWeek.averageTicketBySeller[name] ?? 0, prior: activeReport!.twoWeeksAgo.averageTicketBySeller[name] ?? 0 }))
   const noShowNames = report ? [...new Set([...Object.keys(report.noShows?.lastWeek.bySeller ?? {}), ...Object.keys(report.noShows?.twoWeeksAgo.bySeller ?? {})])].filter(teamSeller) : []
   const noShowRows = noShowNames.map((name) => ({ name, last: report!.noShows?.lastWeek.bySeller[name]?.rate ?? 0, prior: report!.noShows?.twoWeeksAgo.bySeller[name]?.rate ?? 0, total: report!.noShows?.lastWeek.bySeller[name]?.total ?? 0 }))
   const donut = `conic-gradient(${revenueProducts.map((item, index) => {
@@ -282,7 +285,7 @@ function Weekly() {
 
       <section className="lm-table-card"><div className="weekly-section-heading"><span>HubSpot sales quality</span><h2>Average ticket</h2><p>Paid HubSpot revenue divided by paid deals, compared with the prior week.</p></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>Selected week</th><th>Prior week</th><th>Change</th></tr></thead><tbody>{averageTicketRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{money.format(row.last)}</td><td>{money.format(row.prior)}</td><td className={row.last >= row.prior ? 'positive' : 'negative'}>{row.last >= row.prior ? '↗' : '↘'} {money.format(Math.abs(row.last - row.prior))}</td></tr>)}{activeReport && !averageTicketRows.length ? <tr><td colSpan={4}>No paid deals were found for this team.</td></tr> : null}</tbody></table></div></section>
 
-      <section className="lm-table-card"><div className="weekly-section-heading"><span>HubSpot appointments</span><h2>No-show report</h2><p>Meetings marked No show as a percentage of non-cancelled scheduled meetings.</p></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>Selected week</th><th>Prior week</th><th>Appointments reviewed</th></tr></thead><tbody>{noShowRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{row.last.toFixed(1)}%</td><td>{row.prior.toFixed(1)}%</td><td>{count.format(row.total)}</td></tr>)}{report && !noShowRows.length ? <tr><td colSpan={4}>No HubSpot appointments were found for this team.</td></tr> : null}</tbody></table></div></section>
+      <section className="lm-table-card"><div className="weekly-section-heading"><span>HubSpot appointments</span><h2>No-show report</h2><p>HubSpot No Show Rate: canceled meetings as a percentage of all meetings.</p></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>Selected week</th><th>Prior week</th><th>Appointments reviewed</th></tr></thead><tbody>{noShowRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{row.last.toFixed(1)}%</td><td>{row.prior.toFixed(1)}%</td><td>{count.format(row.total)}</td></tr>)}{report && !noShowRows.length ? <tr><td colSpan={4}>No HubSpot appointments were found for this team.</td></tr> : null}</tbody></table></div></section>
 
       <section className="weekly-major-points" aria-labelledby="weekly-major-points-title">
         <h2 id="weekly-major-points-title">Major Points</h2>
