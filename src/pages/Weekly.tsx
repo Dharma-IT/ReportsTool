@@ -14,14 +14,15 @@ const weeklySales = [
 ]
 
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 })
-type WeeklyPeriod = { fromDate: string; toDate: string; revenue: number; refunds: number; dealCount: number; bySeller: Record<string, number>; dealCountsBySeller: Record<string, number>; averageTicketBySeller: Record<string, number>; refundsBySeller: Record<string, number>; products: Record<string, WeeklyProductTotals> }
+type WeeklyPeriod = { fromDate: string; toDate: string; revenue: number; refunds: number; dealCount: number; newTreatments?: number; bySeller: Record<string, number>; dealCountsBySeller: Record<string, number>; averageTicketBySeller: Record<string, number>; refundsBySeller: Record<string, number>; products: Record<string, WeeklyProductTotals> }
 type WeeklyProductTotals = { revenue: number; units: number; bySeller: Record<string, { revenue: number; units: number }> }
 type LeadMetrics = { messages: number; calls: number; bookings: number; callSeconds: number }
 type LeadPeriod = { fromDate: string; toDate: string; agents: Array<LeadMetrics & { name: string }>; days: Array<LeadMetrics & { date: string }>; totals: LeadMetrics }
 type WeeklyActivityReport = { lastWeek: LeadPeriod; twoWeeksAgo: LeadPeriod }
 type WeeklyCallAgent = { name: string; aircallSeconds: number; aircallCalls: number; doxySeconds: number; doxyCalls: number }
 type WeeklyCalls = { lastWeek: { agents: WeeklyCallAgent[]; savedDays: number }; twoWeeksAgo: { agents: WeeklyCallAgent[]; savedDays: number } }
-type NoShowPeriod = { bySeller: Record<string, { total: number; noShows: number; rate: number }> }
+type NoShowBucket = { total: number; noShows: number; rate: number }
+type NoShowPeriod = { bySeller: Record<string, NoShowBucket>; byWeekday: Record<string, NoShowBucket> }
 type WeeklyReport = { timezone: string; lastWeek: WeeklyPeriod; twoWeeksAgo: WeeklyPeriod; source?: { selected: 'live' | 'saved'; prior: 'live' | 'saved' }; calls?: { sales: WeeklyCalls; cs: WeeklyCalls }; noShows?: { lastWeek: NoShowPeriod; twoWeeksAgo: NoShowPeriod }; insights: Array<{ kind: string; title: string; detail: string }>; leadManagement?: WeeklyActivityReport; customerCare?: WeeklyActivityReport }
 type WeeklyTeam = 'sales' | 'cs' | 'lm' | 'cc'
 
@@ -104,6 +105,39 @@ function duration(seconds: number) {
   return `${hours}h ${String(minutes).padStart(2, '0')}m`
 }
 
+function parsedDuration(value: string) {
+  const parts = value.trim().split(':').map(Number)
+  if (parts.some(Number.isNaN)) return 0
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  if (parts.length === 2) return parts[0] * 60 + parts[1]
+  return Math.max(0, parts[0] || 0)
+}
+
+function parseCsv(text: string) {
+  const rows: string[][] = []; let row: string[] = []; let field = ''; let quoted = false
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]
+    if (character === '"' && quoted && text[index + 1] === '"') { field += '"'; index += 1 }
+    else if (character === '"') quoted = !quoted
+    else if (character === ',' && !quoted) { row.push(field); field = '' }
+    else if ((character === '\n' || character === '\r') && !quoted) { if (character === '\r' && text[index + 1] === '\n') index += 1; row.push(field); if (row.some(Boolean)) rows.push(row); row = []; field = '' }
+    else field += character
+  }
+  row.push(field); if (row.some(Boolean)) rows.push(row)
+  return rows
+}
+
+function doxyDate(value: string) {
+  const normalized = value.trim()
+  const iso = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s]|$)/)
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`
+  const us = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})(?:[\s,]|$)/)
+  if (us) return `${us[3].length === 2 ? `20${us[3]}` : us[3]}-${us[1].padStart(2, '0')}-${us[2].padStart(2, '0')}`
+  const parsed = new Date(normalized); return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10)
+}
+
+const normalizedName = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+
 function TeamActivityReport({ report, error, loadingLabel, team }: { report: WeeklyReport | null; error: string; loadingLabel: string; team: 'lm' | 'cc' }) {
   const teamReport = team === 'lm' ? report?.leadManagement : report?.customerCare
   const teamName = team === 'lm' ? 'Lead Management' : 'Customer Care'
@@ -153,6 +187,15 @@ function Weekly() {
   const [selectedWeek, setSelectedWeek] = useState(latestCompletedMonday)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [loadSeconds, setLoadSeconds] = useState<number | null>(null)
+  const [doxyUpload, setDoxyUpload] = useState('')
+  const [isDoxyUploading, setIsDoxyUploading] = useState(false)
+  const doxyFileInput = useRef<HTMLInputElement>(null)
+  const loadReport = useCallback(async () => {
+    const response = await fetch(weeklyApiUrl(`/api/weekly-report?week=${encodeURIComponent(selectedWeek)}`))
+    const payload = await response.json()
+    if (!response.ok) throw new Error(payload.message ?? 'Unable to load the weekly report.')
+    setReport(payload as WeeklyReport)
+  }, [selectedWeek])
   useEffect(() => {
     setReport(null); setError(''); setLoadSeconds(null); setElapsedSeconds(0)
     const controller = new AbortController()
@@ -173,6 +216,39 @@ function Weekly() {
     })
     return () => { controller.abort(); window.clearInterval(timer) }
   }, [selectedWeek])
+
+  async function uploadWeeklyDoxy(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]; event.target.value = ''
+    if (!file || (activeTeam !== 'sales' && activeTeam !== 'cs')) return
+    setError(''); setDoxyUpload(''); setIsDoxyUploading(true)
+    try {
+      if (!file.name.toLowerCase().endsWith('.csv')) throw new Error('Please upload the Doxy meeting history as a CSV file.')
+      const records = parseCsv(await file.text())
+      const headers = records.shift()?.map((header) => header.replace(/^\uFEFF/, '').trim().toLowerCase()) ?? []
+      const findHeader = (...names: string[]) => headers.findIndex((header) => names.includes(header))
+      const dateIndex = findHeader('date', 'meeting date', 'start date', 'started at', 'start time')
+      const providerIndex = findHeader('provider name', 'provider', 'host name', 'host')
+      const durationIndex = findHeader('duration', 'call duration', 'meeting duration')
+      if ([dateIndex, providerIndex, durationIndex].some((index) => index < 0)) throw new Error('This CSV needs Date, Provider name, and Duration columns.')
+      const names = activeTeam === 'sales' ? salesWeeklyNames : csWeeklyNames
+      const aliases: Record<string, string> = { 'alejandra olaya': 'alejandra oyala', 'alice strelow': 'aline strelow', 'alice f': 'aline strelow', 'brayan zuluaga': 'brayam zuluaga' }
+      const metrics = new Map<string, { name: string; doxySeconds: number; doxyCalls: number }>()
+      const weekEnd = shiftDate(selectedWeek, 5)
+      for (const record of records) {
+        const date = doxyDate(record[dateIndex] ?? ''); if (!date || date < selectedWeek || date > weekEnd) continue
+        const rawName = normalizedName(record[providerIndex] ?? ''); const key = aliases[rawName] ?? rawName
+        const matchedName = names.find((name) => (aliases[normalizedName(name)] ?? normalizedName(name)) === key); if (!matchedName) continue
+        const metric = metrics.get(key) ?? { name: matchedName, doxySeconds: 0, doxyCalls: 0 }
+        metric.doxyCalls += 1; metric.doxySeconds += parsedDuration(record[durationIndex] ?? ''); metrics.set(key, metric)
+      }
+      if (!metrics.size) throw new Error(`No ${activeTeam === 'sales' ? 'Sales' : 'Customer Service'} provider calls were found in the selected week.`)
+      const response = await fetch(weeklyApiUrl(`/api/weekly-report?week=${encodeURIComponent(selectedWeek)}&team=${activeTeam}`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agents: [...metrics.values()] }) })
+      const payload = await response.json() as { message?: string; calls?: number }
+      if (!response.ok) throw new Error(payload.message ?? 'Unable to save weekly Doxy data.')
+      await loadReport(); setDoxyUpload(`${file.name}: ${payload.calls ?? 0} calls saved for this week.`)
+    } catch (uploadError) { setError(uploadError instanceof Error ? uploadError.message : 'Unable to read the Doxy CSV file.') }
+    finally { setIsDoxyUploading(false) }
+  }
 
   const estimatedSeconds = 50
   const etaSeconds = Math.max(0, estimatedSeconds - elapsedSeconds)
@@ -250,8 +326,19 @@ function Weekly() {
   const teamSeller = (name: string) => !isExcludedWeeklySeller(name) && (activeTeam === 'cs' ? isCsWeeklySeller(name) : isSalesWeeklySeller(name))
   const comparisonNames = activeReport ? [...new Set([...Object.keys(activeReport.lastWeek.bySeller), ...Object.keys(activeReport.twoWeeksAgo.bySeller)])].filter(teamSeller) : []
   const averageTicketRows = comparisonNames.map((name) => ({ name, last: activeReport!.lastWeek.averageTicketBySeller[name] ?? 0, prior: activeReport!.twoWeeksAgo.averageTicketBySeller[name] ?? 0 }))
-  const noShowNames = report ? [...new Set([...Object.keys(report.noShows?.lastWeek.bySeller ?? {}), ...Object.keys(report.noShows?.twoWeeksAgo.bySeller ?? {})])].filter(teamSeller) : []
-  const noShowRows = noShowNames.map((name) => ({ name, last: report!.noShows?.lastWeek.bySeller[name]?.rate ?? 0, prior: report!.noShows?.twoWeeksAgo.bySeller[name]?.rate ?? 0, total: report!.noShows?.lastWeek.bySeller[name]?.total ?? 0 }))
+  const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  const noShowWeekdays = weekdays.map((name) => ({ name, last: report?.noShows?.lastWeek.byWeekday?.[name]?.rate ?? 0, prior: report?.noShows?.twoWeeksAgo.byWeekday?.[name]?.rate ?? 0 }))
+  const performanceRows = comparisonNames.map((name) => {
+    const injectionsLast = activeReport?.lastWeek.products['Weight Loss Injections']?.bySeller[name]?.units ?? 0
+    const injectionsPrior = activeReport?.twoWeeksAgo.products['Weight Loss Injections']?.bySeller[name]?.units ?? 0
+    const attendedLast = Math.max(0, (report?.noShows?.lastWeek.bySeller[name]?.total ?? 0) - (report?.noShows?.lastWeek.bySeller[name]?.noShows ?? 0))
+    const attendedPrior = Math.max(0, (report?.noShows?.twoWeeksAgo.bySeller[name]?.total ?? 0) - (report?.noShows?.twoWeeksAgo.bySeller[name]?.noShows ?? 0))
+    return { name, last: attendedLast ? injectionsLast / attendedLast * 100 : 0, prior: attendedPrior ? injectionsPrior / attendedPrior * 100 : 0 }
+  })
+  const averagePerformance = (key: 'last' | 'prior') => performanceRows.length ? performanceRows.reduce((sum, row) => sum + row[key], 0) / performanceRows.length : 0
+  const performanceChartRows = [...performanceRows, { name: 'Average', last: averagePerformance('last'), prior: averagePerformance('prior') }]
+  const newTreatments = report?.lastWeek.newTreatments ?? 0
+  const priorNewTreatments = report?.twoWeeksAgo.newTreatments ?? 0
   const donut = `conic-gradient(${revenueProducts.map((item, index) => {
     const start = revenueProducts.slice(0, index).reduce((sum, current) => sum + current.share, 0)
     return `${item.color} ${start}% ${start + item.share}%`
@@ -265,11 +352,13 @@ function Weekly() {
         <button type="button" className={activeTeam === 'cs' ? 'active' : ''} onClick={() => setActiveTeam('cs')}><b>CS</b><span>Customer Service<small>CS team report</small></span></button>
         <button type="button" className={activeTeam === 'lm' ? 'active' : ''} onClick={() => setActiveTeam('lm')}><b>LM</b><span>Lead Management<small>LM team report</small></span></button>
         <button type="button" className={activeTeam === 'cc' ? 'active' : ''} onClick={() => setActiveTeam('cc')}><b>CC</b><span>CC Report<small>Customer Care</small></span></button>
+        {(activeTeam === 'sales' || activeTeam === 'cs') ? <div className="weekly-doxy-upload"><span>Doxy history</span><input ref={doxyFileInput} type="file" accept=".csv,text/csv" onChange={uploadWeeklyDoxy} /><button type="button" onClick={() => doxyFileInput.current?.click()} disabled={isDoxyUploading}><b>CSV</b><span>{isDoxyUploading ? 'Uploading…' : 'Upload Doxy'}</span></button><small>Applies to the selected week and team.</small></div> : null}
       </aside>
       <div className="weekly-content">
       <div className="weekly-week-picker"><label>Report week<select value={selectedWeek} onChange={(event) => setSelectedWeek(event.target.value)}>{weekOptions.map((week) => <option value={week} key={week}>{weekLabel(week)}</option>)}</select></label>{report ? <span>{report.source?.selected === 'saved' ? 'Saved weekly data' : 'Fetched live and saved'} · comparison {report.source?.prior === 'saved' ? 'loaded from database' : 'fetched live and saved'}</span> : null}</div>
       {!report && !error ? <section className="weekly-load-status" aria-live="polite"><div><span className="weekly-load-spinner" aria-hidden="true" /><p><strong>Loading all weekly reports</strong><small>{loadingLabel}</small></p><b>ETA {etaSeconds ? `~${etaSeconds}s` : 'soon'}</b></div><i><span style={{ width: `${Math.min(94, Math.max(4, elapsedSeconds / estimatedSeconds * 100))}%` }} /></i><small>Fetching Sales, Customer Service, Lead Management, and Customer Care from HubSpot at a rate-safe pace.</small></section> : null}
       {report && loadSeconds !== null ? <div className="weekly-load-complete">✓ All weekly reports loaded in {loadSeconds}s</div> : null}
+      {doxyUpload ? <div className="daily-success" role="status">Doxy uploaded: {doxyUpload}</div> : null}
       {activeTeam === 'lm' || activeTeam === 'cc' ? <TeamActivityReport report={report} error={error} loadingLabel={loadingLabel} team={activeTeam} /> : <>
       <header className="weekly-heading">
           <div><p className="eyebrow">Weekly {activeTeam === 'sales' ? 'sales' : 'customer service'} report</p><h1>{activeTeam === 'sales' ? 'Sales' : 'Customer Service'} performance</h1><p>{activeReport ? `${activeReport.lastWeek.fromDate} through ${activeReport.lastWeek.toDate} · Eastern Time` : 'Loading the latest completed HubSpot week…'}</p></div>
@@ -285,7 +374,11 @@ function Weekly() {
 
       <section className="lm-table-card"><div className="weekly-section-heading"><span>HubSpot sales quality</span><h2>Average ticket</h2><p>Paid HubSpot revenue divided by paid deals, compared with last week.</p></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>This week</th><th>Last week</th><th>Change</th></tr></thead><tbody>{averageTicketRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{money.format(row.last)}</td><td>{money.format(row.prior)}</td><td className={row.last >= row.prior ? 'positive' : 'negative'}>{row.last >= row.prior ? '↗' : '↘'} {money.format(Math.abs(row.last - row.prior))}</td></tr>)}{activeReport && !averageTicketRows.length ? <tr><td colSpan={4}>No paid deals were found for this team.</td></tr> : null}</tbody></table></div></section>
 
-      <section className="lm-table-card"><div className="weekly-section-heading"><span>HubSpot appointments</span><h2>No-show report</h2><p>HubSpot No Show Rate: canceled meetings as a percentage of all meetings.</p></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>This week</th><th>Last week</th><th>Appointments reviewed</th></tr></thead><tbody>{noShowRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{row.last.toFixed(1)}%</td><td>{row.prior.toFixed(1)}%</td><td>{count.format(row.total)}</td></tr>)}{report && !noShowRows.length ? <tr><td colSpan={4}>No HubSpot appointments were found for this team.</td></tr> : null}</tbody></table></div></section>
+      <section className="weekly-metric-card"><div className="weekly-section-heading"><span>HubSpot appointments</span><h2>No-show by weekday</h2><p>Canceled meetings as a percentage of all scheduled meetings.</p></div><div className="weekly-chart-legend"><span><i className="last" />This week</span><span><i className="average" />Last week</span></div><div className="weekly-percent-chart">{noShowWeekdays.map((row) => <div className="weekly-percent-group" key={row.name}><div><span className="last" style={{ height: `${row.last}%` }}><em>{row.last.toFixed(0)}%</em></span><span className="prior" style={{ height: `${row.prior}%` }}><em>{row.prior.toFixed(0)}%</em></span></div><strong>{row.name}</strong></div>)}</div></section>
+
+      <section className="weekly-metric-card"><div className="weekly-section-heading"><span>Sales efficiency</span><h2>Performance</h2><p>Weight Loss Injections Sold divided by appointments attended per agent.</p></div><div className="weekly-chart-legend"><span><i className="last" />This week</span><span><i className="average" />Last week</span></div><div className="weekly-percent-chart">{performanceChartRows.map((row) => <div className="weekly-percent-group" key={row.name}><div><span className="last" style={{ height: `${Math.min(100, row.last)}%` }}><em>{row.last.toFixed(1)}%</em></span><span className="prior" style={{ height: `${Math.min(100, row.prior)}%` }}><em>{row.prior.toFixed(1)}%</em></span></div><strong>{row.name}</strong></div>)}</div></section>
+
+      <section className="weekly-new-treatments"><div><span>New treatments</span><h2>{count.format(newTreatments)} injections</h2><p>{Math.abs(newTreatments - priorNewTreatments)} {newTreatments >= priorNewTreatments ? 'more' : 'fewer'} than last week, when the team reached {count.format(priorNewTreatments)} injections.</p></div><aside><strong>Weight Loss Injections only</strong><p>Repurchases and Customer Service sales are excluded. NAD+, supplements, and other products are not counted.</p></aside></section>
 
       <section className="weekly-major-points" aria-labelledby="weekly-major-points-title">
         <h2 id="weekly-major-points-title">Major Points</h2>
@@ -357,4 +450,4 @@ function Weekly() {
 }
 
 export default Weekly
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'

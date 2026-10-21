@@ -1094,7 +1094,10 @@ function weeklyProductCategory(name: string) {
   const product = name.toLowerCase()
   if (product.includes('slim boost')) return 'Slim Boost'
   if (product.includes('nutrition')) return 'Nutritional Plans'
-  if (product.includes('nad+') || /\bnad\b/.test(product)) return 'NAD+'
+  // The clinic's NAD+ metric is injection-only. Do not mix in similarly named
+  // oral supplements from HubSpot line items.
+  if ((product.includes('nad+') || /\bnad\b/.test(product)) &&
+      !['capsule', 'supplement', 'tablet', 'troche', 'gummy', 'oral'].some((term) => product.includes(term))) return 'NAD+'
   if (product.includes('sermorelin')) return 'Sermorelin'
   if (product.includes('ghk')) return 'GHK-Cu Troches'
   if (product.includes('glutathione')) return 'Glutathione'
@@ -1124,6 +1127,20 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
     const payload = await hubSpotPost<{ results?: HubSpotLineItem[] }>('/crm/v3/objects/line_items/batch/read', { inputs: batch.map((id) => ({ id })), properties: ['name', 'quantity', 'amount', 'price'] }, token)
     for (const item of payload.results ?? []) items.set(item.id, item)
   }
+  const contactAssociations: Array<{ from: { id: string }; to: Array<{ toObjectId: string | number }> }> = []
+  for (let index = 0; index < deals.length; index += 100) {
+    const batch = deals.slice(index, index + 100)
+    const payload = await hubSpotPost<{ results?: Array<{ from: { id: string }; to: Array<{ toObjectId: string | number }> }> }>('/crm/v4/associations/deals/contacts/batch/read', { inputs: batch.map((deal) => ({ id: deal.id })) }, token)
+    contactAssociations.push(...(payload.results ?? []))
+  }
+  const contactIds = [...new Set(contactAssociations.flatMap((row) => row.to ?? []).map((contact) => String(contact.toObjectId)))]
+  const contactSources = new Map<string, string | null | undefined>()
+  for (let index = 0; index < contactIds.length; index += 100) {
+    const batch = contactIds.slice(index, index + 100)
+    const payload = await hubSpotPost<{ results?: Array<{ id: string; properties: { source?: string | null } }> }>('/crm/v3/objects/contacts/batch/read', { properties: ['source'], inputs: batch.map((id) => ({ id })) }, token)
+    for (const contact of payload.results ?? []) contactSources.set(String(contact.id), contact.properties.source)
+  }
+  const dealSources = new Map(contactAssociations.map((row) => [String(row.from.id), (row.to ?? []).map((contact) => contactSources.get(String(contact.toObjectId))).find(Boolean)]))
   const bySeller: Record<string, number> = {}
   const dealCountsBySeller: Record<string, number> = {}
   const averageTicketBySeller: Record<string, number> = {}
@@ -1132,6 +1149,7 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
   const products: Record<string, WeeklyProductTotals> = {}
   let revenue = 0
   let refunds = 0
+  let newTreatments = 0
   for (const deal of deals) {
     const seller = ownerNames.get(deal.properties.hubspot_owner_id ?? '') || 'Unassigned'
     const rawAmount = deal.properties.amount
@@ -1148,6 +1166,8 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
     refundsBySeller[seller] = roundMoney((refundsBySeller[seller] ?? 0) + dealRefund)
     const associated = (dealToItems.get(deal.id) ?? []).map((id) => items.get(id)).filter(Boolean) as HubSpotLineItem[]
     const parsed = associated.length ? associated.map((item) => ({ name: item.properties.name ?? '', quantity: finiteNumber(item.properties.quantity, 1), amount: finiteNumber(item.properties.amount, finiteNumber(item.properties.price) * finiteNumber(item.properties.quantity, 1)) })) : parseDailyCsDealDescription(deal.properties.deal_description_items__test ?? '').map((item) => ({ ...item, amount: 0 }))
+    const isSalesOwner = DAILY_SALES_AGENTS.some((agent) => agent.aliases.some((alias) => namesMatch(alias, seller)))
+    const isRepurchase = normalizeAppointmentSalesSource(dealSources.get(String(deal.id))) === 'repurchase'
     for (const item of parsed) {
       const category = weeklyProductCategory(item.name)
       if (!category) continue
@@ -1159,9 +1179,10 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
       sellerRow.units += item.quantity
       row.bySeller[seller] = sellerRow
       products[category] = row
+      if (category === 'Weight Loss Injections' && isSalesOwner && !isRepurchase) newTreatments += item.quantity
     }
   }
-  return { fromDate, toDate, revenue: roundMoney(revenue), refunds: roundMoney(refunds), dealCount: deals.length, bySeller, dealCountsBySeller, averageTicketBySeller, refundsBySeller, products }
+  return { fromDate, toDate, revenue: roundMoney(revenue), refunds: roundMoney(refunds), dealCount: deals.length, bySeller, dealCountsBySeller, averageTicketBySeller, refundsBySeller, products, newTreatments }
 }
 
 async function fetchWeeklyNoShows(fromDate: string, toDate: string, token: string) {
@@ -1281,6 +1302,7 @@ type StoredWeeklyPeriod = {
   leadManagement: Awaited<ReturnType<typeof fetchWeeklyLeadManagementPeriod>>
   customerCare: Awaited<ReturnType<typeof fetchWeeklyLeadManagementPeriod>>
   noShows: Awaited<ReturnType<typeof fetchWeeklyNoShows>>
+  doxy?: Partial<Record<'sales' | 'cs', Array<{ name: string; doxySeconds: number; doxyCalls: number }>>>
 }
 
 async function loadStoredWeeklyPeriod(weekStart: string, supabaseUrl: string, serviceRoleKey: string) {
@@ -1292,13 +1314,13 @@ async function loadStoredWeeklyPeriod(weekStart: string, supabaseUrl: string, se
 }
 
 async function upgradeStoredWeeklyPeriod(stored: StoredWeeklyPeriod, from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string) {
-  if (stored.version >= 3) return stored
+  if (stored.version >= 4) return stored
   const noShows = await fetchWeeklyNoShows(from, to, hubSpotToken)
-  const hubSpot = stored.hubSpot
+  const hubSpot = stored.version >= 3 ? await fetchWeeklyHubSpotPeriod(from, to, hubSpotToken) : stored.hubSpot
   if (!hubSpot.averageTicketBySeller) {
     hubSpot.averageTicketBySeller = Object.fromEntries(Object.entries(hubSpot.bySeller).map(([name, revenue]) => [name, roundMoney(revenue / Math.max(1, hubSpot.dealCountsBySeller?.[name] ?? 0))]))
   }
-  const upgraded: StoredWeeklyPeriod = { ...stored, version: 3, hubSpot, noShows }
+  const upgraded: StoredWeeklyPeriod = { ...stored, version: 4, hubSpot, noShows }
   await supabaseRest(supabaseUrl, serviceRoleKey, 'weekly_reports?on_conflict=week_start', {
     method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
     body: JSON.stringify({ week_start: from, week_end: shiftIsoDate(from, 6), timezone: 'America/New_York', report_data: upgraded, fetched_at: new Date().toISOString() }),
@@ -1313,7 +1335,7 @@ async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken:
     fetchWeeklyLeadManagementPeriod(from, to, hubSpotToken, WEEKLY_CC_AGENTS),
     fetchWeeklyNoShows(from, to, hubSpotToken),
   ])
-  const reportData: StoredWeeklyPeriod = { version: 3, hubSpot, leadManagement, customerCare, noShows }
+  const reportData: StoredWeeklyPeriod = { version: 4, hubSpot, leadManagement, customerCare, noShows }
   if (supabaseUrl && serviceRoleKey) {
     await supabaseRest(supabaseUrl, serviceRoleKey, 'weekly_reports?on_conflict=week_start', {
       method: 'POST',
@@ -1344,6 +1366,22 @@ async function loadWeeklyCallTotals(from: string, to: string, team: 'sales' | 'c
     agents.set(name, row)
   }
   return { agents: [...agents.values()], savedDays: exactRange ? 7 : new Set(sourceRows.map((row) => row.from_date)).size }
+}
+
+function applyWeeklyDoxyOverride(
+  calls: Awaited<ReturnType<typeof loadWeeklyCallTotals>>,
+  override: Array<{ name: string; doxySeconds: number; doxyCalls: number }> | undefined,
+) {
+  if (!override) return calls
+  const rows = new Map(calls.agents.map((agent) => [agent.name.toLowerCase(), { ...agent, doxySeconds: 0, doxyCalls: 0 }]))
+  for (const uploaded of override) {
+    const key = uploaded.name.toLowerCase()
+    const row = rows.get(key) ?? { name: uploaded.name, aircallSeconds: 0, aircallCalls: 0, doxySeconds: 0, doxyCalls: 0 }
+    row.doxySeconds = Math.max(0, finiteNumber(String(uploaded.doxySeconds)))
+    row.doxyCalls = Math.max(0, finiteNumber(String(uploaded.doxyCalls)))
+    rows.set(key, row)
+  }
+  return { ...calls, agents: [...rows.values()] }
 }
 
 function normalizeAppointmentSalesSource(value: string | null | undefined) {
@@ -1865,6 +1903,23 @@ function agentReportApi(
           }
           const selected = { from: selectedStart, to: shiftIsoDate(selectedStart, 5) }
           const prior = { from: shiftIsoDate(selectedStart, -7), to: shiftIsoDate(selectedStart, -2) }
+          if (request.method === 'POST') {
+            if (!supabaseUrl || !supabaseServiceRoleKey) return sendJson(response, 500, { message: 'Weekly report storage is not configured.' })
+            const team = requestUrl.searchParams.get('team') === 'cs' ? 'cs' : 'sales'
+            const body = await readJsonRequest<{ agents?: Array<{ name: string; doxySeconds: number; doxyCalls: number }> }>(request)
+            const agents = (body.agents ?? []).filter((agent) => agent.name.trim()).map((agent) => ({
+              name: agent.name.trim(), doxySeconds: Math.max(0, finiteNumber(String(agent.doxySeconds))), doxyCalls: Math.max(0, finiteNumber(String(agent.doxyCalls))),
+            }))
+            if (!agents.length) return sendJson(response, 400, { message: 'No matching Doxy calls were supplied.' })
+            let stored = await loadStoredWeeklyPeriod(selected.from, supabaseUrl, supabaseServiceRoleKey)
+            if (!stored) stored = await buildAndStoreWeeklyPeriod(selected.from, selected.to, hubSpotToken, supabaseUrl, supabaseServiceRoleKey)
+            stored.doxy = { ...(stored.doxy ?? {}), [team]: agents }
+            await supabaseRest(supabaseUrl, supabaseServiceRoleKey, 'weekly_reports?on_conflict=week_start', {
+              method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+              body: JSON.stringify({ week_start: selected.from, week_end: shiftIsoDate(selected.from, 6), timezone: 'America/New_York', report_data: stored, fetched_at: new Date().toISOString() }),
+            })
+            return sendJson(response, 200, { saved: true, calls: agents.reduce((sum, agent) => sum + agent.doxyCalls, 0) })
+          }
           let selectedStored = await loadStoredWeeklyPeriod(selected.from, supabaseUrl, supabaseServiceRoleKey)
           let priorStored = await loadStoredWeeklyPeriod(prior.from, supabaseUrl, supabaseServiceRoleKey)
           ;[selectedStored, priorStored] = await Promise.all([
@@ -1890,12 +1945,16 @@ function agentReportApi(
           const leadManagementTwoWeeksAgo = priorStored.leadManagement
           const customerCareLastWeek = selectedStored.customerCare
           const customerCareTwoWeeksAgo = priorStored.customerCare
-          const [salesCalls, salesPriorCalls, csCalls, csPriorCalls] = await Promise.all([
+          let [salesCalls, salesPriorCalls, csCalls, csPriorCalls] = await Promise.all([
             loadWeeklyCallTotals(selected.from, selected.to, 'sales', supabaseUrl, supabaseServiceRoleKey),
             loadWeeklyCallTotals(prior.from, prior.to, 'sales', supabaseUrl, supabaseServiceRoleKey),
             loadWeeklyCallTotals(selected.from, selected.to, 'cs', supabaseUrl, supabaseServiceRoleKey),
             loadWeeklyCallTotals(prior.from, prior.to, 'cs', supabaseUrl, supabaseServiceRoleKey),
           ])
+          salesCalls = applyWeeklyDoxyOverride(salesCalls, selectedStored.doxy?.sales)
+          salesPriorCalls = applyWeeklyDoxyOverride(salesPriorCalls, priorStored.doxy?.sales)
+          csCalls = applyWeeklyDoxyOverride(csCalls, selectedStored.doxy?.cs)
+          csPriorCalls = applyWeeklyDoxyOverride(csPriorCalls, priorStored.doxy?.cs)
           const revenueDelta = roundMoney(lastWeek.revenue - twoWeeksAgo.revenue)
           const lastUnits = Object.values(lastWeek.products).reduce((sum, product) => sum + product.units, 0)
           const priorUnits = Object.values(twoWeeksAgo.products).reduce((sum, product) => sum + product.units, 0)
