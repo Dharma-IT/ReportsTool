@@ -298,9 +298,12 @@ function Weekly() {
   const sellerSales = useMemo(() => {
     if (!activeReport) return weeklySales
     const names = [...new Set([...Object.keys(activeReport.lastWeek.bySeller), ...Object.keys(activeReport.twoWeeksAgo.bySeller)])].sort((a, b) => (activeReport.lastWeek.bySeller[b] ?? 0) - (activeReport.lastWeek.bySeller[a] ?? 0)).slice(0, 8)
-    return names.map((name) => { const lastWeek = activeReport.lastWeek.bySeller[name] ?? 0; const twoWeeksAgo = activeReport.twoWeeksAgo.bySeller[name] ?? 0; return { name, lastWeek, twoWeeksAgo, average: (lastWeek + twoWeeksAgo) / 2, highest: Math.max(lastWeek, twoWeeksAgo), lastSales: 0, priorSales: 0 } })
+    return names.map((name) => ({ name, lastWeek: activeReport.lastWeek.bySeller[name] ?? 0, twoWeeksAgo: activeReport.twoWeeksAgo.bySeller[name] ?? 0 }))
   }, [activeReport])
-  const liveChartMaximum = Math.max(1000, Math.ceil(Math.max(...sellerSales.flatMap((seller) => [seller.lastWeek, seller.twoWeeksAgo, seller.highest]), 0) / 5000) * 5000)
+  const liveChartMaximum = Math.max(1000, Math.ceil(Math.max(...sellerSales.flatMap((seller) => [seller.lastWeek, seller.twoWeeksAgo]), 0) / 5000) * 5000)
+  const revenueDelta = activeReport ? activeReport.lastWeek.revenue - activeReport.twoWeeksAgo.revenue : 0
+  const revenueDirection = revenueDelta > 0 ? 'increased' : revenueDelta < 0 ? 'decreased' : 'stayed the same'
+  const revenueArrow = revenueDelta > 0 ? '↗' : revenueDelta < 0 ? '↘' : '→'
   const comparisonProducts = useMemo(() => {
     if (!activeReport) return productComparisons
     return ['Slim Boost', 'Nutritional Plans', 'NAD+', 'Sermorelin', 'GHK-Cu Troches', 'Glutathione'].map((title): ProductComparison => {
@@ -412,21 +415,19 @@ function Weekly() {
 
       <section className="weekly-profit-card" aria-labelledby="weekly-profit-title">
         <aside className="weekly-profit-copy">
-          <div><h2 id="weekly-profit-title">Profit</h2><strong>Weekly sales growth</strong></div>
-          <div className="weekly-growth-note"><span aria-hidden="true">↗</span><strong>We increased in revenue<br />by $7,330 this week</strong><p>We reached $44,901 in revenue this week, compared to $37,571 last week.</p></div>
+          <div><h2 id="weekly-profit-title">Revenue</h2><strong>By seller</strong></div>
+          <div className="weekly-growth-note"><span aria-hidden="true">{revenueArrow}</span><strong>{activeReport ? <>Revenue {revenueDirection}{revenueDelta ? <><br />by {money.format(Math.abs(revenueDelta))}</> : null}</> : 'Loading weekly revenue…'}</strong><p>{activeReport ? `We reached ${money.format(activeReport.lastWeek.revenue)} in revenue this week, compared to ${money.format(activeReport.twoWeeksAgo.revenue)} last week.` : 'Comparing the selected team’s paid HubSpot deals.'}</p></div>
         </aside>
         <div className="weekly-chart-area">
-          <div className="weekly-chart-legend"><span><i className="last" />This week</span><span><i className="prior" />Last week</span><span><i className="average" />Average</span><span><i className="highest" />Highest</span></div>
+          <div className="weekly-chart-legend"><span><i className="last" />This week</span><span><i className="prior" />Last week</span></div>
           <div className="weekly-chart">
             <div className="weekly-y-axis">{Array.from({ length: 8 }, (_, index) => Math.round(liveChartMaximum * (7 - index) / 7)).map((tick) => <span key={tick} style={{ bottom: `${(tick / liveChartMaximum) * 100}%` }}>{money.format(tick)}</span>)}</div>
             <div className="weekly-chart-plot">
               <div className="weekly-grid-lines">{Array.from({ length: 8 }, (_, index) => index).map((tick) => <i key={tick} style={{ bottom: `${(tick / 7) * 100}%` }} />)}</div>
               {sellerSales.map((agent) => <div className="weekly-bar-group" key={agent.name}>
                 <div className="weekly-bars">
-                  <span className="last" style={{ height: `${(agent.lastWeek / liveChartMaximum) * 100}%` }} />
-                  <span className="prior" style={{ height: `${(agent.twoWeeksAgo / liveChartMaximum) * 100}%` }} />
-                  <span className="average" style={{ height: `${(agent.average / liveChartMaximum) * 100}%` }} />
-                  <span className="highest" style={{ height: `${(agent.highest / liveChartMaximum) * 100}%` }} />
+                  <span className="last" style={{ width: '50%', height: `${(agent.lastWeek / liveChartMaximum) * 100}%` }} />
+                  <span className="prior" style={{ width: '50%', height: `${(agent.twoWeeksAgo / liveChartMaximum) * 100}%` }} />
                 </div>
                 <strong>{agent.name}</strong>
               </div>)}
