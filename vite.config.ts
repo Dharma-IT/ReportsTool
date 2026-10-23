@@ -1089,6 +1089,11 @@ async function fetchDailyCsHubSpot(
 
 type WeeklyProductTotals = { revenue: number; units: number; bySeller: Record<string, { revenue: number; units: number }> }
 type WeeklyNoShowBucket = { total: number; noShows: number; rate: number }
+type WeeklyCsSourceMetrics = {
+  abandonedCart: Record<string, number>
+  repurchaseList: Record<string, number>
+  repurchaseNoAnswer: Record<string, number>
+}
 
 function weeklyProductCategory(name: string) {
   const product = name.toLowerCase()
@@ -1211,6 +1216,47 @@ async function fetchWeeklyNoShows(fromDate: string, toDate: string, token: strin
   return { fromDate, toDate, bySeller, byWeekday }
 }
 
+async function fetchWeeklyCsSourceMetrics(fromDate: string, toDate: string, token: string): Promise<WeeklyCsSourceMetrics> {
+  const from = getNewYorkUnixDayRange(fromDate).from * 1000
+  const to = getNewYorkUnixDayRange(toDate).to * 1000
+  const calls = await searchAllHubSpotObjects<{ id: string; properties: { hs_call_status?: string | null; hubspot_owner_id?: string | null } }>('calls', {
+    filterGroups: [{ filters: [{ propertyName: 'hs_timestamp', operator: 'GTE', value: String(from) }, { propertyName: 'hs_timestamp', operator: 'LTE', value: String(to) }] }],
+    properties: ['hs_timestamp', 'hs_call_status', 'hubspot_owner_id'],
+  }, token)
+  const owners = await fetchHubSpotOwners(token)
+  const ownerNames = new Map(owners.map((owner) => [owner.id, `${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim()]))
+  const csCalls = calls.filter((call) => {
+    const owner = ownerNames.get(call.properties.hubspot_owner_id ?? '') ?? ''
+    return DAILY_CS_AGENTS.some((agent) => agent.aliases.some((alias) => namesMatch(alias, owner)))
+  })
+  const callToDeals = new Map<string, string[]>()
+  for (let index = 0; index < csCalls.length; index += 100) {
+    const batch = csCalls.slice(index, index + 100)
+    const payload = await hubSpotPost<{ results?: Array<{ from: { id: string }; to: Array<{ toObjectId: string | number }> }> }>('/crm/v4/associations/calls/deals/batch/read', { inputs: batch.map((call) => ({ id: call.id })) }, token)
+    for (const row of payload.results ?? []) callToDeals.set(String(row.from.id), (row.to ?? []).map((deal) => String(deal.toObjectId)))
+  }
+  const dealIds = [...new Set([...callToDeals.values()].flat())]
+  const dealSources = new Map<string, string>()
+  for (let index = 0; index < dealIds.length; index += 100) {
+    const batch = dealIds.slice(index, index + 100)
+    const payload = await hubSpotPost<{ results?: Array<{ id: string; properties: { imported_source?: string | null } }> }>('/crm/v3/objects/deals/batch/read', { inputs: batch.map((id) => ({ id })), properties: ['imported_source'] }, token)
+    for (const deal of payload.results ?? []) dealSources.set(String(deal.id), String(deal.properties.imported_source ?? '').trim().toLowerCase())
+  }
+  const metrics: WeeklyCsSourceMetrics = { abandonedCart: {}, repurchaseList: {}, repurchaseNoAnswer: {} }
+  for (const call of csCalls) {
+    const owner = ownerNames.get(call.properties.hubspot_owner_id ?? '') || 'Unassigned'
+    const sources = (callToDeals.get(call.id) ?? []).map((id) => dealSources.get(id) ?? '')
+    const abandoned = sources.some((source) => source === 'abandoned cart')
+    const repurchase = sources.some((source) => source === 'repurchase list')
+    if (abandoned) metrics.abandonedCart[owner] = (metrics.abandonedCart[owner] ?? 0) + 1
+    if (repurchase) {
+      metrics.repurchaseList[owner] = (metrics.repurchaseList[owner] ?? 0) + 1
+      if (String(call.properties.hs_call_status ?? '').toUpperCase() === 'NO_ANSWER') metrics.repurchaseNoAnswer[owner] = (metrics.repurchaseNoAnswer[owner] ?? 0) + 1
+    }
+  }
+  return metrics
+}
+
 type WeeklyLeadAgent = { name: string; messages: number; calls: number; bookings: number; callSeconds: number }
 
 async function fetchWeeklyLeadManagementPeriod(fromDate: string, toDate: string, token: string, teamAgents = WEEKLY_LM_AGENTS) {
@@ -1302,6 +1348,7 @@ type StoredWeeklyPeriod = {
   leadManagement: Awaited<ReturnType<typeof fetchWeeklyLeadManagementPeriod>>
   customerCare: Awaited<ReturnType<typeof fetchWeeklyLeadManagementPeriod>>
   noShows: Awaited<ReturnType<typeof fetchWeeklyNoShows>>
+  csSourceMetrics: Awaited<ReturnType<typeof fetchWeeklyCsSourceMetrics>>
   doxy?: Partial<Record<'sales' | 'cs', Array<{ name: string; doxySeconds: number; doxyCalls: number }>>>
 }
 
@@ -1314,13 +1361,13 @@ async function loadStoredWeeklyPeriod(weekStart: string, supabaseUrl: string, se
 }
 
 async function upgradeStoredWeeklyPeriod(stored: StoredWeeklyPeriod, from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string) {
-  if (stored.version >= 4) return stored
-  const noShows = await fetchWeeklyNoShows(from, to, hubSpotToken)
+  if (stored.version >= 5) return stored
+  const [noShows, csSourceMetrics] = await Promise.all([fetchWeeklyNoShows(from, to, hubSpotToken), fetchWeeklyCsSourceMetrics(from, to, hubSpotToken)])
   const hubSpot = stored.version >= 3 ? await fetchWeeklyHubSpotPeriod(from, to, hubSpotToken) : stored.hubSpot
   if (!hubSpot.averageTicketBySeller) {
     hubSpot.averageTicketBySeller = Object.fromEntries(Object.entries(hubSpot.bySeller).map(([name, revenue]) => [name, roundMoney(revenue / Math.max(1, hubSpot.dealCountsBySeller?.[name] ?? 0))]))
   }
-  const upgraded: StoredWeeklyPeriod = { ...stored, version: 4, hubSpot, noShows }
+  const upgraded: StoredWeeklyPeriod = { ...stored, version: 5, hubSpot, noShows, csSourceMetrics }
   await supabaseRest(supabaseUrl, serviceRoleKey, 'weekly_reports?on_conflict=week_start', {
     method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
     body: JSON.stringify({ week_start: from, week_end: shiftIsoDate(from, 6), timezone: 'America/New_York', report_data: upgraded, fetched_at: new Date().toISOString() }),
@@ -1329,13 +1376,14 @@ async function upgradeStoredWeeklyPeriod(stored: StoredWeeklyPeriod, from: strin
 }
 
 async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string) {
-  const [hubSpot, leadManagement, customerCare, noShows] = await Promise.all([
+  const [hubSpot, leadManagement, customerCare, noShows, csSourceMetrics] = await Promise.all([
     fetchWeeklyHubSpotPeriod(from, to, hubSpotToken),
     fetchWeeklyLeadManagementPeriod(from, to, hubSpotToken),
     fetchWeeklyLeadManagementPeriod(from, to, hubSpotToken, WEEKLY_CC_AGENTS),
     fetchWeeklyNoShows(from, to, hubSpotToken),
+    fetchWeeklyCsSourceMetrics(from, to, hubSpotToken),
   ])
-  const reportData: StoredWeeklyPeriod = { version: 4, hubSpot, leadManagement, customerCare, noShows }
+  const reportData: StoredWeeklyPeriod = { version: 5, hubSpot, leadManagement, customerCare, noShows, csSourceMetrics }
   if (supabaseUrl && serviceRoleKey) {
     await supabaseRest(supabaseUrl, serviceRoleKey, 'weekly_reports?on_conflict=week_start', {
       method: 'POST',
@@ -1965,6 +2013,7 @@ function agentReportApi(
             leadManagement: { lastWeek: leadManagementLastWeek, twoWeeksAgo: leadManagementTwoWeeksAgo },
             customerCare: { lastWeek: customerCareLastWeek, twoWeeksAgo: customerCareTwoWeeksAgo },
             noShows: { lastWeek: selectedStored.noShows, twoWeeksAgo: priorStored.noShows },
+            csSourceMetrics: { lastWeek: selectedStored.csSourceMetrics, twoWeeksAgo: priorStored.csSourceMetrics },
             calls: { sales: { lastWeek: salesCalls, twoWeeksAgo: salesPriorCalls }, cs: { lastWeek: csCalls, twoWeeksAgo: csPriorCalls } },
             insights: [
               { kind: revenueDelta >= 0 ? 'up' : 'down', title: `Revenue ${revenueDelta >= 0 ? 'increased' : 'decreased'} by $${weeklyMoney(Math.abs(revenueDelta))} this week`, detail: `Revenue was $${weeklyMoney(lastWeek.revenue)} versus $${weeklyMoney(twoWeeksAgo.revenue)} last week.` },

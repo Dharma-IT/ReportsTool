@@ -23,7 +23,8 @@ type WeeklyCallAgent = { name: string; aircallSeconds: number; aircallCalls: num
 type WeeklyCalls = { lastWeek: { agents: WeeklyCallAgent[]; savedDays: number }; twoWeeksAgo: { agents: WeeklyCallAgent[]; savedDays: number } }
 type NoShowBucket = { total: number; noShows: number; rate: number }
 type NoShowPeriod = { bySeller: Record<string, NoShowBucket>; byWeekday: Record<string, NoShowBucket> }
-type WeeklyReport = { timezone: string; lastWeek: WeeklyPeriod; twoWeeksAgo: WeeklyPeriod; source?: { selected: 'live' | 'saved'; prior: 'live' | 'saved' }; calls?: { sales: WeeklyCalls; cs: WeeklyCalls }; noShows?: { lastWeek: NoShowPeriod; twoWeeksAgo: NoShowPeriod }; insights: Array<{ kind: string; title: string; detail: string }>; leadManagement?: WeeklyActivityReport; customerCare?: WeeklyActivityReport }
+type CsSourceMetrics = { abandonedCart: Record<string, number>; repurchaseList: Record<string, number>; repurchaseNoAnswer: Record<string, number> }
+type WeeklyReport = { timezone: string; lastWeek: WeeklyPeriod; twoWeeksAgo: WeeklyPeriod; source?: { selected: 'live' | 'saved'; prior: 'live' | 'saved' }; calls?: { sales: WeeklyCalls; cs: WeeklyCalls }; noShows?: { lastWeek: NoShowPeriod; twoWeeksAgo: NoShowPeriod }; csSourceMetrics?: { lastWeek: CsSourceMetrics; twoWeeksAgo: CsSourceMetrics }; insights: Array<{ kind: string; title: string; detail: string }>; leadManagement?: WeeklyActivityReport; customerCare?: WeeklyActivityReport }
 type WeeklyTeam = 'sales' | 'cs' | 'lm' | 'cc'
 
 const csWeeklyNames = ['arles martinez', 'brayam zuluaga', 'brayan zuluaga', 'edmilson velasquez', 'edmilson morales', 'alice f', 'aline strelow', 'ailene nuevas']
@@ -52,16 +53,16 @@ type ProductComparison = {
 }
 
 const productComparisons: ProductComparison[] = [
-  { title: 'Slim Boost', subtitle: 'Compared to Injections', direction: 'flat', summary: 'Slim Boost revenue stayed equal by $801 compared to last week', detail: 'This week we sold 9 slim boosts, compared to 9 units last week.', maximum: 100, agents: [
+  { title: 'Slim Boost', subtitle: 'Compared to Injections', direction: 'flat', summary: 'Slim Boost revenue stayed equal by $801 compared to two weeks ago', detail: 'Last week we sold 9 slim boosts, compared to 9 units two weeks ago.', maximum: 100, agents: [
     { name: 'Andrés', last: 50, prior: 38, lastSales: 4, priorSales: 3 }, { name: 'Alejandro', last: 0, prior: 0 }, { name: 'María C.', last: 40, prior: 80, lastSales: 2, priorSales: 4 }, { name: 'Meribet', last: 60, prior: 40, lastSales: 3, priorSales: 2 }, { name: 'Avrg', last: 32, prior: 32 },
   ] },
-  { title: 'Nutr. Plan', subtitle: 'Compared to Injections', direction: 'down', summary: 'Nutritional Plan revenue decreased by $551 compared to last week', detail: 'We sold 11 nutritional plans, compared to 15 units last week.', maximum: 140, agents: [
+  { title: 'Nutr. Plan', subtitle: 'Compared to Injections', direction: 'down', summary: 'Nutritional Plan revenue decreased by $551 compared to two weeks ago', detail: 'Last week we sold 11 nutritional plans, compared to 15 units two weeks ago.', maximum: 140, agents: [
     { name: 'Andrés', last: 0, prior: 40, lastSales: 0, priorSales: 4 }, { name: 'Alejandro', last: 0, prior: 60, lastSales: 0, priorSales: 3 }, { name: 'María C.', last: 70, prior: 125, lastSales: 5, priorSales: 2 }, { name: 'Meribet', last: 90, prior: 78, lastSales: 6, priorSales: 5 }, { name: 'Avrg', last: 70, prior: 81 },
   ] },
-  { title: 'NAD+', subtitle: 'Sales per Seller', direction: 'down', summary: 'NAD+ revenue increased by $282 compared to last week', detail: 'This week we sold 3 NAD+ injections, compared to 5 units last week.', maximum: 70, agents: [
+  { title: 'NAD+', subtitle: 'Sales per Seller', direction: 'down', summary: 'NAD+ revenue increased by $282 compared to two weeks ago', detail: 'Last week we sold 3 NAD+ injections, compared to 5 units two weeks ago.', maximum: 70, agents: [
     { name: 'Andrés', last: 33, prior: 50, lastSales: 1, priorSales: 4 }, { name: 'Alejandro', last: 0, prior: 0 }, { name: 'María C.', last: 0, prior: 0 }, { name: 'Meribet', last: 66, prior: 20, lastSales: 2, priorSales: 1 }, { name: 'Avrg', last: 14, prior: 14 },
   ] },
-  { title: 'Sermorelin', subtitle: 'Compared to Injections', direction: 'up', summary: 'Sermorelin revenue increased by $2,247 compared to last week', detail: 'This week we sold 17 Sermorelin, compared to 9 units last week.', maximum: 70, agents: [
+  { title: 'Sermorelin', subtitle: 'Compared to Injections', direction: 'up', summary: 'Sermorelin revenue increased by $2,247 compared to two weeks ago', detail: 'Last week we sold 17 Sermorelin, compared to 9 units two weeks ago.', maximum: 70, agents: [
     { name: 'Andrés', last: 0, prior: 63, priorSales: 5 }, { name: 'Alejandro', last: 0, prior: 0 }, { name: 'María C.', last: 40, prior: 40, lastSales: 8, priorSales: 2 }, { name: 'Meribet', last: 50, prior: 40, lastSales: 9, priorSales: 2 }, { name: 'Avrg', last: 29, prior: 29 },
   ] },
   { title: 'GHK-Cu Troches', subtitle: 'Compared to Injections', direction: 'down', summary: 'No GHK revenue for the past two weeks.', maximum: 100, agents: [
@@ -80,7 +81,7 @@ function ProductComparisonCard({ product }: { product: ProductComparison }) {
       <div className="weekly-product-summary"><span className={product.direction} aria-hidden="true">{product.direction === 'up' ? '↗' : product.direction === 'down' ? '↘' : '→'}</span><strong>{product.summary}</strong>{product.detail ? <p>{product.detail}</p> : null}</div>
     </aside>
     <div className="weekly-product-chart-area">
-      <div className="weekly-chart-legend"><span><i className="last" />This week</span><span><i className="average" />Last week</span></div>
+      <div className="weekly-chart-legend"><span><i className="last" />Last week</span><span><i className="average" />Two weeks ago</span></div>
       <div className="weekly-product-chart">
         <div className="weekly-product-y-axis">{ticks.map((tick) => <span key={tick} style={{ bottom: `${(tick / product.maximum) * 100}%` }}>{tick}%</span>)}</div>
         <div className="weekly-product-plot">
@@ -95,6 +96,17 @@ function ProductComparisonCard({ product }: { product: ProductComparison }) {
         </div>
       </div>
     </div>
+  </section>
+}
+
+type CsMetricSlide = { title: string; subtitle: string; lastTotal: number; priorTotal: number; percent?: boolean; agents: Array<{ name: string; last: number; prior: number }> }
+function CsMetricCard({ metric }: { metric: CsMetricSlide }) {
+  const peak = Math.max(...metric.agents.flatMap((agent) => [agent.last, agent.prior]), metric.percent ? 100 : 1)
+  const maximum = metric.percent ? 100 : Math.max(5, Math.ceil(peak / 5) * 5)
+  const format = (value: number) => metric.percent ? `${value.toFixed(0)}%` : count.format(value)
+  return <section className="weekly-product-card cs-weekly-metric-card" aria-label={`${metric.title} weekly comparison`}>
+    <aside className="weekly-product-copy"><div><h2>{metric.title}</h2><strong>{metric.subtitle}</strong></div><div className="weekly-product-summary"><span className={metric.lastTotal <= metric.priorTotal ? 'up' : 'down'} aria-hidden="true">{metric.lastTotal <= metric.priorTotal ? '↘' : '↗'}</span><strong>{format(metric.lastTotal)} last week</strong><p>Compared with {format(metric.priorTotal)} two weeks ago.</p></div></aside>
+    <div className="weekly-product-chart-area"><div className="weekly-chart-legend"><span><i className="last" />Last week</span><span><i className="average" />Two weeks ago</span></div><div className="weekly-product-chart"><div className="weekly-product-plot">{metric.agents.map((agent) => <div className="weekly-product-group" key={agent.name}><div className="weekly-product-bars"><span className="last" style={{ height: `${agent.last / maximum * 100}%` }}>{agent.last ? <em>{format(agent.last)}</em> : null}</span><span className="average" style={{ height: `${agent.prior / maximum * 100}%` }}>{agent.prior ? <em>{format(agent.prior)}</em> : null}</span></div><strong>{agent.name}</strong></div>)}</div></div></div>
   </section>
 }
 
@@ -167,10 +179,10 @@ function TeamActivityReport({ report, error, loadingLabel, team }: { report: Wee
   return <>
     <header className="weekly-heading"><div><p className="eyebrow">Weekly {teamName.toLowerCase()} report</p><h1>{teamName} performance</h1><p>{period ? `${period.fromDate} through ${period.toDate} · Eastern Time` : 'Loading the latest completed HubSpot week…'}</p></div><span>HubSpot {teamShortName} overview</span></header>
     {error ? <div className="daily-error" role="alert">HubSpot weekly report unavailable: {error}</div> : null}
-    <section className="lm-volume-section"><div className="weekly-section-heading"><span>Activity snapshot</span><h2>High-level volumes</h2><p>{teamName} activity recorded in HubSpot for the latest completed week.</p></div><div className="lm-kpi-grid">{cards.map((card) => { const delta = card.current - card.previous; return <article key={card.label}><strong>{period ? card.value : '—'}</strong><span>{card.label}</span>{period && prior ? <small className={delta >= 0 ? 'positive' : 'negative'}>{delta >= 0 ? '↗' : '↘'} {card.format(Math.abs(delta))} vs last week</small> : !error ? <small>{loadingLabel}</small> : null}</article> })}</div></section>
-    <section className="lm-visual-card lm-booking-chart-card"><aside><div><h2>Appointments</h2><strong>Set by LM agent</strong></div><div className="lm-chart-note"><span aria-hidden="true">↗</span><strong>{period ? `${count.format(totals.bookings)} appointments set this week` : 'Loading appointment performance…'}</strong><p>{prior ? `Compared with ${count.format(prior.totals.bookings)} appointments last week.` : 'Comparing the latest completed HubSpot weeks.'}</p></div></aside><div className="lm-booking-chart-area"><div className="weekly-chart-legend"><span><i className="last" />This week</span><span><i className="average" />Last week</span></div><div className="lm-booking-chart">{bookingRows.length ? bookingRows.map((row) => <div className="lm-booking-group" key={row.name}><div><span className="last" style={{ height: `${row.last / bookingMaximum * 100}%` }}>{row.last ? <em>{row.last}</em> : null}</span><span className="prior" style={{ height: `${row.prior / bookingMaximum * 100}%` }}>{row.prior ? <em>{row.prior}</em> : null}</span></div><strong>{row.name}</strong></div>) : <p>Appointment chart will appear when HubSpot finishes loading.</p>}</div></div></section>
+    <section className="lm-volume-section"><div className="weekly-section-heading"><span>Activity snapshot</span><h2>High-level volumes</h2><p>{teamName} activity recorded in HubSpot for the latest completed week.</p></div><div className="lm-kpi-grid">{cards.map((card) => { const delta = card.current - card.previous; return <article key={card.label}><strong>{period ? card.value : '—'}</strong><span>{card.label}</span>{period && prior ? <small className={delta >= 0 ? 'positive' : 'negative'}>{delta >= 0 ? '↗' : '↘'} {card.format(Math.abs(delta))} vs two weeks ago</small> : !error ? <small>{loadingLabel}</small> : null}</article> })}</div></section>
+    <section className="lm-visual-card lm-booking-chart-card"><aside><div><h2>Appointments</h2><strong>Set by LM agent</strong></div><div className="lm-chart-note"><span aria-hidden="true">↗</span><strong>{period ? `${count.format(totals.bookings)} appointments set last week` : 'Loading appointment performance…'}</strong><p>{prior ? `Compared with ${count.format(prior.totals.bookings)} appointments two weeks ago.` : 'Comparing the latest completed HubSpot weeks.'}</p></div></aside><div className="lm-booking-chart-area"><div className="weekly-chart-legend"><span><i className="last" />Last week</span><span><i className="average" />Two weeks ago</span></div><div className="lm-booking-chart">{bookingRows.length ? bookingRows.map((row) => <div className="lm-booking-group" key={row.name}><div><span className="last" style={{ height: `${row.last / bookingMaximum * 100}%` }}>{row.last ? <em>{row.last}</em> : null}</span><span className="prior" style={{ height: `${row.prior / bookingMaximum * 100}%` }}>{row.prior ? <em>{row.prior}</em> : null}</span></div><strong>{row.name}</strong></div>) : <p>Appointment chart will appear when HubSpot finishes loading.</p>}</div></div></section>
     <section className="lm-visual-card lm-mix-card"><aside><div><h2>Activity<br />Mix</h2><strong>By HubSpot activity</strong></div><p>See how {teamName} activity is distributed across messages, calls, and appointments.</p></aside><div className="lm-mix-visual"><div className="lm-activity-donut" style={{ background: activityDonut }} role="img" aria-label={`${teamName} activity distribution`}><span><strong>{count.format(activityTotal)}</strong><small>Total activities</small></span></div><div className="lm-mix-legend">{activityMix.map((item) => <div key={item.label}><i style={{ background: item.color }} /><span>{item.label}<strong>{count.format(item.value)}</strong><small>{activityTotal ? `${(item.value / activityTotal * 100).toFixed(1)}%` : '0.0%'}</small></span></div>)}</div></div></section>
-    <section className="lm-table-card"><div className="weekly-section-heading"><span>Team performance</span><h2>Agent overview</h2></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>Messages</th><th>Calls</th><th>Bookings</th><th>Time in Call (TIC)</th></tr></thead><tbody>{(period?.agents ?? []).map((agent) => <tr key={agent.name}><th scope="row">{agent.name}</th><td>{count.format(agent.messages)}</td><td>{count.format(agent.calls)}</td><td>{count.format(agent.bookings)}</td><td>{duration(agent.callSeconds)}</td></tr>)}{period && !period.agents.length ? <tr><td colSpan={5}>No {teamName} activity was found for this week.</td></tr> : null}</tbody>{period ? <tfoot><tr><th scope="row">Team total</th><td>{count.format(totals.messages)}</td><td>{count.format(totals.calls)}</td><td>{count.format(totals.bookings)}</td><td>{duration(totals.callSeconds)}</td></tr></tfoot> : null}</table></div></section>
+    <section className="lm-table-card"><div className="weekly-section-heading"><span>Team performance</span><h2>Agent overview</h2></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>Messages</th><th>Calls</th><th>Bookings</th><th>Time in Call (TIC)</th></tr></thead><tbody>{(period?.agents ?? []).map((agent) => <tr key={agent.name}><th scope="row">{agent.name}</th><td>{count.format(agent.messages)}</td><td>{count.format(agent.calls)}</td><td>{count.format(agent.bookings)}</td><td>{duration(agent.callSeconds)}</td></tr>)}{period && !period.agents.length ? <tr><td colSpan={5}>No {teamName} activity was found for last week.</td></tr> : null}</tbody>{period ? <tfoot><tr><th scope="row">Team total</th><td>{count.format(totals.messages)}</td><td>{count.format(totals.calls)}</td><td>{count.format(totals.bookings)}</td><td>{duration(totals.callSeconds)}</td></tr></tfoot> : null}</table></div></section>
     <section className="weekly-major-points"><h2>Major Points</h2><div className="weekly-insight-grid">{[
       { title: topMessage ? `${topMessage.name} led messages` : 'Message activity', detail: topMessage ? `${count.format(topMessage.messages)} HubSpot communications during the week.` : 'No messages were recorded.' },
       { title: topBooking ? `${topBooking.name} led bookings` : 'Booking activity', detail: topBooking ? `${count.format(topBooking.bookings)} HubSpot meetings booked during the week.` : 'No bookings were recorded.' },
@@ -245,7 +257,7 @@ function Weekly() {
       const response = await fetch(weeklyApiUrl(`/api/weekly-report?week=${encodeURIComponent(selectedWeek)}&team=${activeTeam}`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agents: [...metrics.values()] }) })
       const payload = await response.json() as { message?: string; calls?: number }
       if (!response.ok) throw new Error(payload.message ?? 'Unable to save weekly Doxy data.')
-      await loadReport(); setDoxyUpload(`${file.name}: ${payload.calls ?? 0} calls saved for this week.`)
+      await loadReport(); setDoxyUpload(`${file.name}: ${payload.calls ?? 0} calls saved for the selected week.`)
     } catch (uploadError) { setError(uploadError instanceof Error ? uploadError.message : 'Unable to read the Doxy CSV file.') }
     finally { setIsDoxyUploading(false) }
   }
@@ -275,9 +287,9 @@ function Weekly() {
     const priorUnits = Object.values(twoWeeksAgo.products).reduce((sum, product) => sum + product.units, 0)
     const topSeller = Object.entries(lastWeek.bySeller).sort((a, b) => b[1] - a[1])[0]
     return { ...report, lastWeek, twoWeeksAgo, insights: [
-      { kind: revenueDelta >= 0 ? 'up' : 'down', title: `Revenue ${revenueDelta >= 0 ? 'increased' : 'decreased'} by ${money.format(Math.abs(revenueDelta))} this week`, detail: `Revenue was ${money.format(lastWeek.revenue)} versus ${money.format(twoWeeksAgo.revenue)} last week.` },
-      { kind: lastUnits >= priorUnits ? 'up' : 'down', title: `Product units ${lastUnits >= priorUnits ? 'increased' : 'decreased'} by ${Math.abs(lastUnits - priorUnits)}`, detail: `${lastUnits} units were sold this week versus ${priorUnits} last week.` },
-      { kind: 'seller', title: topSeller ? `${topSeller[0]} led this week's revenue` : 'No seller revenue this week', detail: topSeller ? `${money.format(topSeller[1])} in paid HubSpot deals.` : 'No paid HubSpot deals were found for this team.' },
+      { kind: revenueDelta >= 0 ? 'up' : 'down', title: `Revenue ${revenueDelta >= 0 ? 'increased' : 'decreased'} by ${money.format(Math.abs(revenueDelta))} last week`, detail: `Revenue was ${money.format(lastWeek.revenue)} last week versus ${money.format(twoWeeksAgo.revenue)} two weeks ago.` },
+      { kind: lastUnits >= priorUnits ? 'up' : 'down', title: `Product units ${lastUnits >= priorUnits ? 'increased' : 'decreased'} by ${Math.abs(lastUnits - priorUnits)}`, detail: `${lastUnits} units were sold last week versus ${priorUnits} two weeks ago.` },
+      { kind: 'seller', title: topSeller ? `${topSeller[0]} led last week's revenue` : 'No seller revenue last week', detail: topSeller ? `${money.format(topSeller[1])} in paid HubSpot deals.` : 'No paid HubSpot deals were found for this team.' },
     ] }
   }, [report, activeTeam])
 
@@ -309,10 +321,26 @@ function Weekly() {
     return ['Slim Boost', 'Nutritional Plans', 'NAD+', 'Sermorelin', 'GHK-Cu Troches', 'Glutathione'].map((title): ProductComparison => {
       const last = activeReport.lastWeek.products[title] ?? { revenue: 0, units: 0, bySeller: {} }
       const prior = activeReport.twoWeeksAgo.products[title] ?? { revenue: 0, units: 0, bySeller: {} }
+      const lastInjections = activeReport.lastWeek.products['Weight Loss Injections'] ?? { revenue: 0, units: 0, bySeller: {} }
+      const priorInjections = activeReport.twoWeeksAgo.products['Weight Loss Injections'] ?? { revenue: 0, units: 0, bySeller: {} }
       const sellers = [...new Set([...Object.keys(last.bySeller), ...Object.keys(prior.bySeller)])].sort((a, b) => (last.bySeller[b]?.units ?? 0) - (last.bySeller[a]?.units ?? 0)).slice(0, 7)
-      const maxUnits = Math.max(last.units, prior.units, 1)
       const delta = last.revenue - prior.revenue
-      return { title, subtitle: 'Sales per seller', direction: delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat', summary: `${title} revenue ${delta > 0 ? 'increased' : delta < 0 ? 'decreased' : 'stayed equal'} by ${money.format(Math.abs(delta))} compared to last week`, detail: `This week we sold ${last.units} units, compared to ${prior.units} units last week.`, maximum: 100, agents: sellers.length ? sellers.map((name) => ({ name, last: (last.bySeller[name]?.units ?? 0) / maxUnits * 100, prior: (prior.bySeller[name]?.units ?? 0) / maxUnits * 100, lastSales: last.bySeller[name]?.units ?? 0, priorSales: prior.bySeller[name]?.units ?? 0 })) : [{ name: 'No sales', last: 0, prior: 0 }] }
+      const agents = sellers.length ? sellers.map((name) => {
+        const lastSales = last.bySeller[name]?.units ?? 0
+        const priorSales = prior.bySeller[name]?.units ?? 0
+        const lastInjectionSales = lastInjections.bySeller[name]?.units ?? 0
+        const priorInjectionSales = priorInjections.bySeller[name]?.units ?? 0
+        return {
+          name,
+          last: lastInjectionSales ? lastSales / lastInjectionSales * 100 : 0,
+          prior: priorInjectionSales ? priorSales / priorInjectionSales * 100 : 0,
+          lastSales,
+          priorSales,
+        }
+      }) : [{ name: 'No sales', last: 0, prior: 0 }]
+      const highestPercentage = Math.max(...agents.flatMap((agent) => [agent.last, agent.prior]), 0)
+      const maximum = Math.max(100, Math.ceil(highestPercentage / 20) * 20)
+      return { title, subtitle: 'Compared to injections', direction: delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat', summary: `${title} revenue ${delta > 0 ? 'increased' : delta < 0 ? 'decreased' : 'stayed equal'} by ${money.format(Math.abs(delta))} compared to two weeks ago`, detail: `Last week we sold ${last.units} units, compared to ${prior.units} units two weeks ago.`, maximum, agents }
     })
   }, [activeReport])
   const refundSellers = useMemo(() => {
@@ -331,6 +359,27 @@ function Weekly() {
   const averageTicketRows = comparisonNames.map((name) => ({ name, last: activeReport!.lastWeek.averageTicketBySeller[name] ?? 0, prior: activeReport!.twoWeeksAgo.averageTicketBySeller[name] ?? 0 }))
   const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
   const noShowWeekdays = weekdays.map((name) => ({ name, last: report?.noShows?.lastWeek.byWeekday?.[name]?.rate ?? 0, prior: report?.noShows?.twoWeeksAgo.byWeekday?.[name]?.rate ?? 0 }))
+  const csMetricSlides = useMemo((): CsMetricSlide[] => {
+    if (!report || activeTeam !== 'cs') return []
+    const sourceMetrics = report.csSourceMetrics
+    const names = [...new Set([
+      ...Object.keys(sourceMetrics?.lastWeek.abandonedCart ?? {}), ...Object.keys(sourceMetrics?.twoWeeksAgo.abandonedCart ?? {}),
+      ...Object.keys(sourceMetrics?.lastWeek.repurchaseList ?? {}), ...Object.keys(sourceMetrics?.twoWeeksAgo.repurchaseList ?? {}),
+      ...Object.keys(report.noShows?.lastWeek.bySeller ?? {}), ...Object.keys(report.noShows?.twoWeeksAgo.bySeller ?? {}),
+    ])].filter(isCsWeeklySeller)
+    const countSlide = (title: string, subtitle: string, key: keyof CsSourceMetrics): CsMetricSlide => {
+      const last = sourceMetrics?.lastWeek[key] ?? {}; const prior = sourceMetrics?.twoWeeksAgo[key] ?? {}
+      return { title, subtitle, lastTotal: Object.values(last).reduce((sum, value) => sum + value, 0), priorTotal: Object.values(prior).reduce((sum, value) => sum + value, 0), agents: names.map((name) => ({ name, last: last[name] ?? 0, prior: prior[name] ?? 0 })) }
+    }
+    const generalLast = names.reduce((total, name) => ({ total: total.total + (report.noShows?.lastWeek.bySeller[name]?.total ?? 0), noShows: total.noShows + (report.noShows?.lastWeek.bySeller[name]?.noShows ?? 0) }), { total: 0, noShows: 0 })
+    const generalPrior = names.reduce((total, name) => ({ total: total.total + (report.noShows?.twoWeeksAgo.bySeller[name]?.total ?? 0), noShows: total.noShows + (report.noShows?.twoWeeksAgo.bySeller[name]?.noShows ?? 0) }), { total: 0, noShows: 0 })
+    return [
+      countSlide('Abandoned Cart', 'Associated calls', 'abandonedCart'),
+      countSlide('Repurchase List', 'Associated calls', 'repurchaseList'),
+      countSlide('Repurchase No-answer', 'Calls not answered', 'repurchaseNoAnswer'),
+      { title: 'No-show', subtitle: 'All CS appointments', percent: true, lastTotal: generalLast.total ? generalLast.noShows / generalLast.total * 100 : 0, priorTotal: generalPrior.total ? generalPrior.noShows / generalPrior.total * 100 : 0, agents: names.map((name) => ({ name, last: report.noShows?.lastWeek.bySeller[name]?.rate ?? 0, prior: report.noShows?.twoWeeksAgo.bySeller[name]?.rate ?? 0 })) },
+    ]
+  }, [report, activeTeam])
   const performanceRows = comparisonNames.map((name) => {
     const injectionsLast = activeReport?.lastWeek.products['Weight Loss Injections']?.bySeller[name]?.units ?? 0
     const injectionsPrior = activeReport?.twoWeeksAgo.products['Weight Loss Injections']?.bySeller[name]?.units ?? 0
@@ -368,20 +417,21 @@ function Weekly() {
         <span>HubSpot {activeTeam === 'sales' ? 'sales' : 'CS'} overview</span>
       </header>
 
-      <section className="weekly-total-revenue" aria-label="Total revenue this week">
-        <div><span>Total revenue this week</span><strong>{activeReport ? money.format(activeReport.lastWeek.revenue) : 'Loading…'}</strong><small>{activeTeam === 'sales' ? 'Sales team' : 'Customer Service team'} · Paid HubSpot deals</small></div>
-        <div className="weekly-total-comparison"><span>Last week</span><strong>{activeReport ? money.format(activeReport.twoWeeksAgo.revenue) : '—'}</strong>{activeReport ? <small className={activeReport.lastWeek.revenue >= activeReport.twoWeeksAgo.revenue ? 'positive' : 'negative'}>{activeReport.lastWeek.revenue >= activeReport.twoWeeksAgo.revenue ? '↗' : '↘'} {money.format(Math.abs(activeReport.lastWeek.revenue - activeReport.twoWeeksAgo.revenue))}</small> : null}</div>
+      <section className="weekly-total-revenue" aria-label="Total revenue last week">
+        <div><span>Total revenue last week</span><strong>{activeReport ? money.format(activeReport.lastWeek.revenue) : 'Loading…'}</strong><small>{activeTeam === 'sales' ? 'Sales team' : 'Customer Service team'} · Paid HubSpot deals</small></div>
+        <div className="weekly-total-comparison"><span>Two weeks ago</span><strong>{activeReport ? money.format(activeReport.twoWeeksAgo.revenue) : '—'}</strong>{activeReport ? <small className={activeReport.lastWeek.revenue >= activeReport.twoWeeksAgo.revenue ? 'positive' : 'negative'}>{activeReport.lastWeek.revenue >= activeReport.twoWeeksAgo.revenue ? '↗' : '↘'} {money.format(Math.abs(activeReport.lastWeek.revenue - activeReport.twoWeeksAgo.revenue))}</small> : null}</div>
       </section>
 
-      <section className="lm-table-card weekly-calls-card"><div className="weekly-section-heading"><span>Customer contact</span><h2>Aircall and Doxy</h2><p>Aggregated from saved Daily dashboard reports for the selected week.</p></div><div className="lm-kpi-grid"><article><strong>{duration(weeklyAircallSeconds)}</strong><span>Aircall time</span></article><article><strong>{duration(weeklyDoxySeconds)}</strong><span>Doxy time</span></article><article><strong>{duration(weeklyAircallSeconds + weeklyDoxySeconds)}</strong><span>Total connected time</span></article><article><strong>{weeklyCalls?.lastWeek.savedDays ?? 0}/6</strong><span>Saved days included</span></article></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>Aircall calls</th><th>Aircall time</th><th>Doxy calls</th><th>Doxy time</th><th>Total time</th></tr></thead><tbody>{weeklyCallRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{count.format(row.aircallCalls)}</td><td>{duration(row.aircallSeconds)}</td><td>{count.format(row.doxyCalls)}</td><td>{duration(row.doxySeconds)}</td><td>{duration(row.aircallSeconds + row.doxySeconds)}</td></tr>)}{weeklyCalls && !weeklyCallRows.length ? <tr><td colSpan={6}>No saved Daily Aircall or Doxy data exists for this week.</td></tr> : null}</tbody></table></div></section>
+      <section className="lm-table-card weekly-calls-card"><div className="weekly-section-heading"><span>Customer contact</span><h2>Aircall and Doxy</h2><p>Aggregated from saved Daily dashboard reports for the selected week.</p></div><div className="lm-kpi-grid"><article><strong>{duration(weeklyAircallSeconds)}</strong><span>Aircall time</span></article><article><strong>{duration(weeklyDoxySeconds)}</strong><span>Doxy time</span></article><article><strong>{duration(weeklyAircallSeconds + weeklyDoxySeconds)}</strong><span>Total connected time</span></article><article><strong>{weeklyCalls?.lastWeek.savedDays ?? 0}/6</strong><span>Saved days included</span></article></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>Aircall calls</th><th>Aircall time</th><th>Doxy calls</th><th>Doxy time</th><th>Total time</th></tr></thead><tbody>{weeklyCallRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{count.format(row.aircallCalls)}</td><td>{duration(row.aircallSeconds)}</td><td>{count.format(row.doxyCalls)}</td><td>{duration(row.doxySeconds)}</td><td>{duration(row.aircallSeconds + row.doxySeconds)}</td></tr>)}{weeklyCalls && !weeklyCallRows.length ? <tr><td colSpan={6}>No saved Daily Aircall or Doxy data exists for last week.</td></tr> : null}</tbody></table></div></section>
 
-      <section className="lm-table-card"><div className="weekly-section-heading"><span>HubSpot sales quality</span><h2>Average ticket</h2><p>Paid HubSpot revenue divided by paid deals, compared with last week.</p></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>This week</th><th>Last week</th><th>Change</th></tr></thead><tbody>{averageTicketRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{money.format(row.last)}</td><td>{money.format(row.prior)}</td><td className={row.last >= row.prior ? 'positive' : 'negative'}>{row.last >= row.prior ? '↗' : '↘'} {money.format(Math.abs(row.last - row.prior))}</td></tr>)}{activeReport && !averageTicketRows.length ? <tr><td colSpan={4}>No paid deals were found for this team.</td></tr> : null}</tbody></table></div></section>
+      <section className="lm-table-card"><div className="weekly-section-heading"><span>HubSpot sales quality</span><h2>Average ticket</h2><p>Paid HubSpot revenue divided by paid deals, compared with two weeks ago.</p></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>Last week</th><th>Two weeks ago</th><th>Change</th></tr></thead><tbody>{averageTicketRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{money.format(row.last)}</td><td>{money.format(row.prior)}</td><td className={row.last >= row.prior ? 'positive' : 'negative'}>{row.last >= row.prior ? '↗' : '↘'} {money.format(Math.abs(row.last - row.prior))}</td></tr>)}{activeReport && !averageTicketRows.length ? <tr><td colSpan={4}>No paid deals were found for this team.</td></tr> : null}</tbody></table></div></section>
 
-      <section className="weekly-metric-card"><div className="weekly-section-heading"><span>HubSpot appointments</span><h2>No-show by weekday</h2><p>Canceled meetings as a percentage of all scheduled meetings.</p></div><div className="weekly-chart-legend"><span><i className="last" />This week</span><span><i className="average" />Last week</span></div><div className="weekly-percent-chart">{noShowWeekdays.map((row) => <div className="weekly-percent-group" key={row.name}><div><span className="last" style={{ height: `${row.last}%` }}><em>{row.last.toFixed(0)}%</em></span><span className="prior" style={{ height: `${row.prior}%` }}><em>{row.prior.toFixed(0)}%</em></span></div><strong>{row.name}</strong></div>)}</div></section>
+      <section className="weekly-metric-card"><div className="weekly-section-heading"><span>HubSpot appointments</span><h2>No-show by weekday</h2><p>Canceled meetings as a percentage of all scheduled meetings.</p></div><div className="weekly-chart-legend"><span><i className="last" />Last week</span><span><i className="average" />Two weeks ago</span></div><div className="weekly-percent-chart">{noShowWeekdays.map((row) => <div className="weekly-percent-group" key={row.name}><div><span className="last" style={{ height: `${row.last}%` }}><em>{row.last.toFixed(0)}%</em></span><span className="prior" style={{ height: `${row.prior}%` }}><em>{row.prior.toFixed(0)}%</em></span></div><strong>{row.name}</strong></div>)}</div></section>
+      {activeTeam === 'cs' ? <section className="cs-weekly-slides"><div className="weekly-section-heading"><span>Customer Service lists</span><h2>Call and no-show details</h2><p>Calls are matched to deals by Imported Source. No-show uses the weekly HubSpot appointment report.</p></div>{csMetricSlides.map((metric) => <CsMetricCard key={metric.title} metric={metric} />)}</section> : null}
 
-      <section className="weekly-metric-card"><div className="weekly-section-heading"><span>Sales efficiency</span><h2>Performance</h2><p>Weight Loss Injections Sold divided by appointments attended per agent.</p></div><div className="weekly-chart-legend"><span><i className="last" />This week</span><span><i className="average" />Last week</span></div><div className="weekly-percent-chart">{performanceChartRows.map((row) => <div className="weekly-percent-group" key={row.name}><div><span className="last" style={{ height: `${Math.min(100, row.last)}%` }}><em>{row.last.toFixed(1)}%</em></span><span className="prior" style={{ height: `${Math.min(100, row.prior)}%` }}><em>{row.prior.toFixed(1)}%</em></span></div><strong>{row.name}</strong></div>)}</div></section>
+      <section className="weekly-metric-card"><div className="weekly-section-heading"><span>Sales efficiency</span><h2>Performance</h2><p>Weight Loss Injections Sold divided by appointments attended per agent.</p></div><div className="weekly-chart-legend"><span><i className="last" />Last week</span><span><i className="average" />Two weeks ago</span></div><div className="weekly-percent-chart">{performanceChartRows.map((row) => <div className="weekly-percent-group" key={row.name}><div><span className="last" style={{ height: `${Math.min(100, row.last)}%` }}><em>{row.last.toFixed(1)}%</em></span><span className="prior" style={{ height: `${Math.min(100, row.prior)}%` }}><em>{row.prior.toFixed(1)}%</em></span></div><strong>{row.name}</strong></div>)}</div></section>
 
-      <section className="weekly-new-treatments"><div><span>New treatments</span><h2>{count.format(newTreatments)} injections</h2><p>{Math.abs(newTreatments - priorNewTreatments)} {newTreatments >= priorNewTreatments ? 'more' : 'fewer'} than last week, when the team reached {count.format(priorNewTreatments)} injections.</p></div><aside><strong>Weight Loss Injections only</strong><p>Repurchases and Customer Service sales are excluded. NAD+, supplements, and other products are not counted.</p></aside></section>
+      <section className="weekly-new-treatments"><div><span>New treatments</span><h2>{count.format(newTreatments)} injections</h2><p>{Math.abs(newTreatments - priorNewTreatments)} {newTreatments >= priorNewTreatments ? 'more' : 'fewer'} than two weeks ago, when the team reached {count.format(priorNewTreatments)} injections.</p></div><aside><strong>Weight Loss Injections only</strong><p>Repurchases and Customer Service sales are excluded. NAD+, supplements, and other products are not counted.</p></aside></section>
 
       <section className="weekly-major-points" aria-labelledby="weekly-major-points-title">
         <h2 id="weekly-major-points-title">Major Points</h2>
@@ -416,10 +466,10 @@ function Weekly() {
       <section className="weekly-profit-card" aria-labelledby="weekly-profit-title">
         <aside className="weekly-profit-copy">
           <div><h2 id="weekly-profit-title">Revenue</h2><strong>By seller</strong></div>
-          <div className="weekly-growth-note"><span aria-hidden="true">{revenueArrow}</span><strong>{activeReport ? <>Revenue {revenueDirection}{revenueDelta ? <><br />by {money.format(Math.abs(revenueDelta))}</> : null}</> : 'Loading weekly revenue…'}</strong><p>{activeReport ? `We reached ${money.format(activeReport.lastWeek.revenue)} in revenue this week, compared to ${money.format(activeReport.twoWeeksAgo.revenue)} last week.` : 'Comparing the selected team’s paid HubSpot deals.'}</p></div>
+          <div className="weekly-growth-note"><span aria-hidden="true">{revenueArrow}</span><strong>{activeReport ? <>Revenue {revenueDirection}{revenueDelta ? <><br />by {money.format(Math.abs(revenueDelta))}</> : null}</> : 'Loading weekly revenue…'}</strong><p>{activeReport ? `We reached ${money.format(activeReport.lastWeek.revenue)} in revenue last week, compared to ${money.format(activeReport.twoWeeksAgo.revenue)} two weeks ago.` : 'Comparing the selected team’s paid HubSpot deals.'}</p></div>
         </aside>
         <div className="weekly-chart-area">
-          <div className="weekly-chart-legend"><span><i className="last" />This week</span><span><i className="prior" />Last week</span></div>
+          <div className="weekly-chart-legend"><span><i className="last" />Last week</span><span><i className="prior" />Two weeks ago</span></div>
           <div className="weekly-chart">
             <div className="weekly-y-axis">{Array.from({ length: 8 }, (_, index) => Math.round(liveChartMaximum * (7 - index) / 7)).map((tick) => <span key={tick} style={{ bottom: `${(tick / liveChartMaximum) * 100}%` }}>{money.format(tick)}</span>)}</div>
             <div className="weekly-chart-plot">
@@ -436,13 +486,13 @@ function Weekly() {
         </div>
       </section>
 
-      <div className="weekly-section-heading"><span>Product performance</span><h2>Sales by product</h2><p>This week compared with last week.</p></div>
+      <div className="weekly-section-heading"><span>Product performance</span><h2>Sales by product</h2><p>Last week compared with two weeks ago.</p></div>
       {error ? <div className="daily-error" role="alert">HubSpot weekly report unavailable: {error}</div> : null}
       {comparisonProducts.map((product) => <ProductComparisonCard product={product} key={product.title} />)}
 
       <section className="weekly-product-card weekly-refund-card" aria-label="Refunds by seller">
-        <aside className="weekly-product-copy"><div><h2>Refunds</h2><strong>Per seller</strong></div><div className="weekly-product-summary"><span className={activeReport?.lastWeek.refunds ? 'down' : 'up'} aria-hidden="true">{activeReport?.lastWeek.refunds ? '↘' : '✓'}</span><strong>{activeReport?.lastWeek.refunds ? `${money.format(activeReport.lastWeek.refunds)} was refunded this week` : 'There were no refunds this week'}</strong><p>{activeReport ? `Last week refunds totaled ${money.format(activeReport.twoWeeksAgo.refunds)} across paid HubSpot deals.` : 'Loading refund totals from HubSpot.'}</p></div></aside>
-        <div className="weekly-product-chart-area"><div className="weekly-chart-legend"><span><i className="refund-last" />This week</span><span><i className="refund-prior" />Last week</span></div><div className="weekly-refund-plot"><div className="weekly-refund-groups">{refundSellers.map((seller) => <div className="weekly-refund-group" key={seller.name}><div><span className="refund-current" style={{ height: `${(seller.last / refundMaximum) * 100}%` }}>{seller.last ? <em>{money.format(seller.last)}</em> : null}</span><span className="refund-previous" style={{ height: `${(seller.prior / refundMaximum) * 100}%` }}>{seller.prior ? <em>{money.format(seller.prior)}</em> : null}</span></div><strong>{seller.name}</strong></div>)}</div></div></div>
+        <aside className="weekly-product-copy"><div><h2>Refunds</h2><strong>Per seller</strong></div><div className="weekly-product-summary"><span className={activeReport?.lastWeek.refunds ? 'down' : 'up'} aria-hidden="true">{activeReport?.lastWeek.refunds ? '↘' : '✓'}</span><strong>{activeReport?.lastWeek.refunds ? `${money.format(activeReport.lastWeek.refunds)} was refunded last week` : 'There were no refunds last week'}</strong><p>{activeReport ? `Two weeks ago refunds totaled ${money.format(activeReport.twoWeeksAgo.refunds)} across paid HubSpot deals.` : 'Loading refund totals from HubSpot.'}</p></div></aside>
+        <div className="weekly-product-chart-area"><div className="weekly-chart-legend"><span><i className="refund-last" />Last week</span><span><i className="refund-prior" />Two weeks ago</span></div><div className="weekly-refund-plot"><div className="weekly-refund-groups">{refundSellers.map((seller) => <div className="weekly-refund-group" key={seller.name}><div><span className="refund-current" style={{ height: `${(seller.last / refundMaximum) * 100}%` }}>{seller.last ? <em>{money.format(seller.last)}</em> : null}</span><span className="refund-previous" style={{ height: `${(seller.prior / refundMaximum) * 100}%` }}>{seller.prior ? <em>{money.format(seller.prior)}</em> : null}</span></div><strong>{seller.name}</strong></div>)}</div></div></div>
       </section>
       </>}
       </div>
