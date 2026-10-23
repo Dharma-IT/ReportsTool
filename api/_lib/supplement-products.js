@@ -121,7 +121,15 @@ export async function deleteSupplementProduct(id) {
 
 export function findSupplementProductCost(name, products) {
   const normalized = normalizeSupplementProductName(name)
-  const matches = products.filter((product) => normalized.includes(product.match_name))
-  matches.sort((a, b) => b.match_name.length - a.match_name.length)
-  return matches[0] ? Number(matches[0].unit_cost) : null
+  const sourceTokens = new Set(normalized.split(' ').filter(Boolean))
+  const matches = products.map((product) => {
+    const matchName = normalizeSupplementProductName(product.match_name || product.name)
+    if (normalized.includes(matchName)) return { product, score: 2 + matchName.length / 1000 }
+    const tokens = matchName.split(' ').filter(Boolean)
+    const matched = tokens.filter((token) => sourceTokens.has(token)).length
+    const coverage = tokens.length ? matched / tokens.length : 0
+    const qualifies = tokens.length === 1 ? coverage === 1 : matched >= 2 && coverage >= 0.6
+    return { product, score: qualifies ? coverage + matched / 100 : 0 }
+  }).filter((match) => match.score > 0).sort((a, b) => b.score - a.score)
+  return matches[0] ? Number(matches[0].product.unit_cost) : null
 }

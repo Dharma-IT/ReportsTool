@@ -3,7 +3,7 @@ import { shopifyAdminFetch } from './shopify.js'
 const EARLIEST_DATE = '2026-09-01'
 
 const SALES_QUERY = `query SalesForSupplements($after: String, $search: String!) {
-  orders(first: 100, after: $after, sortKey: CREATED_AT, query: $search) {
+  orders(first: 250, after: $after, sortKey: CREATED_AT, query: $search) {
     nodes {
       legacyResourceId
       name
@@ -52,6 +52,12 @@ function nextDate(value) {
   return date.toISOString().slice(0, 10)
 }
 
+function previousDate(value, days) {
+  const date = new Date(`${value}T12:00:00Z`)
+  date.setUTCDate(date.getUTCDate() - days)
+  return date.toISOString().slice(0, 10)
+}
+
 function easternDate(value) {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -90,7 +96,14 @@ export async function fetchShopifySales(date, options = {}) {
   do {
     const data = await shopifyGraphql(SALES_QUERY, {
       after,
-      search: `${options.costRecognition ? 'updated_at' : 'created_at'}:>=${date} ${options.costRecognition ? 'updated_at' : 'created_at'}:<${nextDate(date)}`,
+      // A later edit to an order changes updated_at, so an updated_at window can
+      // permanently hide historical fulfillments from a subsequent COGS fetch.
+      // Search orders created in the prior month, then use the fulfillment
+      // timestamp below as the actual recognition date. This covers delayed
+      // fulfillment without scanning the store's entire history on every click.
+      search: options.costRecognition
+        ? `created_at:>=${previousDate(date, 31)} created_at:<${nextDate(date)}`
+        : `created_at:>=${date} created_at:<${nextDate(date)}`,
     })
     const orders = data.orders
 
