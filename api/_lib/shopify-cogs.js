@@ -1,5 +1,6 @@
 import { fetchShopifySales } from './shopify-sales.js'
 import { shopify2AdminFetch } from './shopify.js'
+import { findSupplementProductCost, getSupplementProducts } from './supplement-products.js'
 
 const EARLIEST_DATE = '2026-09-01'
 const SUPLIFUL_PROCESSING_RATE = 0.0299
@@ -53,52 +54,6 @@ export function suplifulShippingCost(weightLbs, country, province, service) {
 export function suplifulFulfillmentFee(quantity) {
   const qty = Math.max(0, Number(quantity || 0))
   return qty ? roundMoney(SUPLIFUL_FIRST_UNIT_FEE + Math.max(0, qty - 1) * SUPLIFUL_ADDITIONAL_UNIT_FEE) : 0
-}
-
-const PRODUCT_UNIT_COSTS = [
-  ['advanced 100 whey protein isolate vanilla', 39.95],
-  ['advanced 100 whey protein isolate chocolate', 39.95],
-  ['grass fed collagen creamer vanilla', 20.05],
-  ['grass fed collagen peptides powder chocolate', 17.45],
-  ['grass fed hydrolyzed collagen peptides', 15.29],
-  ['hydration powder passion fruit', 11.25],
-  ['hydration powder peach mango', 11.29],
-  ['hydration powder lemonade', 11.29],
-  ['hydration powder lychee', 11.45],
-  ['plant protein chocolate', 26.55],
-  ['plant protein vanilla', 27.45],
-  ['probiotic 40 billion with prebiotics', 8.15],
-  ['omega 3 epa 180mg dha 120mg', 8.85],
-  ['hair skin and nails essentials', 5.79],
-  ['complete multivitamin', 5.69],
-  ['apple cider vinegar capsules', 4.55],
-  ['digestive enzyme pro blend', 5.29],
-  ['vitamin d3 2 000 iu', 7.45],
-  ['creatine monohydrate', 10.95],
-  ['magnesium glycinate', 6.59],
-  ['brain and focus formula', 4.85],
-  ['colon gentle cleanse', 15.55],
-  ['diet drops ultra 1 oz', 4.85],
-  ['bone and heart support', 5.29],
-  ['max detox acai detox', 5.75],
-  ['fat burner with mct', 7.59],
-  ['glp 1 support', 6.65],
-  ['sleep formula', 5.25],
-  ['energy strips', 8.19],
-  ['sleep strips', 7.55],
-  ['berberine', 5.55],
-  ['maca plus', 5.75],
-  ['nad', 9.25],
-]
-
-function normalizedProductName(value) {
-  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
-    .replace(/\bsubscription\b/g, ' ').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim()
-}
-
-function productUnitCost(name) {
-  const normalized = normalizedProductName(name)
-  return PRODUCT_UNIT_COSTS.find(([product]) => normalized.includes(product))?.[1] ?? null
 }
 
 function validateDate(date) {
@@ -179,6 +134,8 @@ export async function saveShopifyCogs(date, rows) {
 
 export async function syncShopifyCogs(date) {
   validateDate(date)
+  const { products } = await getSupplementProducts()
+  const productUnitCost = (name) => findSupplementProductCost(name, products)
   const report = await fetchShopifySales(date, { costRecognition: true })
   const orderNames = report.rows.map((item) => item.name).filter(Boolean)
   let payouts = new Map()

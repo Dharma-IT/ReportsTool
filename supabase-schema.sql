@@ -165,6 +165,35 @@ create table if not exists public.shopify_cogs_reports (
   constraint shopify_cogs_reports_data_is_array check (jsonb_typeof(report_data) = 'array')
 );
 
+create table if not exists public.supplement_products (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  match_name text not null unique,
+  unit_cost numeric(12,2) not null check (unit_cost >= 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+insert into public.supplement_products (name, match_name, unit_cost) values
+  ('Fat Burner with MCT', 'fat burner with mct', 7.59), ('Berberine', 'berberine', 5.55),
+  ('Maca Plus', 'maca plus', 5.75), ('Brain & Focus Formula', 'brain and focus formula', 4.85),
+  ('Energy Strips', 'energy strips', 8.19), ('Hair, Skin and Nails Essentials', 'hair skin and nails essentials', 5.79),
+  ('Complete Multivitamin', 'complete multivitamin', 5.69), ('Grass-Fed Collagen Creamer (Vanilla)', 'grass fed collagen creamer vanilla', 20.05),
+  ('Sleep Strips', 'sleep strips', 7.55), ('Advanced 100% Whey Protein Isolate (Vanilla)', 'advanced 100 whey protein isolate vanilla', 39.95),
+  ('Creatine Monohydrate', 'creatine monohydrate', 10.95), ('Grass-Fed Collagen Peptides Powder (Chocolate)', 'grass fed collagen peptides powder chocolate', 17.45),
+  ('Advanced 100% Whey Protein Isolate (Chocolate)', 'advanced 100 whey protein isolate chocolate', 39.95), ('Grass-Fed Hydrolyzed Collagen Peptides', 'grass fed hydrolyzed collagen peptides', 15.29),
+  ('GLP-1 Support', 'glp 1 support', 6.65), ('Hydration Powder (Lemonade)', 'hydration powder lemonade', 11.29),
+  ('Hydration Powder (Peach Mango)', 'hydration powder peach mango', 11.29), ('Hydration Powder (Lychee)', 'hydration powder lychee', 11.45),
+  ('Hydration Powder (Passion Fruit)', 'hydration powder passion fruit', 11.25), ('Plant Protein (Vanilla)', 'plant protein vanilla', 27.45),
+  ('Magnesium Glycinate', 'magnesium glycinate', 6.59), ('Plant Protein (Chocolate)', 'plant protein chocolate', 26.55),
+  ('Colon Gentle Cleanse', 'colon gentle cleanse', 15.55), ('Sleep Formula', 'sleep formula', 5.25),
+  ('Vitamin D3 2,000 IU', 'vitamin d3 2 000 iu', 7.45), ('Probiotic 40 Billion with Prebiotics', 'probiotic 40 billion with prebiotics', 8.15),
+  ('Apple Cider Vinegar Capsules', 'apple cider vinegar capsules', 4.55), ('Digestive Enzyme Pro Blend', 'digestive enzyme pro blend', 5.29),
+  ('Max Detox (Acai detox)', 'max detox acai detox', 5.75), ('Diet Drops Ultra 1 oz', 'diet drops ultra 1 oz', 4.85),
+  ('Bone & Heart Support', 'bone and heart support', 5.29), ('NAD+', 'nad', 9.25),
+  ('Omega-3 EPA 180mg + DHA 120mg', 'omega 3 epa 180mg dha 120mg', 8.85)
+on conflict (match_name) do nothing;
+
 create index if not exists aircall_call_events_call_timeline_idx
 on public.aircall_call_events (call_id, event_timestamp desc);
 
@@ -250,6 +279,13 @@ for each row
 execute function public.set_updated_at();
 
 alter table public.shopify_cogs_reports enable row level security;
+
+drop trigger if exists set_supplement_products_updated_at on public.supplement_products;
+create trigger set_supplement_products_updated_at
+before update on public.supplement_products
+for each row execute function public.set_updated_at();
+
+alter table public.supplement_products enable row level security;
 
 -- Refund snapshots are server-only because they contain deal-level data.
 

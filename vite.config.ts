@@ -11,6 +11,7 @@ import { getSavedShopifyCogs, getSavedShopifyCogsDates, saveShopifyCogs, syncSho
 import { fetchGoogleAdsCost } from './api/_lib/google-ads.js'
 import { fetchMetaAdsCost } from './api/_lib/meta-ads.js'
 import { getSupplementsAds, saveSupplementsAds } from './api/_lib/supplements-ads.js'
+import { createSupplementProduct, deleteSupplementProduct, getSupplementProducts, updateSupplementProduct } from './api/_lib/supplement-products.js'
 
 const execFileAsync = promisify(execFile)
 const ACCOUNT_ID = 'act_653630476536860'
@@ -4495,6 +4496,33 @@ function supplementsAdsApi(env: Record<string, string>): Plugin {
   }
 }
 
+function supplementProductsApi(env: Record<string, string>): Plugin {
+  return {
+    name: 'supplement-products-api',
+    configureServer(server) {
+      server.middlewares.use('/api/supplements/products', async (request, response) => {
+        if (!['GET', 'POST', 'PUT', 'DELETE'].includes(request.method ?? '')) {
+          response.setHeader('Allow', 'GET, POST, PUT, DELETE')
+          return sendJson(response, 405, { message: 'Method not allowed' })
+        }
+        try {
+          process.env.VITE_SUPABASE_URL = env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
+          process.env.SUPABASE_SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+          const body = request.method === 'GET' ? {} : await readJsonRequest<{ id?: string; name?: string; unit_cost?: number }>(request)
+          const result = request.method === 'GET' ? await getSupplementProducts()
+            : request.method === 'POST' ? await createSupplementProduct(body)
+              : request.method === 'PUT' ? await updateSupplementProduct(body)
+                : await deleteSupplementProduct(body.id ?? '')
+          response.setHeader('Cache-Control', 'no-store')
+          return sendJson(response, 200, result)
+        } catch (error) {
+          return sendJson(response, 502, { message: error instanceof Error ? error.message : 'Unable to manage supplement products.' })
+        }
+      })
+    },
+  }
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
@@ -4512,6 +4540,7 @@ export default defineConfig(({ mode }) => {
       react(),
       metaAdsCostApi(env),
       supplementsAdsApi(env),
+      supplementProductsApi(env),
       googleAdsCostApi(env),
       shopifyCogsApi(env),
       shopifySalesApi(env),

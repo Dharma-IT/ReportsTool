@@ -73,6 +73,7 @@ type ShopifyCogsRow = {
 
 type AdsSummaryRow = Record<'meta' | 'google' | 'tiktok' | 'cogs' | 'shipping' | 'fulfillment' | 'processing', string> & { date: string }
 type SavedAdsRow = { report_date: string; meta: number; google: number; tiktok: number; cogs?: number; shipping?: number; fulfillment?: number; processing?: number }
+type SupplementProduct = { id: string; name: string; match_name: string; unit_cost: number; created_at?: string; updated_at?: string }
 
 type FinanceTotals = {
   qty: number
@@ -148,12 +149,13 @@ const adsSummaryHeaders = [
 const cogsHeaders = ['Date', 'Order', 'Product', 'Qty', 'Unit Price', 'Subtotal', 'Shipping', 'Fulfillment (Supliful)', 'Process. (Supliful)', 'Process. (Shopify)', 'Total']
 const cogsNumericFields = ['qty', 'unit_price', 'subtotal', 'shipping', 'fulfillment_supliful', 'processing_supliful', 'processing_shopify', 'total'] as const
 
-type SupplementsView = 'daily' | 'ads' | 'cogs' | 'shopify' | 'orders' | 'sales'
+type SupplementsView = 'daily' | 'ads' | 'cogs' | 'products' | 'shopify' | 'orders' | 'sales'
 
 const supplementViews: Array<{ key: SupplementsView; label: string; short: string; detail: string }> = [
   { key: 'daily', label: 'Report Daily', short: 'RD', detail: 'Daily finance overview' },
   { key: 'ads', label: 'ADS', short: 'AD', detail: 'Advertising spend' },
   { key: 'cogs', label: 'COGS & FEE', short: 'CF', detail: 'Costs and fees' },
+  { key: 'products', label: 'Products', short: 'PR', detail: 'Manage product costs' },
   { key: 'shopify', label: 'Shopify', short: 'SH', detail: 'Store performance' },
   { key: 'orders', label: 'Orders', short: 'OR', detail: 'Order reporting' },
   { key: 'sales', label: 'Total sales by order', short: 'TS', detail: 'Order-level sales' },
@@ -265,6 +267,11 @@ export default function Supplements() {
   const [cogsLoading, setCogsLoading] = useState(false)
   const [cogsMessage, setCogsMessage] = useState('')
   const [cogsError, setCogsError] = useState('')
+  const [products, setProducts] = useState<SupplementProduct[]>([])
+  const [productDraft, setProductDraft] = useState({ name: '', unit_cost: '' })
+  const [productsLoading, setProductsLoading] = useState(true)
+  const [productsMessage, setProductsMessage] = useState('')
+  const [productsError, setProductsError] = useState('')
   const [overview, setOverview] = useState<FinanceOverview | null>(null)
   const [overviewLoading, setOverviewLoading] = useState(false)
   const [overviewAction, setOverviewAction] = useState<'fetch' | 'view' | ''>('')
@@ -318,6 +325,18 @@ export default function Supplements() {
       .then((response) => response.ok ? response.json() : Promise.reject(new Error('Unable to load saved COGS dates')))
       .then((payload: { dates?: string[] }) => setSavedCogsDates(new Set(payload.dates ?? [])))
       .catch(() => undefined)
+  }, [view])
+
+  useEffect(() => {
+    if (view !== 'products') return
+    void fetch(getApiUrl('/api/supplements/products'))
+      .then(async (response) => {
+        const payload = await response.json() as { products?: SupplementProduct[]; message?: string }
+        if (!response.ok) throw new Error(payload.message || 'Unable to load products')
+        setProducts(payload.products ?? [])
+      })
+      .catch((error: unknown) => setProductsError(error instanceof Error ? error.message : 'Unable to load products.'))
+      .finally(() => setProductsLoading(false))
   }, [view])
 
   useEffect(() => {
@@ -428,6 +447,34 @@ export default function Supplements() {
     } catch (error) {
       setCogsError(error instanceof Error ? error.message : 'Unable to process COGS & Fee data.')
     } finally { setCogsLoading(false) }
+  }
+
+  function updateProductDraft(id: string, field: 'name' | 'unit_cost', value: string) {
+    setProducts((rows) => rows.map((product) => product.id === id ? { ...product, [field]: field === 'unit_cost' ? value : value } as SupplementProduct : product))
+  }
+
+  async function productRequest(method: 'POST' | 'PUT' | 'DELETE', product: { id?: string; name?: string; unit_cost?: string | number }) {
+    setProductsLoading(true); setProductsError(''); setProductsMessage('')
+    try {
+      const response = await fetch(getApiUrl('/api/supplements/products'), {
+        method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(product),
+      })
+      const payload = await response.json() as { product?: SupplementProduct; message?: string }
+      if (!response.ok) throw new Error(payload.message || `Unable to ${method === 'POST' ? 'create' : method === 'PUT' ? 'update' : 'delete'} product.`)
+      if (method === 'POST' && payload.product) {
+        setProducts((rows) => [...rows, payload.product!].sort((a, b) => a.name.localeCompare(b.name)))
+        setProductDraft({ name: '', unit_cost: '' })
+        setProductsMessage(`${payload.product.name} was created.`)
+      } else if (method === 'PUT' && payload.product) {
+        setProducts((rows) => rows.map((row) => row.id === payload.product!.id ? payload.product! : row).sort((a, b) => a.name.localeCompare(b.name)))
+        setProductsMessage(`${payload.product.name} was updated.`)
+      } else if (method === 'DELETE') {
+        setProducts((rows) => rows.filter((row) => row.id !== product.id))
+        setProductsMessage('Product was deleted.')
+      }
+    } catch (error) {
+      setProductsError(error instanceof Error ? error.message : 'Unable to manage product.')
+    } finally { setProductsLoading(false) }
   }
 
   async function fetchOrders() {
@@ -847,6 +894,30 @@ export default function Supplements() {
             </table>
           </div>
           <p className="supplements-note"><span /> Click any cell to edit it, then select Save edits. Fee changes recalculate Total automatically.</p>
+        </section> : view === 'products' ? <section className="supplements-content" aria-labelledby="supplements-products-title">
+          <div className="supplements-table-heading">
+            <div><span>Cost catalog</span><h2 id="supplements-products-title">Products</h2></div>
+            <time>{products.length} products</time>
+          </div>
+          <form className="supplements-product-create" onSubmit={(event) => { event.preventDefault(); void productRequest('POST', productDraft) }}>
+            <label><span>Product name</span><input required value={productDraft.name} onChange={(event) => setProductDraft((draft) => ({ ...draft, name: event.target.value }))} placeholder="Enter product name" /></label>
+            <label><span>Unit cost</span><input required type="number" min="0" step="0.01" inputMode="decimal" value={productDraft.unit_cost} onChange={(event) => setProductDraft((draft) => ({ ...draft, unit_cost: event.target.value }))} placeholder="0.00" /></label>
+            <button type="submit" disabled={productsLoading}>{productsLoading ? 'Working…' : 'Add product'}</button>
+          </form>
+          {productsError ? <p className="supplements-orders-feedback error" role="alert">{productsError}</p> : null}
+          {productsMessage ? <p className="supplements-orders-feedback success" role="status">{productsMessage}</p> : null}
+          <div className="supplements-table-wrap">
+            <table className="supplements-ads-sheet supplements-products-table">
+              <caption>Product Unit Costs</caption>
+              <thead><tr><th scope="col">Product</th><th scope="col">Unit cost</th><th scope="col">Actions</th></tr></thead>
+              <tbody>{products.length ? products.map((product) => <tr key={product.id}>
+                <td><input aria-label="Product name" value={product.name} onChange={(event) => updateProductDraft(product.id, 'name', event.target.value)} /></td>
+                <td><div className="supplements-price-input"><span>$</span><input aria-label={`${product.name} unit cost`} type="number" min="0" step="0.01" inputMode="decimal" value={product.unit_cost} onChange={(event) => updateProductDraft(product.id, 'unit_cost', event.target.value)} /></div></td>
+                <td><div className="supplements-product-actions"><button type="button" disabled={productsLoading} onClick={() => void productRequest('PUT', product)}>Save</button><button className="delete" type="button" disabled={productsLoading} onClick={() => { if (window.confirm(`Delete ${product.name}? Future COGS imports will no longer match this product.`)) void productRequest('DELETE', { id: product.id }) }}>Delete</button></div></td>
+              </tr>) : <tr><td className="supplements-ads-empty" colSpan={3}>{productsLoading ? 'Loading products…' : 'No products in the catalog.'}</td></tr>}</tbody>
+            </table>
+          </div>
+          <p className="supplements-note"><span /> Product names are matched against Shopify line-item names. Catalog price changes apply to future COGS fetches; saved historical reports remain unchanged.</p>
         </section> : view === 'shopify' ? <section className="supplements-content" aria-labelledby="supplements-shopify-title">
           <div className="supplements-table-heading">
             <div><span>Shopify export</span><h2 id="supplements-shopify-title">Shopify</h2></div>
