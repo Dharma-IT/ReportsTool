@@ -60,7 +60,6 @@ const STAFF_PERFORMANCE_REPORT = [
   { name: 'Zara Meza', respondAliases: ['Zara Meza'], hubSpotAliases: ['Zara Meza'], hasCalls: true },
 ]
 const WEEKLY_LM_AGENTS = [
-  { name: 'Ailene Nuevas', aliases: ['Ailene Nuevas', 'Aline Strelow', 'Alice Strelow', 'Alice F'] },
   { name: 'Laura Sanchez', aliases: ['Laura Sanchez', 'Laura Alejandra Sanchez Pinto'] },
   { name: 'William Carcamo', aliases: ['William Carcamo'] },
   { name: 'Belizabett Gonzalez', aliases: ['Belizabett Gonzalez'] },
@@ -1258,6 +1257,11 @@ async function fetchWeeklyCsSourceMetrics(fromDate: string, toDate: string, toke
 }
 
 type WeeklyLeadAgent = { name: string; messages: number; calls: number; bookings: number; callSeconds: number }
+type SavedAgentReport = {
+  reportDate: string
+  agents?: Array<{ name?: string; callLengthSeconds?: number; totalCalls?: number }>
+  staff?: Array<{ name?: string; messages?: number | null }>
+}
 
 async function fetchWeeklyLeadManagementPeriod(fromDate: string, toDate: string, token: string, teamAgents = WEEKLY_LM_AGENTS) {
   if (!token) throw new Error('HubSpot reporting is not configured.')
@@ -1332,6 +1336,75 @@ async function fetchWeeklyLeadManagementPeriod(fromDate: string, toDate: string,
   }
 }
 
+async function applySavedAgentReportsToWeeklyPeriod(
+  period: Awaited<ReturnType<typeof fetchWeeklyLeadManagementPeriod>>,
+  teamAgents: typeof WEEKLY_LM_AGENTS,
+  supabaseUrl: string,
+  serviceRoleKey: string,
+) {
+  if (!supabaseUrl || !serviceRoleKey) return period
+  const response = await supabaseRest(
+    supabaseUrl,
+    serviceRoleKey,
+    `agent_reports?report_date=gte.${period.fromDate}&report_date=lte.${period.toDate}&select=report_date,report_data&order=report_date.asc`,
+  )
+  const storedRows = await response.json() as Array<{ report_date: string; report_data?: SavedAgentReport }>
+  const reportsByDate = new Map(storedRows.map((row) => [row.report_date, row.report_data]))
+  const reportDates = period.days.map((day) => day.date)
+  period.agents = period.agents.filter((row) =>
+    teamAgents.some((agent) => namesMatch(row.name, agent.name)),
+  )
+  for (const agent of teamAgents) {
+    if (!period.agents.some((row) => namesMatch(row.name, agent.name))) {
+      period.agents.push({ name: agent.name, messages: 0, calls: 0, bookings: 0, callSeconds: 0 })
+    }
+  }
+
+  for (const day of period.days) {
+    const saved = reportsByDate.get(day.date)
+    if (!saved) continue
+    const isTeamMember = (name?: string) => Boolean(name && teamAgents.some((agent) => namesMatch(agent.name, name)))
+    const messageRows = (saved.staff ?? []).filter((row) => isTeamMember(row.name))
+    const callRows = (saved.agents ?? []).filter((row) => isTeamMember(row.name))
+    if (messageRows.some((row) => typeof row.messages === 'number')) {
+      day.messages = messageRows.reduce((sum, row) => sum + (typeof row.messages === 'number' ? row.messages : 0), 0)
+    }
+    if (callRows.length) {
+      day.calls = callRows.reduce((sum, row) => sum + finiteNumber(String(row.totalCalls ?? 0)), 0)
+      day.callSeconds = callRows.reduce((sum, row) => sum + finiteNumber(String(row.callLengthSeconds ?? 0)), 0)
+    }
+  }
+
+  for (const row of period.agents) {
+    const savedDays = reportDates.map((date) => reportsByDate.get(date))
+    const messageValues = savedDays.map((saved) =>
+      saved?.staff?.find((candidate) => candidate.name && namesMatch(candidate.name, row.name))?.messages,
+    )
+    const callValues = savedDays.map((saved) =>
+      saved?.agents?.find((candidate) => candidate.name && namesMatch(candidate.name, row.name)),
+    )
+    // Only replace an agent's weekly total when every business day is present.
+    // Partial saved weeks retain HubSpot totals rather than treating absent data as zero.
+    if (messageValues.every((value) => typeof value === 'number')) {
+      row.messages = messageValues.reduce<number>((sum, value) => sum + (value ?? 0), 0)
+    }
+    if (callValues.every(Boolean)) {
+      row.calls = callValues.reduce((sum, value) => sum + finiteNumber(String(value?.totalCalls ?? 0)), 0)
+      row.callSeconds = callValues.reduce((sum, value) => sum + finiteNumber(String(value?.callLengthSeconds ?? 0)), 0)
+    }
+  }
+  period.totals = period.agents.reduce(
+    (total, row) => ({
+      messages: total.messages + row.messages,
+      calls: total.calls + row.calls,
+      bookings: total.bookings + row.bookings,
+      callSeconds: total.callSeconds + row.callSeconds,
+    }),
+    { messages: 0, calls: 0, bookings: 0, callSeconds: 0 },
+  )
+  return period
+}
+
 function completedEasternWeeks() {
   const today = getTodayInNewYork()
   const day = new Date(`${today}T12:00:00Z`).getUTCDay()
@@ -1361,13 +1434,29 @@ async function loadStoredWeeklyPeriod(weekStart: string, supabaseUrl: string, se
 }
 
 async function upgradeStoredWeeklyPeriod(stored: StoredWeeklyPeriod, from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string) {
-  if (stored.version >= 5) return stored
+  if (stored.version >= 7) return stored
+  if (stored.version >= 5) {
+    const [leadManagement, customerCare] = await Promise.all([
+      applySavedAgentReportsToWeeklyPeriod(stored.leadManagement, WEEKLY_LM_AGENTS, supabaseUrl, serviceRoleKey),
+      applySavedAgentReportsToWeeklyPeriod(stored.customerCare, WEEKLY_CC_AGENTS, supabaseUrl, serviceRoleKey),
+    ])
+    const upgraded: StoredWeeklyPeriod = { ...stored, version: 7, leadManagement, customerCare }
+    await supabaseRest(supabaseUrl, serviceRoleKey, 'weekly_reports?on_conflict=week_start', {
+      method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ week_start: from, week_end: shiftIsoDate(from, 6), timezone: 'America/New_York', report_data: upgraded, fetched_at: new Date().toISOString() }),
+    })
+    return upgraded
+  }
   const [noShows, csSourceMetrics] = await Promise.all([fetchWeeklyNoShows(from, to, hubSpotToken), fetchWeeklyCsSourceMetrics(from, to, hubSpotToken)])
   const hubSpot = stored.version >= 3 ? await fetchWeeklyHubSpotPeriod(from, to, hubSpotToken) : stored.hubSpot
   if (!hubSpot.averageTicketBySeller) {
     hubSpot.averageTicketBySeller = Object.fromEntries(Object.entries(hubSpot.bySeller).map(([name, revenue]) => [name, roundMoney(revenue / Math.max(1, hubSpot.dealCountsBySeller?.[name] ?? 0))]))
   }
-  const upgraded: StoredWeeklyPeriod = { ...stored, version: 5, hubSpot, noShows, csSourceMetrics }
+  const [leadManagement, customerCare] = await Promise.all([
+    applySavedAgentReportsToWeeklyPeriod(stored.leadManagement, WEEKLY_LM_AGENTS, supabaseUrl, serviceRoleKey),
+    applySavedAgentReportsToWeeklyPeriod(stored.customerCare, WEEKLY_CC_AGENTS, supabaseUrl, serviceRoleKey),
+  ])
+  const upgraded: StoredWeeklyPeriod = { ...stored, version: 7, hubSpot, leadManagement, customerCare, noShows, csSourceMetrics }
   await supabaseRest(supabaseUrl, serviceRoleKey, 'weekly_reports?on_conflict=week_start', {
     method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
     body: JSON.stringify({ week_start: from, week_end: shiftIsoDate(from, 6), timezone: 'America/New_York', report_data: upgraded, fetched_at: new Date().toISOString() }),
@@ -1376,14 +1465,18 @@ async function upgradeStoredWeeklyPeriod(stored: StoredWeeklyPeriod, from: strin
 }
 
 async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string) {
-  const [hubSpot, leadManagement, customerCare, noShows, csSourceMetrics] = await Promise.all([
+  const [hubSpot, hubSpotLeadManagement, hubSpotCustomerCare, noShows, csSourceMetrics] = await Promise.all([
     fetchWeeklyHubSpotPeriod(from, to, hubSpotToken),
     fetchWeeklyLeadManagementPeriod(from, to, hubSpotToken),
     fetchWeeklyLeadManagementPeriod(from, to, hubSpotToken, WEEKLY_CC_AGENTS),
     fetchWeeklyNoShows(from, to, hubSpotToken),
     fetchWeeklyCsSourceMetrics(from, to, hubSpotToken),
   ])
-  const reportData: StoredWeeklyPeriod = { version: 5, hubSpot, leadManagement, customerCare, noShows, csSourceMetrics }
+  const [leadManagement, customerCare] = await Promise.all([
+    applySavedAgentReportsToWeeklyPeriod(hubSpotLeadManagement, WEEKLY_LM_AGENTS, supabaseUrl, serviceRoleKey),
+    applySavedAgentReportsToWeeklyPeriod(hubSpotCustomerCare, WEEKLY_CC_AGENTS, supabaseUrl, serviceRoleKey),
+  ])
+  const reportData: StoredWeeklyPeriod = { version: 7, hubSpot, leadManagement, customerCare, noShows, csSourceMetrics }
   if (supabaseUrl && serviceRoleKey) {
     await supabaseRest(supabaseUrl, serviceRoleKey, 'weekly_reports?on_conflict=week_start', {
       method: 'POST',
