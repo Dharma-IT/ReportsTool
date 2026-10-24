@@ -4,29 +4,45 @@ import { chromium } from 'playwright'
 
 const profilePath = resolve('.auth/stripe-profile')
 if (!existsSync(profilePath)) fail('Stripe Dashboard is not connected. Click Connect Stripe first.')
-const ids = (readArg('--ids') ?? '').split(',').filter(Boolean)
+const targets = (readArg('--ids') ?? '').split(',').filter(Boolean).map((value) => {
+  const testMode = value.startsWith('test:')
+  return { id: testMode ? value.slice(5) : value, testMode }
+})
 const debug = process.argv.includes('--debug')
 const headless = process.argv.includes('--headless')
 const context = await chromium.launchPersistentContext(profilePath, { headless })
 const phones = {}
+let loginPages = 0
 
 try {
   const runBatch = async (batch) => {
     let nextIndex = 0
     const worker = async () => {
-      const page = await context.newPage()
-      while (nextIndex < batch.length) {
-        const id = batch[nextIndex++]
-      let text = ''
+      let page
       try {
+        page = await context.newPage()
+        while (nextIndex < batch.length) {
+          const { id, testMode } = batch[nextIndex++]
+          let text = ''
+          try {
         // Stripe is a long-lived SPA and frequently never reaches
         // `domcontentloaded`. `commit` confirms navigation without waiting for
         // every Dashboard request to settle.
-        await page.goto(`https://dashboard.stripe.com/payments/${encodeURIComponent(id)}`, { waitUntil: 'commit', timeout: 20_000 })
-        await page.getByText('Checkout summary', { exact: true }).waitFor({ timeout: 15_000 }).catch(() => {})
-        await page.waitForTimeout(1_000)
-        text = await page.locator('body').innerText()
-        if (/login|signin/i.test(page.url())) fail('Saved Stripe session expired. Click Connect Stripe and sign in again.')
+        const modePath = testMode ? 'test/' : ''
+        await page.goto(`https://dashboard.stripe.com/${modePath}payments/${encodeURIComponent(id)}`, { waitUntil: 'commit', timeout: 20_000 })
+        // Stripe's test-mode route can briefly render an empty application
+        // shell. Poll for real content without depending on a specific label.
+        for (let attempt = 0; attempt < 15; attempt += 1) {
+          await page.waitForTimeout(1_000)
+          text = await page.locator('body').innerText()
+          if (text.includes(id) || /checkout summary|transaction not found|payment details/i.test(text)) break
+        }
+        const loginRoute = /\/(?:login|signin)(?:[/?#]|$)/i.test(new URL(page.url()).pathname)
+        const loginScreen = /sign in to (?:your )?stripe|email address[\s\S]{0,200}password/i.test(text)
+        if (loginRoute && loginScreen) {
+          loginPages += 1
+          continue
+        }
         if (debug) {
           await page.screenshot({ path: resolve(`.auth/stripe-${id}.png`), fullPage: true })
           console.error(JSON.stringify({ id, url: page.url(), text: text.slice(0, 4000) }))
@@ -34,19 +50,27 @@ try {
         const summary = text.match(/Checkout summary([\s\S]{0,1600}?)(?:Items|Payment breakdown|Details)/i)?.[1] ?? text
         const matches = [...summary.matchAll(/(?:\+?1[\s.-]?)?\(?([2-9]\d{2})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})/g)]
         if (matches[0]) phones[id] = `1${matches[0][1]}${matches[0][2]}${matches[0][3]}`
+          } catch (error) {
+            if (debug) console.error(JSON.stringify({ id, message: error instanceof Error ? error.message : String(error) }))
+          }
+        }
       } catch (error) {
-        if (debug) console.error(JSON.stringify({ id, message: error instanceof Error ? error.message : String(error) }))
+        if (debug) console.error(JSON.stringify({ message: error instanceof Error ? error.message : String(error) }))
+      } finally {
+        await page?.close().catch(() => {})
       }
-      }
-      await page.close()
     }
+    // Six tabs keep a full date crawl below the API timeout. The previous
+    // failure came from crawling every unresolved payment twice.
     await Promise.all(Array.from({ length: Math.min(6, batch.length) }, worker))
   }
-  await runBatch(ids)
-  // Stripe occasionally renders an empty shell on the first SPA navigation.
-  // Retry only unresolved pages rather than repeating the entire crawl.
-  await runBatch(ids.filter((id) => !phones[id]))
-  console.log(JSON.stringify({ phones }))
+  await runBatch(targets)
+  if (targets.length && loginPages === targets.length) {
+    console.error(JSON.stringify({ message: 'Saved Stripe session expired. Click Connect Stripe and sign in again.' }))
+    process.exitCode = 1
+  } else {
+    console.log(JSON.stringify({ phones }))
+  }
 } finally {
   await context.close()
 }

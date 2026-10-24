@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
-import { existsSync, openSync, rmSync } from 'node:fs'
+import { existsSync, openSync, rmSync, writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -3924,7 +3924,18 @@ function likelySameStripeContact(
   return emailsMatch
 }
 
-async function crawlStripeDashboardPhones(ids: string[]) {
+const activeStripeDashboardCrawls = new Map<string, Promise<{ phones: Record<string, string>; warning: string }>>()
+
+function crawlStripeDashboardPhones(ids: string[]) {
+  const key = [...ids].sort().join(',')
+  const active = activeStripeDashboardCrawls.get(key)
+  if (active) return active
+  const crawl = runStripeDashboardPhoneCrawl(ids).finally(() => activeStripeDashboardCrawls.delete(key))
+  activeStripeDashboardCrawls.set(key, crawl)
+  return crawl
+}
+
+async function runStripeDashboardPhoneCrawl(ids: string[]) {
   if (!ids.length) return { phones: {} as Record<string, string>, warning: '' }
   if (process.env.RENDER) {
     return {
@@ -3938,6 +3949,9 @@ async function crawlStripeDashboardPhones(ids: string[]) {
       { cwd: getAppRoot(), timeout: 180_000, maxBuffer: 1024 * 1024 },
     )
     const payload = JSON.parse(String(result.stdout)) as { phones?: Record<string, string> }
+    // A completed authenticated crawl is stronger evidence than a stale marker.
+    // Restore the marker if an overlapping run removed it incorrectly.
+    writeFileSync(resolve(getAppRoot(), '.auth', 'stripe-session-ready.json'), JSON.stringify({ connectedAt: new Date().toISOString(), verifiedBy: 'dashboard-crawl' }))
     return { phones: payload.phones ?? {}, warning: '' }
   } catch (error) {
     const stderr = error && typeof error === 'object' && 'stderr' in error ? String(error.stderr) : ''
@@ -4148,7 +4162,7 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
             return sessionDetailCache.get(id)!
           }
           const closestSession = (options: StripeObject[], created: number) => options.toSorted((left, right) => Math.abs(Number(left.created ?? 0) - created) - Math.abs(Number(right.created ?? 0) - created))[0]
-          const resolved: Array<ReturnType<typeof stripeContact> & { status: string; customerId: string; phoneSource: string; lookupId: string }> = []
+          const resolved: Array<ReturnType<typeof stripeContact> & { status: string; customerId: string; phoneSource: string; lookupId: string; livemode: boolean }> = []
           for (const candidate of candidates) {
             let customer: StripeObject = candidate.source.customer && typeof candidate.source.customer === 'object' ? candidate.source.customer : {}
             if (candidate.customerId) {
@@ -4179,7 +4193,7 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
             const phone = checkout.phone || customerPhone || customerShippingPhone || chargePhone || failedPhone || paymentMethodPhone || metadataPhone
             const phoneSource = checkout.phone ? 'checkout_session' : customerPhone ? 'customer' : customerShippingPhone ? 'customer_shipping' : chargePhone ? 'charge' : failedPhone ? 'failed_payment' : paymentMethodPhone ? 'payment_method' : metadataPhone ? 'metadata' : 'unavailable'
             const enriched = stripeContact({ ...candidate.source, customer: { ...customer, name: customer.name || checkout.name, email: customer.email || checkout.email, phone } })
-            resolved.push({ ...enriched, status: candidate.status, customerId: candidate.customerId, phoneSource, lookupId: candidate.paymentIntentId || objectId(candidate.source) })
+            resolved.push({ ...enriched, status: candidate.status, customerId: candidate.customerId, phoneSource, lookupId: candidate.paymentIntentId || objectId(candidate.source), livemode: candidate.source.livemode !== false })
           }
 
           // Some payment methods (notably Affirm) show a phone in Stripe's
@@ -4230,7 +4244,7 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
             Boolean(canonicalClientEmail(contact.email)) &&
             contact.lookupId,
           )
-          const dashboardIds = [...new Set(dashboardCandidates.map((contact) => contact.lookupId))]
+          const dashboardIds = [...new Set(dashboardCandidates.map((contact) => `${contact.livemode ? '' : 'test:'}${contact.lookupId}`))]
           const dashboardRecovery = await crawlStripeDashboardPhones(dashboardIds)
           for (const contact of dashboardCandidates) {
             const phone = stripePhone(dashboardRecovery.phones[contact.lookupId])
