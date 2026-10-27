@@ -1,3 +1,5 @@
+import { AircallLedger, agentCallMetrics, summarizeAircall, type LedgerRecord, talkSeconds } from './api/_lib/aircall-ledger.ts'
+import { aggregateWeeklyAircall, aircallCallsFromCsv, contactName, combineWeeklyContact, type AircallMetric, type DoxyMetric } from './api/_lib/weekly-contact.ts'
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, openSync, rmSync, writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -208,13 +210,6 @@ type StoredAircallRingEvent = {
   call_id: number
   agent_name: string | null
   event_timestamp: number
-}
-
-type StoredAircallTransferEvent = {
-  call_id: number
-  event_type: string
-  event_timestamp: number
-  payload: AircallWebhookPayload
 }
 
 type HubSpotTask = {
@@ -1423,7 +1418,8 @@ type StoredWeeklyPeriod = {
   customerCare: Awaited<ReturnType<typeof fetchWeeklyLeadManagementPeriod>>
   noShows: Awaited<ReturnType<typeof fetchWeeklyNoShows>>
   csSourceMetrics: Awaited<ReturnType<typeof fetchWeeklyCsSourceMetrics>>
-  doxy?: Partial<Record<'sales' | 'cs', Array<{ name: string; doxySeconds: number; doxyCalls: number }>>>
+  doxy?: Partial<Record<'sales' | 'cs', DoxyMetric[]>>
+  aircall?: { version: 1; fetchedAt: string; sales?: AircallMetric[]; cs?: AircallMetric[]; uploaded?: Partial<Record<'sales' | 'cs', { fileName: string; uploadedAt: string }>> }
 }
 
 async function loadStoredWeeklyPeriod(weekStart: string, supabaseUrl: string, serviceRoleKey: string) {
@@ -1489,41 +1485,6 @@ async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken:
     })
   }
   return reportData
-}
-
-async function loadWeeklyCallTotals(from: string, to: string, team: 'sales' | 'cs', supabaseUrl: string, serviceRoleKey: string) {
-  if (!supabaseUrl || !serviceRoleKey) return { agents: [], savedDays: 0 }
-  const response = await supabaseRest(supabaseUrl, serviceRoleKey, `daily_reports?team=eq.${team}&from_date=gte.${from}&to_date=lte.${to}&select=from_date,to_date,report_data`)
-  const rows = await response.json() as Array<{ from_date: string; to_date: string; report_data?: { agents?: Array<Record<string, unknown>> } }>
-  const exactRange = rows.find((row) => row.from_date === from && row.to_date === to)
-  const sourceRows = exactRange ? [exactRange] : rows.filter((row) => row.from_date === row.to_date)
-  const agents = new Map<string, { name: string; aircallSeconds: number; aircallCalls: number; doxySeconds: number; doxyCalls: number }>()
-  for (const stored of sourceRows) for (const raw of stored.report_data?.agents ?? []) {
-    const name = String(raw.name ?? 'Unassigned')
-    const row = agents.get(name) ?? { name, aircallSeconds: 0, aircallCalls: 0, doxySeconds: 0, doxyCalls: 0 }
-    row.aircallSeconds += finiteNumber(String(raw.totalTalkSeconds ?? '0'))
-    row.aircallCalls += finiteNumber(String(raw.totalIntents ?? '0'))
-    row.doxySeconds += finiteNumber(String(raw.doxyTotalSeconds ?? '0'))
-    row.doxyCalls += finiteNumber(String(raw.doxyCalls ?? '0'))
-    agents.set(name, row)
-  }
-  return { agents: [...agents.values()], savedDays: exactRange ? 7 : new Set(sourceRows.map((row) => row.from_date)).size }
-}
-
-function applyWeeklyDoxyOverride(
-  calls: Awaited<ReturnType<typeof loadWeeklyCallTotals>>,
-  override: Array<{ name: string; doxySeconds: number; doxyCalls: number }> | undefined,
-) {
-  if (!override) return calls
-  const rows = new Map(calls.agents.map((agent) => [agent.name.toLowerCase(), { ...agent, doxySeconds: 0, doxyCalls: 0 }]))
-  for (const uploaded of override) {
-    const key = uploaded.name.toLowerCase()
-    const row = rows.get(key) ?? { name: uploaded.name, aircallSeconds: 0, aircallCalls: 0, doxySeconds: 0, doxyCalls: 0 }
-    row.doxySeconds = Math.max(0, finiteNumber(String(uploaded.doxySeconds)))
-    row.doxyCalls = Math.max(0, finiteNumber(String(uploaded.doxyCalls)))
-    rows.set(key, row)
-  }
-  return { ...calls, agents: [...rows.values()] }
 }
 
 function normalizeAppointmentSalesSource(value: string | null | undefined) {
@@ -2031,9 +1992,39 @@ function agentReportApi(
   supabaseUrl: string,
   supabaseServiceRoleKey: string,
 ): Plugin {
+  const ledger = supabaseUrl && supabaseServiceRoleKey ? new AircallLedger(supabaseUrl, supabaseServiceRoleKey) : null
+  async function ledgerPeriod(fromDate: string, toDate: string, syncApi = false) {
+    if (!ledger) throw new Error('Aircall ledger storage is not configured.')
+    const from = getNewYorkUnixDayRange(fromDate).from, to = getNewYorkUnixDayRange(toDate).to
+    const apiError = syncApi ? (!apiId || !apiToken ? 'Aircall API credentials are unavailable' : await ledger.sync(from, to, (persist) => fetchAircallCalls({ apiId, apiToken, from, to, phoneNumber: '', direction: null, includeTransferredCalls: true, onPage: persist }), true)) : undefined
+    const [records, status] = await Promise.all([ledger.read(from, to), ledger.syncStatus(from, to)])
+    return { records, calls: records.map((row) => row.call_data), apiError: apiError ?? status?.last_error ?? undefined }
+  }
+  function scopedQuality(records: LedgerRecord[], aliases: string[], apiError?: string) {
+    return summarizeAircall(records.filter((row) => aliases.some((name) => namesMatch(name, row.call_data.user?.name ?? '')) || (!row.call_data.user?.name && (!row.finalized || talkSeconds(row.call_data) > 0))), apiError)
+  }
   return {
     name: 'aircall-agent-report-api',
     configureServer(server) {
+      if (ledger && server.httpServer && process.env.AIRCALL_BACKGROUND_SYNC !== 'false') {
+        let timer: ReturnType<typeof setInterval> | undefined
+        let running = false
+        const reconcileRecent = async () => {
+          if (running) return
+          running = true
+          try {
+            const to = Math.floor(Date.now() / 1000), from = to - 86400
+            const error = await ledger.sync(from, to, (persist) => fetchAircallCalls({ apiId, apiToken, from, to, phoneNumber: '', direction: null, includeTransferredCalls: true, onPage: persist }))
+            if (error) server.config.logger.error(`Aircall background reconciliation: ${error}`)
+          } finally { running = false }
+        }
+        server.httpServer.once('listening', () => {
+          void reconcileRecent()
+          timer = setInterval(() => { void reconcileRecent() }, 30 * 60000)
+          timer.unref()
+        })
+        server.httpServer.once('close', () => { if (timer) clearInterval(timer) })
+      }
       server.middlewares.use('/api/weekly-report', async (request, response) => {
         try {
           const weeks = completedEasternWeeks()
@@ -2048,19 +2039,26 @@ function agentReportApi(
           if (request.method === 'POST') {
             if (!supabaseUrl || !supabaseServiceRoleKey) return sendJson(response, 500, { message: 'Weekly report storage is not configured.' })
             const team = requestUrl.searchParams.get('team') === 'cs' ? 'cs' : 'sales'
-            const body = await readJsonRequest<{ agents?: Array<{ name: string; doxySeconds: number; doxyCalls: number }> }>(request)
-            const agents = (body.agents ?? []).filter((agent) => agent.name.trim()).map((agent) => ({
-              name: agent.name.trim(), doxySeconds: Math.max(0, finiteNumber(String(agent.doxySeconds))), doxyCalls: Math.max(0, finiteNumber(String(agent.doxyCalls))),
-            }))
-            if (!agents.length) return sendJson(response, 400, { message: 'No matching Doxy calls were supplied.' })
+            const isAircall = requestUrl.searchParams.get('mode') === 'aircall'
+            const body = await readJsonRequest<{ agents?: Array<Partial<DoxyMetric & AircallMetric> & { name: string }>; fileName?: string; csvText?: string }>(request, 8_000_000)
+            const supplied = (body.agents ?? []).filter((agent) => agent.name?.trim())
+            if (!supplied.length) return sendJson(response, 400, { message: 'No matching calls were supplied.' })
             let stored = await loadStoredWeeklyPeriod(selected.from, supabaseUrl, supabaseServiceRoleKey)
             if (!stored) stored = await buildAndStoreWeeklyPeriod(selected.from, selected.to, hubSpotToken, supabaseUrl, supabaseServiceRoleKey)
-            stored.doxy = { ...(stored.doxy ?? {}), [team]: agents }
+            if (isAircall) {
+              if (!ledger || !body.csvText) return sendJson(response, 400, { message: 'Upload the original Aircall CSV so Daily and Weekly can share its call records.' })
+              await ledger.ingest(aircallCallsFromCsv(body.csvText, selected.from, selected.to), 'export')
+              const agents = aggregateWeeklyAircall(aircallCallsFromCsv(body.csvText, selected.from, selected.to), team, await fetchDailyAgentRoster(team, supabaseUrl, supabaseServiceRoleKey))
+              stored.aircall = { ...stored.aircall, version: 1, fetchedAt: new Date().toISOString(), [team]: agents, uploaded: { ...stored.aircall?.uploaded, [team]: { fileName: String(body.fileName ?? 'Aircall CSV').slice(0, 200), uploadedAt: new Date().toISOString() } } }
+            } else {
+              const agents = supplied.map((agent) => ({ name: agent.name.trim(), doxySeconds: Math.max(0, finiteNumber(String(agent.doxySeconds))), doxyCalls: Math.max(0, finiteNumber(String(agent.doxyCalls))), unknownDurationCalls: Math.max(0, finiteNumber(String(agent.unknownDurationCalls ?? 0))) }))
+              stored.doxy = { ...(stored.doxy ?? {}), [team]: agents }
+            }
             await supabaseRest(supabaseUrl, supabaseServiceRoleKey, 'weekly_reports?on_conflict=week_start', {
               method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
               body: JSON.stringify({ week_start: selected.from, week_end: shiftIsoDate(selected.from, 6), timezone: 'America/New_York', report_data: stored, fetched_at: new Date().toISOString() }),
             })
-            return sendJson(response, 200, { saved: true, calls: agents.reduce((sum, agent) => sum + agent.doxyCalls, 0) })
+            return sendJson(response, 200, { saved: true, calls: supplied.reduce((sum, agent) => sum + Number(isAircall ? agent.aircallCalls : agent.doxyCalls), 0) })
           }
           let selectedStored = await loadStoredWeeklyPeriod(selected.from, supabaseUrl, supabaseServiceRoleKey)
           let priorStored = await loadStoredWeeklyPeriod(prior.from, supabaseUrl, supabaseServiceRoleKey)
@@ -2087,23 +2085,32 @@ function agentReportApi(
           const leadManagementTwoWeeksAgo = priorStored.leadManagement
           const customerCareLastWeek = selectedStored.customerCare
           const customerCareTwoWeeksAgo = priorStored.customerCare
-          let [salesCalls, salesPriorCalls, csCalls, csPriorCalls] = await Promise.all([
-            loadWeeklyCallTotals(selected.from, selected.to, 'sales', supabaseUrl, supabaseServiceRoleKey),
-            loadWeeklyCallTotals(prior.from, prior.to, 'sales', supabaseUrl, supabaseServiceRoleKey),
-            loadWeeklyCallTotals(selected.from, selected.to, 'cs', supabaseUrl, supabaseServiceRoleKey),
-            loadWeeklyCallTotals(prior.from, prior.to, 'cs', supabaseUrl, supabaseServiceRoleKey),
+          const [selectedLedger, priorLedger, salesRoster, csRoster] = await Promise.all([
+            ledgerPeriod(selected.from, selected.to, requestUrl.searchParams.get('refresh') === 'aircall'),
+            ledgerPeriod(prior.from, prior.to),
+            fetchDailyAgentRoster('sales', supabaseUrl, supabaseServiceRoleKey),
+            fetchDailyAgentRoster('cs', supabaseUrl, supabaseServiceRoleKey),
           ])
-          salesCalls = applyWeeklyDoxyOverride(salesCalls, selectedStored.doxy?.sales)
-          salesPriorCalls = applyWeeklyDoxyOverride(salesPriorCalls, priorStored.doxy?.sales)
-          csCalls = applyWeeklyDoxyOverride(csCalls, selectedStored.doxy?.cs)
-          csPriorCalls = applyWeeklyDoxyOverride(csPriorCalls, priorStored.doxy?.cs)
+          const contactPeriod = (period: typeof selectedLedger, stored: StoredWeeklyPeriod, team: 'sales' | 'cs') => {
+            const roster = team === 'sales' ? salesRoster : csRoster
+            const records = period.records.filter((row) => contactName(row.call_data.user?.name ?? '', team, roster) || (!row.call_data.user?.name && (!row.finalized || talkSeconds(row.call_data) > 0)))
+            return {
+              ...combineWeeklyContact(aggregateWeeklyAircall(period.calls, team, roster), stored.doxy?.[team]),
+              aircallUploaded: records.some((row) => row.source === 'export'), aircallAvailable: true,
+              aircallQuality: summarizeAircall(records, period.apiError),
+            }
+          }
+          const salesCalls = contactPeriod(selectedLedger, selectedStored, 'sales')
+          const salesPriorCalls = contactPeriod(priorLedger, priorStored, 'sales')
+          const csCalls = contactPeriod(selectedLedger, selectedStored, 'cs')
+          const csPriorCalls = contactPeriod(priorLedger, priorStored, 'cs')
           const revenueDelta = roundMoney(lastWeek.revenue - twoWeeksAgo.revenue)
           const lastUnits = Object.values(lastWeek.products).reduce((sum, product) => sum + product.units, 0)
           const priorUnits = Object.values(twoWeeksAgo.products).reduce((sum, product) => sum + product.units, 0)
           const topSeller = Object.entries(lastWeek.bySeller).sort((left, right) => right[1] - left[1])[0] ?? ['No seller', 0]
           const weeklyMoney = (value: number) => value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
           sendJson(response, 200, {
-            timezone: 'America/New_York', lastWeek, twoWeeksAgo, source: { selected: selectedSource, prior: priorSource },
+            timezone: 'America/New_York', lastWeek, twoWeeksAgo, contactRosters: { sales: salesRoster, cs: csRoster }, source: { selected: selectedSource, prior: priorSource },
             leadManagement: { lastWeek: leadManagementLastWeek, twoWeeksAgo: leadManagementTwoWeeksAgo },
             customerCare: { lastWeek: customerCareLastWeek, twoWeeksAgo: customerCareTwoWeeksAgo },
             noShows: { lastWeek: selectedStored.noShows, twoWeeksAgo: priorStored.noShows },
@@ -2181,102 +2188,41 @@ function agentReportApi(
               sendJson(response, 404, { message: 'No saved daily report exists for this team and date range.' })
               return
             }
-            sendJson(response, 200, savedRows[0].report_data)
+            const reportData = savedRows[0].report_data as { agents: Array<Record<string, unknown>>; [key: string]: unknown }
+            const period = await ledgerPeriod(fromDate, toDate)
+            reportData.agents = reportData.agents.map((agent) => {
+              const configured = teamAgents.find((candidate) => namesMatch(candidate.name, String(agent.name)))
+              const aliases = configured?.aliases ?? [String(agent.name)]
+              return { ...agent, ...agentCallMetrics(period.calls.filter((call) => aliases.some((name) => namesMatch(name, call.user?.name ?? '')))) }
+            })
+            const restored = teamAgents.filter((agent) => !reportData.agents.some((saved) => namesMatch(String(saved.name), agent.name))).map((agent) => ({
+              name: agent.name, ...agentCallMetrics(period.calls.filter((call) => agent.aliases.some((name) => namesMatch(name, call.user?.name ?? '')))), hubSpotMissing: true,
+            })).filter((agent) => agent.totalIntents > 0)
+            reportData.agents.push(...restored)
+            const quality = scopedQuality(period.records, teamAgents.flatMap((agent) => agent.aliases), period.apiError)
+            if (restored.length) quality.warnings.push(`Restored call activity for ${restored.map((agent) => agent.name).join(', ')}. Fetch this Daily report to load their sales figures; current sales totals are partial.`)
+            reportData.aircallQuality = quality
+            reportData.aircallSource = 'ledger'
+            sendJson(response, 200, reportData)
             return
           }
 
-          if (!apiId || !apiToken) {
-            sendJson(response, 500, { message: 'Missing Aircall credentials.' })
-            return
-          }
-
-          const startRange = getNewYorkUnixDayRange(fromDate)
-          const endRange = getNewYorkUnixDayRange(toDate)
           let hubSpotError: string | null = null
-          const [calls, users, hubSpotRows, transferOrigins] = await Promise.all([
-            fetchAircallCalls({
-              apiId,
-              apiToken,
-              from: startRange.from,
-              to: endRange.to,
-              phoneNumber: '',
-              // Aircall can expose an outbound transferred call as `inbound`
-              // on the complete Calls endpoint (for example 4106416726).
-              // Fetch both directions, then attribute by the dedicated line.
-              direction: null,
-              includeTransferredCalls: true,
-            }),
-            fetchAircallUsers(apiId, apiToken),
+          const [period, hubSpotRows] = await Promise.all([
+            ledgerPeriod(fromDate, toDate, true),
             fetchDailyCsHubSpot(fromDate, toDate, hubSpotToken, teamAgents).catch((error: unknown) => {
               hubSpotError = error instanceof Error ? error.message : 'Unable to load HubSpot sales.'
               return new Map<string, DailyCsHubSpotMetrics>()
             }),
-            fetchAircallTransferOrigins(
-              startRange.from,
-              endRange.to,
-              supabaseUrl,
-              supabaseServiceRoleKey,
-            ).catch(() => new Map<number, AircallUser>()),
           ])
-
           const agents = teamAgents.map(({ name, aliases }) => {
-            const matchingUserIds = new Set(users
-              .filter((user) => user.id && user.name && aliases.some((alias) => namesMatch(user.name!, alias)))
-              .map((user) => user.id!))
-            const agentCalls = calls.filter((call) => {
-              const normalizedLineName = (call.number?.name ?? '').replace(/^spam\s+/i, '').trim()
-              const lineOwner = teamAgents.find((candidate) =>
-                candidate.aliases.some((alias) => namesMatch(normalizedLineName, alias)),
-              )
-              // Dedicated Aircall lines identify the originating agent even
-              // when Aircall changes `user` to the final transfer recipient.
-              if (lineOwner) return lineOwner.name === name
-
-              const reportingUser = transferOrigins.get(call.id) ?? call.transferred_by ?? call.user
-              return Boolean((reportingUser?.id && matchingUserIds.has(reportingUser.id)) ||
-                (reportingUser?.name && aliases.some((alias) => namesMatch(reportingUser.name!, alias))))
-            })
-            const validCalls = agentCalls.filter((call) =>
-              call.answered_at !== null && Math.max(0, call.ended_at - call.answered_at) > 60,
-            )
-            const validSeconds = validCalls.reduce((sum, call) => sum + Math.max(0, call.ended_at - call.answered_at!), 0)
-            const totalTalkSeconds = agentCalls.reduce((sum, call) =>
-              sum + (call.answered_at === null ? 0 : Math.max(0, call.ended_at - call.answered_at)), 0)
-            const uniqueNumbers = new Set(agentCalls.map((call) => call.raw_digits).filter(Boolean))
-
+            const agentCalls = period.calls.filter((call) => aliases.some((alias) => namesMatch(call.user?.name ?? '', alias)))
             const hubSpot = hubSpotRows.get(name.toLowerCase()) ?? emptyDailyCsHubSpotMetrics()
-            return {
-              name,
-              numbersCalled: uniqueNumbers.size,
-              totalIntents: agentCalls.length,
-              validCalls: validCalls.length,
-              averageCallSeconds: validCalls.length ? Math.round(validSeconds / validCalls.length) : 0,
-              totalTalkSeconds,
-              ...hubSpot,
-            }
+            return { name, ...agentCallMetrics(agentCalls), ...hubSpot }
           })
-
-          // Transfer events were not being stored on 2026-09-01, so the public
-          // Calls API cannot reconstruct that day's original-agent ownership.
-          // Preserve the reconciled Aircall Call History values for this one
-          // historical Sales report so a later live refresh cannot regress it.
-          if (team === 'sales' && fromDate === '2026-09-01' && toDate === '2026-09-01') {
-            const reconciledAircall: Record<string, {
-              numbersCalled: number
-              totalIntents: number
-              validCalls: number
-              averageCallSeconds: number
-              totalTalkSeconds: number
-            }> = {
-              'Andres Castro': { numbersCalled: 48, totalIntents: 79, validCalls: 9, averageCallSeconds: 376, totalTalkSeconds: 8405 },
-              'Maria Claudia': { numbersCalled: 85, totalIntents: 140, validCalls: 3, averageCallSeconds: 232, totalTalkSeconds: 6276 },
-              'Ailin Isabel': { numbersCalled: 0, totalIntents: 0, validCalls: 0, averageCallSeconds: 0, totalTalkSeconds: 0 },
-            }
-            agents.forEach((agent) => Object.assign(agent, reconciledAircall[agent.name] ?? {}))
-          }
-
           const reportData = {
             fromDate, toDate, team, timezone: 'America/New_York', agents,
+            aircallSource: 'ledger', aircallQuality: scopedQuality(period.records, teamAgents.flatMap((agent) => agent.aliases), period.apiError),
             hubSpotAvailable: hubSpotError === null,
             hubSpotError,
             fetchedAt: new Date().toISOString(),
@@ -2791,6 +2737,7 @@ async function fetchAircallCalls({
   direction = 'inbound',
   userId,
   includeTransferredCalls = false,
+  onPage,
 }: {
   apiId: string
   apiToken: string
@@ -2800,6 +2747,7 @@ async function fetchAircallCalls({
   direction?: 'inbound' | 'outbound' | null
   userId?: number
   includeTransferredCalls?: boolean
+  onPage?: (calls: AircallCall[]) => Promise<void>
 }) {
   // Call Search omits calls transferred between Aircall users. The general
   // Calls endpoint includes those records and exposes transferred_by/to.
@@ -2824,16 +2772,21 @@ async function fetchAircallCalls({
   const calls: AircallCall[] = []
   let nextUrl: string | null = url.toString()
 
+  const visited = new Set<string>()
   while (nextUrl) {
+    if (visited.has(nextUrl)) throw new Error('Aircall API pagination repeated a page.')
+    visited.add(nextUrl)
     const requestUrl: string = nextUrl
     const payload: AircallCallsResponse = await aircallGet(requestUrl, apiId, apiToken)
-    calls.push(...(payload.calls ?? []))
+    if (!Array.isArray(payload.calls)) throw new Error('Aircall returned an invalid calls page.')
+    await onPage?.(payload.calls)
+    calls.push(...payload.calls)
     nextUrl = payload.meta?.next_page_link ?? null
   }
 
   // Apply these filters locally too because the general Calls endpoint does
   // not support every Call Search filter consistently.
-  return calls.filter((call) =>
+  return [...new Map(calls.map((call) => [call.id, call])).values()].filter((call) =>
     (!direction || call.direction === direction) &&
     (!phoneNumber || call.raw_digits.replace(/\D/g, '') === phoneNumber.replace(/\D/g, '')) &&
     (!userId || call.user?.id === userId),
@@ -3264,19 +3217,43 @@ function getVerifiedMissedByName(callId: number) {
   return verifiedMissedBy[callId] ?? null
 }
 
-async function aircallGet<T>(url: string, apiId: string, apiToken: string): Promise<T> {
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${apiId}:${apiToken}`).toString('base64')}`,
-    },
+let aircallRequestGate = Promise.resolve()
+let lastAircallRequestAt = 0
+async function paceAircallRequest() {
+  const slot = aircallRequestGate.then(async () => {
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, 1100 - (Date.now() - lastAircallRequestAt))))
+    lastAircallRequestAt = Date.now()
   })
-  const payload = (await response.json().catch(() => ({}))) as AircallCallsResponse
+  aircallRequestGate = slot.catch(() => {})
+  await slot
+}
 
-  if (!response.ok) {
-    throw new Error(payload.message ?? `Aircall API failed with ${response.status}.`)
+async function aircallGet<T>(url: string, apiId: string, apiToken: string): Promise<T> {
+  const target = new URL(url)
+  if (target.protocol !== 'https:' || target.hostname !== 'api.aircall.io') throw new Error('Invalid Aircall pagination URL.')
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let response: Response
+    try {
+      await paceAircallRequest()
+      response = await fetch(url, {
+        signal: AbortSignal.timeout(20000),
+        headers: { Authorization: `Basic ${Buffer.from(`${apiId}:${apiToken}`).toString('base64')}` },
+      })
+    } catch (error) {
+      if (attempt === 2) throw error
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)))
+      continue
+    }
+    if ((response.status === 429 || response.status >= 500) && attempt < 2) {
+      const seconds = Number(response.headers.get('Retry-After'))
+      await new Promise((resolve) => setTimeout(resolve, response.status === 429 ? Math.min(60, Math.max(1, seconds || 5)) * 1000 : 1000 * (attempt + 1)))
+      continue
+    }
+    const payload = (await response.json().catch(() => ({}))) as AircallCallsResponse
+    if (!response.ok) throw new Error(payload.message ?? `Aircall API failed with ${response.status}.`)
+    return payload as T
   }
-
-  return payload as T
+  throw new Error('Aircall API retries exhausted.')
 }
 
 function getSupabaseRestUrl(supabaseUrl: string, path: string) {
@@ -3345,10 +3322,8 @@ async function fetchDailyAgentRoster(
         : [row.display_name],
       ...(row.hubspot_owner_id ? { hubspotOwnerId: row.hubspot_owner_id } : {}),
     }))
-  } catch {
-    // Deployments created before the roster table continue using the built-in
-    // team until the database migration is applied.
-    return fallback.map((agent) => ({ ...agent }))
+  } catch (error) {
+    throw new Error(`Unable to load the report team roster: ${error instanceof Error ? error.message : 'database request failed'}`, { cause: error })
   }
 }
 
@@ -3378,44 +3353,14 @@ async function fetchLastRungAgents(
   return result
 }
 
-async function fetchAircallTransferOrigins(
-  from: number,
-  to: number,
-  supabaseUrl: string,
-  serviceRoleKey: string,
-) {
-  const result = new Map<number, AircallUser>()
-  if (!supabaseUrl || !serviceRoleKey) return result
-
-  const params = new URLSearchParams({
-    select: 'call_id,event_type,event_timestamp,payload',
-    event_type: 'in.(call.transferred,call.external_transferred)',
-    event_timestamp: `gte.${from}`,
-    order: 'event_timestamp.asc',
-  })
-  const response = await supabaseRest(
-    supabaseUrl,
-    serviceRoleKey,
-    `aircall_call_events?${params.toString()}&event_timestamp=lte.${to}`,
-  )
-  const rows = (await response.json()) as StoredAircallTransferEvent[]
-  rows.forEach((row) => {
-    const origin = row.payload.data?.transferred_by ?? row.payload.data?.user
-    // The first transfer identifies the agent who originated the call. Later
-    // transfer legs must not replace that ownership with an intermediary.
-    if (origin?.name && !result.has(row.call_id)) result.set(row.call_id, origin)
-  })
-  return result
-}
-
-async function readJsonRequest<T>(request: IncomingMessage): Promise<T> {
+async function readJsonRequest<T>(request: IncomingMessage, maxBytes = 1_000_000): Promise<T> {
   const chunks: Buffer[] = []
   let size = 0
 
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += buffer.length
-    if (size > 1_000_000) throw new Error('Request payload is too large.')
+    if (size > maxBytes) throw new Error('Request payload is too large.')
     chunks.push(buffer)
   }
 

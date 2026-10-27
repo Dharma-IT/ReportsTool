@@ -1,3 +1,5 @@
+import type { AircallQuality } from '../../api/_lib/aircall-ledger.ts'
+import { aggregateWeeklyDoxy, aggregateWeeklyAircallCsv, contactDuration, type ContactAgent } from '../../api/_lib/weekly-contact.ts'
 const productRevenue = [
   { name: 'Weight Loss Injections', value: 22849, share: 63.9, color: '#1e754c' },
   { name: 'Slim Boost', value: 1157, share: 3.2, color: '#55c995' },
@@ -20,11 +22,12 @@ type LeadMetrics = { messages: number; calls: number; bookings: number; callSeco
 type LeadPeriod = { fromDate: string; toDate: string; agents: Array<LeadMetrics & { name: string }>; days: Array<LeadMetrics & { date: string }>; totals: LeadMetrics }
 type WeeklyActivityReport = { lastWeek: LeadPeriod; twoWeeksAgo: LeadPeriod }
 type WeeklyCallAgent = { name: string; aircallSeconds: number; aircallCalls: number; doxySeconds: number; doxyCalls: number }
-type WeeklyCalls = { lastWeek: { agents: WeeklyCallAgent[]; savedDays: number }; twoWeeksAgo: { agents: WeeklyCallAgent[]; savedDays: number } }
+type WeeklyCallPeriod = { agents: WeeklyCallAgent[]; doxyUploaded: boolean; unknownDurationCalls: number; aircallUploaded: boolean; aircallAvailable: boolean; aircallQuality: AircallQuality }
+type WeeklyCalls = { lastWeek: WeeklyCallPeriod; twoWeeksAgo: WeeklyCallPeriod }
 type NoShowBucket = { total: number; noShows: number; rate: number }
 type NoShowPeriod = { bySeller: Record<string, NoShowBucket>; byWeekday: Record<string, NoShowBucket> }
 type CsSourceMetrics = { abandonedCart: Record<string, number>; repurchaseList: Record<string, number>; repurchaseNoAnswer: Record<string, number> }
-type WeeklyReport = { timezone: string; lastWeek: WeeklyPeriod; twoWeeksAgo: WeeklyPeriod; source?: { selected: 'live' | 'saved'; prior: 'live' | 'saved' }; calls?: { sales: WeeklyCalls; cs: WeeklyCalls }; noShows?: { lastWeek: NoShowPeriod; twoWeeksAgo: NoShowPeriod }; csSourceMetrics?: { lastWeek: CsSourceMetrics; twoWeeksAgo: CsSourceMetrics }; insights: Array<{ kind: string; title: string; detail: string }>; leadManagement?: WeeklyActivityReport; customerCare?: WeeklyActivityReport }
+type WeeklyReport = { timezone: string; contactRosters?: { sales: ContactAgent[]; cs: ContactAgent[] }; lastWeek: WeeklyPeriod; twoWeeksAgo: WeeklyPeriod; source?: { selected: 'live' | 'saved'; prior: 'live' | 'saved' }; calls?: { sales: WeeklyCalls; cs: WeeklyCalls }; noShows?: { lastWeek: NoShowPeriod; twoWeeksAgo: NoShowPeriod }; csSourceMetrics?: { lastWeek: CsSourceMetrics; twoWeeksAgo: CsSourceMetrics }; insights: Array<{ kind: string; title: string; detail: string }>; leadManagement?: WeeklyActivityReport; customerCare?: WeeklyActivityReport }
 type WeeklyTeam = 'sales' | 'cs' | 'lm' | 'cc'
 
 const csWeeklyNames = ['arles martinez', 'brayam zuluaga', 'brayan zuluaga', 'edmilson velasquez', 'edmilson morales', 'alice f', 'aline strelow', 'ailene nuevas']
@@ -117,39 +120,6 @@ function duration(seconds: number) {
   return `${hours}h ${String(minutes).padStart(2, '0')}m`
 }
 
-function parsedDuration(value: string) {
-  const parts = value.trim().split(':').map(Number)
-  if (parts.some(Number.isNaN)) return 0
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
-  if (parts.length === 2) return parts[0] * 60 + parts[1]
-  return Math.max(0, parts[0] || 0)
-}
-
-function parseCsv(text: string) {
-  const rows: string[][] = []; let row: string[] = []; let field = ''; let quoted = false
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index]
-    if (character === '"' && quoted && text[index + 1] === '"') { field += '"'; index += 1 }
-    else if (character === '"') quoted = !quoted
-    else if (character === ',' && !quoted) { row.push(field); field = '' }
-    else if ((character === '\n' || character === '\r') && !quoted) { if (character === '\r' && text[index + 1] === '\n') index += 1; row.push(field); if (row.some(Boolean)) rows.push(row); row = []; field = '' }
-    else field += character
-  }
-  row.push(field); if (row.some(Boolean)) rows.push(row)
-  return rows
-}
-
-function doxyDate(value: string) {
-  const normalized = value.trim()
-  const iso = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s]|$)/)
-  if (iso) return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`
-  const us = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})(?:[\s,]|$)/)
-  if (us) return `${us[3].length === 2 ? `20${us[3]}` : us[3]}-${us[1].padStart(2, '0')}-${us[2].padStart(2, '0')}`
-  const parsed = new Date(normalized); return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10)
-}
-
-const normalizedName = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-
 function TeamActivityReport({ report, error, loadingLabel, team }: { report: WeeklyReport | null; error: string; loadingLabel: string; team: 'lm' | 'cc' }) {
   const teamReport = team === 'lm' ? report?.leadManagement : report?.customerCare
   const teamName = team === 'lm' ? 'Lead Management' : 'Customer Care'
@@ -201,7 +171,9 @@ function Weekly() {
   const [loadSeconds, setLoadSeconds] = useState<number | null>(null)
   const [doxyUpload, setDoxyUpload] = useState('')
   const [isDoxyUploading, setIsDoxyUploading] = useState(false)
+  const [isAircallRefreshing, setIsAircallRefreshing] = useState(false)
   const doxyFileInput = useRef<HTMLInputElement>(null)
+  const aircallFileInput = useRef<HTMLInputElement>(null)
   const loadReport = useCallback(async () => {
     const response = await fetch(weeklyApiUrl(`/api/weekly-report?week=${encodeURIComponent(selectedWeek)}`))
     const payload = await response.json()
@@ -209,7 +181,6 @@ function Weekly() {
     setReport(payload as WeeklyReport)
   }, [selectedWeek])
   useEffect(() => {
-    setReport(null); setError(''); setLoadSeconds(null); setElapsedSeconds(0)
     const controller = new AbortController()
     const startedAt = Date.now()
     const timer = window.setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000)
@@ -229,36 +200,31 @@ function Weekly() {
     return () => { controller.abort(); window.clearInterval(timer) }
   }, [selectedWeek])
 
-  async function uploadWeeklyDoxy(event: ChangeEvent<HTMLInputElement>) {
+  async function refreshWeeklyAircall() {
+    setError(''); setIsAircallRefreshing(true)
+    try {
+      const response = await fetch(weeklyApiUrl(`/api/weekly-report?week=${encodeURIComponent(selectedWeek)}&refresh=aircall`))
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.message ?? 'Unable to refresh Aircall.')
+      setReport(payload as WeeklyReport)
+    } catch (refreshError) { setError(refreshError instanceof Error ? refreshError.message : 'Unable to refresh Aircall.') }
+    finally { setIsAircallRefreshing(false) }
+  }
+
+  async function uploadWeeklyContact(event: ChangeEvent<HTMLInputElement>, source: 'aircall' | 'doxy') {
     const file = event.target.files?.[0]; event.target.value = ''
     if (!file || (activeTeam !== 'sales' && activeTeam !== 'cs')) return
     setError(''); setDoxyUpload(''); setIsDoxyUploading(true)
     try {
-      if (!file.name.toLowerCase().endsWith('.csv')) throw new Error('Please upload the Doxy meeting history as a CSV file.')
-      const records = parseCsv(await file.text())
-      const headers = records.shift()?.map((header) => header.replace(/^\uFEFF/, '').trim().toLowerCase()) ?? []
-      const findHeader = (...names: string[]) => headers.findIndex((header) => names.includes(header))
-      const dateIndex = findHeader('date', 'meeting date', 'start date', 'started at', 'start time')
-      const providerIndex = findHeader('provider name', 'provider', 'host name', 'host')
-      const durationIndex = findHeader('duration', 'call duration', 'meeting duration')
-      if ([dateIndex, providerIndex, durationIndex].some((index) => index < 0)) throw new Error('This CSV needs Date, Provider name, and Duration columns.')
-      const names = activeTeam === 'sales' ? salesWeeklyNames : csWeeklyNames
-      const aliases: Record<string, string> = { 'alejandra olaya': 'alejandra oyala', 'alice strelow': 'aline strelow', 'alice f': 'aline strelow', 'brayan zuluaga': 'brayam zuluaga' }
-      const metrics = new Map<string, { name: string; doxySeconds: number; doxyCalls: number }>()
-      const weekEnd = shiftDate(selectedWeek, 5)
-      for (const record of records) {
-        const date = doxyDate(record[dateIndex] ?? ''); if (!date || date < selectedWeek || date > weekEnd) continue
-        const rawName = normalizedName(record[providerIndex] ?? ''); const key = aliases[rawName] ?? rawName
-        const matchedName = names.find((name) => (aliases[normalizedName(name)] ?? normalizedName(name)) === key); if (!matchedName) continue
-        const metric = metrics.get(key) ?? { name: matchedName, doxySeconds: 0, doxyCalls: 0 }
-        metric.doxyCalls += 1; metric.doxySeconds += parsedDuration(record[durationIndex] ?? ''); metrics.set(key, metric)
-      }
-      if (!metrics.size) throw new Error(`No ${activeTeam === 'sales' ? 'Sales' : 'Customer Service'} provider calls were found in the selected week.`)
-      const response = await fetch(weeklyApiUrl(`/api/weekly-report?week=${encodeURIComponent(selectedWeek)}&team=${activeTeam}`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agents: [...metrics.values()] }) })
+      if (!file.name.toLowerCase().endsWith('.csv')) throw new Error('Please upload the platform export as a CSV file.')
+      const text = await file.text()
+      const metrics = source === 'aircall' ? aggregateWeeklyAircallCsv(text, selectedWeek, shiftDate(selectedWeek, 5), activeTeam, report?.contactRosters?.[activeTeam]) : aggregateWeeklyDoxy(text, selectedWeek, shiftDate(selectedWeek, 5), activeTeam, report?.contactRosters?.[activeTeam])
+      if (!metrics.length) throw new Error(`No ${activeTeam === 'sales' ? 'Sales' : 'Customer Service'} calls were found in the selected week.`)
+      const response = await fetch(weeklyApiUrl(`/api/weekly-report?week=${encodeURIComponent(selectedWeek)}&team=${activeTeam}&mode=${source}`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agents: metrics, fileName: file.name, ...(source === 'aircall' ? { csvText: text } : {}) }) })
       const payload = await response.json() as { message?: string; calls?: number }
-      if (!response.ok) throw new Error(payload.message ?? 'Unable to save weekly Doxy data.')
+      if (!response.ok) throw new Error(payload.message ?? 'Unable to save weekly contact data.')
       await loadReport(); setDoxyUpload(`${file.name}: ${payload.calls ?? 0} calls saved for the selected week.`)
-    } catch (uploadError) { setError(uploadError instanceof Error ? uploadError.message : 'Unable to read the Doxy CSV file.') }
+    } catch (uploadError) { setError(uploadError instanceof Error ? uploadError.message : 'Unable to read the CSV file.') }
     finally { setIsDoxyUploading(false) }
   }
 
@@ -404,13 +370,16 @@ function Weekly() {
         <button type="button" className={activeTeam === 'cs' ? 'active' : ''} onClick={() => setActiveTeam('cs')}><b>CS</b><span>Customer Service<small>CS team report</small></span></button>
         <button type="button" className={activeTeam === 'lm' ? 'active' : ''} onClick={() => setActiveTeam('lm')}><b>LM</b><span>Lead Management<small>LM team report</small></span></button>
         <button type="button" className={activeTeam === 'cc' ? 'active' : ''} onClick={() => setActiveTeam('cc')}><b>CC</b><span>CC Report<small>Customer Care</small></span></button>
-        {(activeTeam === 'sales' || activeTeam === 'cs') ? <div className="weekly-doxy-upload"><span>Doxy history</span><input ref={doxyFileInput} type="file" accept=".csv,text/csv" onChange={uploadWeeklyDoxy} /><button type="button" onClick={() => doxyFileInput.current?.click()} disabled={isDoxyUploading}><b>CSV</b><span>{isDoxyUploading ? 'Uploading…' : 'Upload Doxy'}</span></button><small>Applies to the selected week and team.</small></div> : null}
+        {(activeTeam === 'sales' || activeTeam === 'cs') ? <div className="weekly-doxy-upload"><span>Aircall history</span><input ref={aircallFileInput} type="file" accept=".csv,text/csv" onChange={(event) => uploadWeeklyContact(event, 'aircall')} /><button type="button" onClick={() => aircallFileInput.current?.click()} disabled={isDoxyUploading}><b>CSV</b><span>Upload Aircall</span></button><small>Use the full week's New York Call History export.</small></div> : null}
+        {(activeTeam === 'sales' || activeTeam === 'cs') ? <div className="weekly-doxy-upload"><span>Doxy history</span><input ref={doxyFileInput} type="file" accept=".csv,text/csv" onChange={(event) => uploadWeeklyContact(event, 'doxy')} /><button type="button" onClick={() => doxyFileInput.current?.click()} disabled={isDoxyUploading}><b>CSV</b><span>{isDoxyUploading ? 'Uploading…' : 'Upload Doxy'}</span></button><small>Applies to the selected week and team.</small></div> : null}
       </aside>
       <div className="weekly-content">
-      <div className="weekly-week-picker"><label>Report week<select value={selectedWeek} onChange={(event) => setSelectedWeek(event.target.value)}>{weekOptions.map((week) => <option value={week} key={week}>{weekLabel(week)}</option>)}</select></label>{report ? <span>{report.source?.selected === 'saved' ? 'Saved weekly data' : 'Fetched live and saved'} · comparison {report.source?.prior === 'saved' ? 'loaded from database' : 'fetched live and saved'}</span> : null}</div>
+      <div className="weekly-week-picker"><label>Report week<select value={selectedWeek} disabled={isDoxyUploading || isAircallRefreshing} onChange={(event) => { setSelectedWeek(event.target.value); setReport(null); setError(''); setLoadSeconds(null); setElapsedSeconds(0); setDoxyUpload('') }}>{weekOptions.map((week) => <option value={week} key={week}>{weekLabel(week)}</option>)}</select></label>{report ? <span>{report.source?.selected === 'saved' ? 'Saved weekly data' : 'Fetched live and saved'} · comparison {report.source?.prior === 'saved' ? 'loaded from database' : 'fetched live and saved'}</span> : null}</div>
       {!report && !error ? <section className="weekly-load-status" aria-live="polite"><div><span className="weekly-load-spinner" aria-hidden="true" /><p><strong>Loading all weekly reports</strong><small>{loadingLabel}</small></p><b>ETA {etaSeconds ? `~${etaSeconds}s` : 'soon'}</b></div><i><span style={{ width: `${Math.min(94, Math.max(4, elapsedSeconds / estimatedSeconds * 100))}%` }} /></i><small>Fetching Sales, Customer Service, Lead Management, and Customer Care from HubSpot at a rate-safe pace.</small></section> : null}
       {report && loadSeconds !== null ? <div className="weekly-load-complete">✓ All weekly reports loaded in {loadSeconds}s</div> : null}
-      {doxyUpload ? <div className="daily-success" role="status">Doxy uploaded: {doxyUpload}</div> : null}
+      {weeklyCalls?.lastWeek.aircallQuality?.warnings.map((warning) => <div className="daily-warning" role="status" key={warning}>{warning}</div>)}
+      {weeklyCalls?.lastWeek.unknownDurationCalls ? <div className="daily-warning" role="status">Doxy export has {weeklyCalls.lastWeek.unknownDurationCalls} call(s) without a duration. Doxy time includes only the durations provided.</div> : null}
+      {doxyUpload ? <div className="daily-success" role="status">Weekly upload saved: {doxyUpload}</div> : null}
       {activeTeam === 'lm' || activeTeam === 'cc' ? <TeamActivityReport report={report} error={error} loadingLabel={loadingLabel} team={activeTeam} /> : <>
       <header className="weekly-heading">
           <div><p className="eyebrow">Weekly {activeTeam === 'sales' ? 'sales' : 'customer service'} report</p><h1>{activeTeam === 'sales' ? 'Sales' : 'Customer Service'} performance</h1><p>{activeReport ? `${activeReport.lastWeek.fromDate} through ${activeReport.lastWeek.toDate} · Eastern Time` : 'Loading the latest completed HubSpot week…'}</p></div>
@@ -422,7 +391,7 @@ function Weekly() {
         <div className="weekly-total-comparison"><span>Two weeks ago</span><strong>{activeReport ? money.format(activeReport.twoWeeksAgo.revenue) : '—'}</strong>{activeReport ? <small className={activeReport.lastWeek.revenue >= activeReport.twoWeeksAgo.revenue ? 'positive' : 'negative'}>{activeReport.lastWeek.revenue >= activeReport.twoWeeksAgo.revenue ? '↗' : '↘'} {money.format(Math.abs(activeReport.lastWeek.revenue - activeReport.twoWeeksAgo.revenue))}</small> : null}</div>
       </section>
 
-      <section className="lm-table-card weekly-calls-card"><div className="weekly-section-heading"><span>Customer contact</span><h2>Aircall and Doxy</h2><p>Aggregated from saved Daily dashboard reports for the selected week.</p></div><div className="lm-kpi-grid"><article><strong>{duration(weeklyAircallSeconds)}</strong><span>Aircall time</span></article><article><strong>{duration(weeklyDoxySeconds)}</strong><span>Doxy time</span></article><article><strong>{duration(weeklyAircallSeconds + weeklyDoxySeconds)}</strong><span>Total connected time</span></article><article><strong>{weeklyCalls?.lastWeek.savedDays ?? 0}/6</strong><span>Saved days included</span></article></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>Aircall calls</th><th>Aircall time</th><th>Doxy calls</th><th>Doxy time</th><th>Total time</th></tr></thead><tbody>{weeklyCallRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{count.format(row.aircallCalls)}</td><td>{duration(row.aircallSeconds)}</td><td>{count.format(row.doxyCalls)}</td><td>{duration(row.doxySeconds)}</td><td>{duration(row.aircallSeconds + row.doxySeconds)}</td></tr>)}{weeklyCalls && !weeklyCallRows.length ? <tr><td colSpan={6}>No saved Daily Aircall or Doxy data exists for last week.</td></tr> : null}</tbody></table></div></section>
+      <section className="lm-table-card weekly-calls-card"><div className="weekly-section-heading"><span>Customer contact</span><h2>Aircall and Doxy</h2><button className="daily-export-button" type="button" onClick={refreshWeeklyAircall} disabled={isAircallRefreshing}>{isAircallRefreshing ? 'Refreshing Aircall...' : 'Reconcile Aircall'}</button><p>Aircall uses the shared webhook and API ledger, including saved export corrections. Doxy comes only from the uploaded weekly meeting history. Monday-Saturday, New York time.</p></div><div className="lm-kpi-grid"><article><strong>{weeklyCalls?.lastWeek.aircallAvailable ? contactDuration(weeklyAircallSeconds) : 'Pending'}</strong><span>Aircall time</span></article><article><strong>{weeklyCalls?.lastWeek.doxyUploaded ? contactDuration(weeklyDoxySeconds) : 'Pending'}</strong><span>Doxy time</span></article><article><strong>{weeklyCalls?.lastWeek.doxyUploaded && weeklyCalls.lastWeek.aircallAvailable ? contactDuration(weeklyAircallSeconds + weeklyDoxySeconds) : 'Pending'}</strong><span>Total connected time</span></article><article><strong>{weeklyCalls?.lastWeek.doxyUploaded ? 'Uploaded' : 'Upload needed'}</strong><span>Weekly Doxy history</span></article></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>Aircall calls</th><th>Aircall time</th><th>Doxy calls</th><th>Doxy time</th><th>Total time</th></tr></thead><tbody>{weeklyCallRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{weeklyCalls?.lastWeek.aircallAvailable ? count.format(row.aircallCalls) : 'Pending'}</td><td>{weeklyCalls?.lastWeek.aircallAvailable ? contactDuration(row.aircallSeconds) : 'Pending'}</td><td>{weeklyCalls?.lastWeek.doxyUploaded ? count.format(row.doxyCalls) : 'Pending'}</td><td>{weeklyCalls?.lastWeek.doxyUploaded ? contactDuration(row.doxySeconds) : 'Pending'}</td><td>{weeklyCalls?.lastWeek.doxyUploaded && weeklyCalls.lastWeek.aircallAvailable ? contactDuration(row.aircallSeconds + row.doxySeconds) : 'Pending'}</td></tr>)}{weeklyCalls && !weeklyCallRows.length ? <tr><td colSpan={6}>No Aircall activity or uploaded Doxy data exists for this week.</td></tr> : null}</tbody></table></div></section>
 
       <section className="lm-table-card"><div className="weekly-section-heading"><span>HubSpot sales quality</span><h2>Average ticket</h2><p>Paid HubSpot revenue divided by paid deals, compared with two weeks ago.</p></div><div className="lm-table-wrap"><table><thead><tr><th>Agent</th><th>Last week</th><th>Two weeks ago</th><th>Change</th></tr></thead><tbody>{averageTicketRows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{money.format(row.last)}</td><td>{money.format(row.prior)}</td><td className={row.last >= row.prior ? 'positive' : 'negative'}>{row.last >= row.prior ? '↗' : '↘'} {money.format(Math.abs(row.last - row.prior))}</td></tr>)}{activeReport && !averageTicketRows.length ? <tr><td colSpan={4}>No paid deals were found for this team.</td></tr> : null}</tbody></table></div></section>
 

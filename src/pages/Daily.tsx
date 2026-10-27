@@ -1,3 +1,4 @@
+import type { AircallQuality } from '../../api/_lib/aircall-ledger.ts'
 import { type ChangeEvent, useEffect, useRef, useState } from 'react'
 import { toPng } from 'html-to-image'
 
@@ -21,11 +22,15 @@ type DailyRow = {
   sales: number
   balance: number
   observation: string
+  hubSpotMissing?: boolean
 }
 
 type DailyResponse = {
+  aircallQuality?: AircallQuality
+  storageWarning?: string
   agents: Array<{
     name: string
+    hubSpotMissing?: boolean
     numbersCalled: number
     totalIntents: number
     validCalls: number
@@ -170,6 +175,7 @@ function rowsFromDailyResponse(team: DailySection, payload: DailyResponse, staff
     const agent = payload.agents.find((candidate) => candidate.name === row.staff)
     return agent ? {
       ...row,
+      hubSpotMissing: agent.hubSpotMissing,
       called: safeNumber(agent.numbersCalled), intents: safeNumber(agent.totalIntents), valid: safeNumber(agent.validCalls),
       average: safeNumber(agent.validCalls) ? formatDuration(safeNumber(agent.averageCallSeconds)) : '—',
       aircall: formatDuration(safeNumber(agent.totalTalkSeconds)), injections: safeNumber(agent.injections), nad: safeNumber(agent.nad),
@@ -340,7 +346,7 @@ function Daily() {
           const payload = await response.json() as DailyResponse
           if (cancelled) return
           setRows(activeReportRows(rowsFromDailyResponse(activeSection, payload, teamRoster[activeSection])))
-          setSourceWarning(payload.hubSpotAvailable === false ? (payload.hubSpotError ?? 'HubSpot sales were unavailable.') : '')
+          setSourceWarning([payload.hubSpotAvailable === false ? (payload.hubSpotError ?? 'HubSpot sales were unavailable.') : '', ...(payload.aircallQuality?.warnings ?? []), payload.storageWarning ?? ''].filter(Boolean).join(' '))
           setHasLiveData(true); setReportSource('saved'); setError('')
           setSupplements(productsFromDailyResponse(payload, 'productSales'))
           setPeptides(productsFromDailyResponse(payload, 'peptideSales'))
@@ -353,7 +359,7 @@ function Daily() {
         if (cached) {
           const saved = JSON.parse(cached) as SavedDailyReport
           if (saved.team === activeSection && saved.fromDate === fromDate && saved.toDate === toDate && Array.isArray(saved.rows)) {
-            setRows(activeReportRows(saved.rows.filter((row) => teamRoster[activeSection].includes(row.staff)))); setSourceWarning(saved.sourceWarning ?? ''); setHasLiveData(true); setReportSource('saved'); setError(''); setSupplements(null); setPeptides(null); return
+            setRows(activeReportRows(saved.rows.filter((row) => teamRoster[activeSection].includes(row.staff)))); setSourceWarning([saved.sourceWarning ?? '', 'Showing a browser-cached report; the Aircall ledger could not be refreshed.'].filter(Boolean).join(' ')); setHasLiveData(true); setReportSource('saved'); setError(''); setSupplements(null); setPeptides(null); return
           }
         }
       } catch { /* No browser cache is available. */ }
@@ -561,7 +567,7 @@ function Daily() {
           balance: safeNumber(agent.balance),
         } : row
       })
-      const warning = payload.hubSpotAvailable === false ? (payload.hubSpotError ?? 'HubSpot sales were unavailable.') : ''
+      const warning = [payload.hubSpotAvailable === false ? (payload.hubSpotError ?? 'HubSpot sales were unavailable.') : '', ...(payload.aircallQuality?.warnings ?? []), payload.storageWarning ?? ''].filter(Boolean).join(' ')
       setRows(activeReportRows(fetchedRows))
       setSourceWarning(warning)
       setHasLiveData(true)
@@ -688,7 +694,7 @@ function Daily() {
                 {hasLiveData && <button className="daily-export-button" type="button" onClick={exportReportImage} disabled={isExporting}>
                   {isExporting ? 'Creating image…' : 'Export image'}
                 </button>}
-                <small>{hasLiveData ? (reportSource === 'saved' ? 'Saved report' : 'Live Aircall + HubSpot') : 'Awaiting fetch'}</small>
+                <small>{hasLiveData ? (reportSource === 'saved' ? 'Saved report' : 'Aircall ledger + HubSpot') : 'Awaiting fetch'}</small>
               </div>
             </div>
             {isLoading && <div className="daily-fetch-loader" role="status" aria-live="polite">
@@ -697,9 +703,9 @@ function Daily() {
               <small><b>{elapsedSeconds}s elapsed</b>{elapsedSeconds < 20 ? `About ${20 - elapsedSeconds}s remaining` : 'Finishing up…'}</small>
             </div>}
             {error && <div className="daily-error" role="alert">{error}</div>}
-            {sourceWarning && <div className="daily-warning" role="status">Aircall loaded, but HubSpot did not: {sourceWarning}</div>}
+            {sourceWarning && <div className="daily-warning" role="status">Report data needs attention: {sourceWarning}</div>}
             {doxyUpload && <div className="daily-success" role="status">Doxy uploaded: {doxyUpload}</div>}
-            {hasLiveData && <div className="daily-source-note">Aircall supplies call activity. HubSpot supplies products, sales, and refund-adjusted balance. Doxy values come from the uploaded meeting-history CSV.</div>}
+            {hasLiveData && <div className="daily-source-note">The shared Aircall webhook and API ledger supplies call activity. HubSpot supplies products, sales, and refund-adjusted balance. Doxy values come from the uploaded meeting-history CSV.</div>}
             {hasLiveData ? <><div className="daily-table-scroll">
               <table className="daily-table daily-sales-table">
                 <colgroup>
@@ -729,7 +735,7 @@ function Daily() {
                   <th scope="row"><span className="daily-avatar">{row.staff.split(' ').map((name) => name[0]).join('')}</span>{row.staff}</th>
                   <td>{row.called}</td><td>{row.intents}</td><td>{row.valid}</td><td>{row.average}</td><td>{row.aircall}</td>
                   <td>{row.doxyCalls ?? 0}</td><td>{row.doxyValid ?? 0}</td><td>{row.doxyAverage || '—'}</td><td>{row.doxyTotal || '0:00:00'}</td><td>{formatDuration(durationSeconds(row.aircall) + durationSeconds(row.doxyTotal))}</td>
-                  <td>{row.injections}</td><td>{row.nad}</td><td>{row.lipoMino}</td><td>{row.plan}</td><td>{row.peptides}</td><td className="daily-money">{money.format(row.sales)}</td><td className="daily-money">{money.format(row.balance)}</td><td>{row.observation}</td>
+                  <td>{row.hubSpotMissing ? 'Pending' : row.injections}</td><td>{row.hubSpotMissing ? 'Pending' : row.nad}</td><td>{row.hubSpotMissing ? 'Pending' : row.lipoMino}</td><td>{row.hubSpotMissing ? 'Pending' : row.plan}</td><td>{row.hubSpotMissing ? 'Pending' : row.peptides}</td><td className="daily-money">{row.hubSpotMissing ? 'Pending' : money.format(row.sales)}</td><td className="daily-money">{row.hubSpotMissing ? 'Pending' : money.format(row.balance)}</td><td>{row.observation}</td>
                 </tr>)}</tbody>
                 <tfoot><tr><th>Total</th><td>{totals.called}</td><td>{totals.intents}</td><td>{totals.valid}</td><td>{averageTotal}</td><td>{formatDuration(totals.talk)}</td>
                   <td>{totals.doxyCalls}</td><td>{totals.doxyValid}</td><td>{doxyAverageTotal}</td><td>{formatDuration(totals.doxyTalk)}</td><td>{formatDuration(totals.talk + totals.doxyTalk)}</td>
