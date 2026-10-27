@@ -19,7 +19,7 @@ The report server reconciles the preceding 24 hours at startup and every 30 minu
 
 Runtime uses the existing Supabase URL/service-role key, Aircall API ID/token, and webhook token. The administration tool additionally needs `SUPABASE_ACCESS_TOKEN`. Credentials remain in environment configuration.
 
-For a new installation, apply `scripts/create-aircall-ledger.sql` or the complete `supabase-schema.sql`. Tables and RPC functions are service-role only; browser clients receive report aggregates.
+For a new installation, apply `scripts/create-aircall-ledger.sql` and `scripts/create-weekly-report-merge.sql`, or the complete `supabase-schema.sql`. Tables and RPC functions are service-role only; browser clients receive report aggregates.
 
 ```powershell
 node scripts/aircall-ledger-admin.mjs migrate
