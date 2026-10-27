@@ -102,7 +102,7 @@ export default function WeeklyTeamReport({ report, team, error, onReconcile, rec
   const withAverage = (rows: Row[]) => [...rows, { name: 'Average', last: mean(rows.map((row) => row.last)), prior: mean(rows.map((row) => row.prior)) }]
 
   return <div className="wr-report">
-    <header className="weekly-heading"><div><p className="eyebrow">Weekly {team === 'sales' ? 'sales' : 'customer service'} report</p><h1>{team === 'sales' ? 'Sales' : 'Customer Service'} performance</h1><p>{last ? `${last.fromDate} through ${last.toDate} ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· New York time ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· Monday-Saturday` : 'Loading HubSpot reporting data...'}</p></div><span>HubSpot + call ledger</span></header>
+    <header className="weekly-heading"><div><p className="eyebrow">Weekly {team === 'sales' ? 'sales' : 'customer service'} report</p><h1>{team === 'sales' ? 'Sales' : 'Customer Service'} performance</h1><p>{last ? `${last.fromDate} through ${last.toDate} | New York time | Monday-Saturday` : 'Loading HubSpot reporting data...'}</p></div><span>HubSpot + call ledger</span></header>
     {last?.checkedAt ? <p className="wr-note">HubSpot checked {new Date(last.checkedAt).toLocaleString('en-US', { timeZone: 'America/New_York' })} (New York time).</p> : null}
     {error ? <div className="daily-error" role="alert">Weekly report unavailable: {error}</div> : null}
     {last?.warnings?.map((warning) => <div className="daily-warning" role="status" key={warning.message}>{warning.seller}: {warning.message}</div>)}
