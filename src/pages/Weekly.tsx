@@ -31,7 +31,7 @@ type WeeklyReport = { timezone: string; contactRosters?: { sales: ContactAgent[]
 type WeeklyTeam = 'sales' | 'cs' | 'lm' | 'cc'
 
 const csWeeklyNames = ['arles martinez', 'brayam zuluaga', 'brayan zuluaga', 'edmilson velasquez', 'edmilson morales', 'alice f', 'aline strelow', 'ailene nuevas']
-const salesWeeklyNames = ['alejandra oyala', 'alejandra olaya', 'carlos vargas', 'yaneth rodriguez', 'diana villalobos']
+const salesWeeklyNames = ['alejandra oyala', 'alejandra olaya', 'carlos vargas', 'yaneth rodriguez', 'diana villalobos', 'helen gutierrez']
 const excludedWeeklyNames = ['denis reis', 'paula alfonso', 'maria sandoval']
 const isCsWeeklySeller = (name: string) => csWeeklyNames.includes(name.trim().toLowerCase())
 const isSalesWeeklySeller = (name: string) => salesWeeklyNames.includes(name.trim().toLowerCase())
