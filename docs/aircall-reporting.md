@@ -8,7 +8,7 @@ Daily and Weekly use `aircall_reporting_calls`, keyed by Aircall call ID. Weekly
 - `call.ended` finalizes a call. Older provisional events cannot regress finalized data. Duplicate deliveries update the same call.
 - Successful internal transfer events determine the final recipient. Late transfer deliveries rebuild an already finalized webhook record. Failed transfers do not change ownership.
 - API records fill missing calls and missing fields. Missing API agent details never erase captured webhook identities. Final API timestamps resolve differences of up to one second, validated against the platform export. Larger timing differences and unverified agent changes remain flagged, with comparison evidence retained.
-- Row-level CSV corrections are authoritative and protected from later API/webhook overwrites. An Aircall upload corrects both Daily and Weekly, while Doxy uploads affect only the selected Weekly team.
+- Row-level CSV corrections are authoritative and protected from later API/webhook overwrites. Administrative Aircall corrections apply to both Daily and Weekly. The report UI only accepts Doxy uploads, affecting the selected Weekly team.
 - Known attempts count once, including in-progress calls. Talk time and valid-call averages include finalized calls only. Pending, unassigned, conflicting, and failed-sync conditions appear as report warnings.
 
 Daily Fetch reconciles the requested range with the API. Saved Daily views refresh call metrics from the ledger while preserving saved sales and Doxy fields. Newly recovered agents with no saved sales figures show Pending until Fetch rebuilds the sales section.
@@ -32,7 +32,7 @@ node scripts/recheck-aircall-conflicts.mjs 2026-09-28
 
 Use `functions` instead of `migrate` when changing only merge functions on an active database. It avoids table/trigger DDL during webhook ingestion. Date-range API catch-up resumes completed days and preserves partial pages. The September 28 start includes the first October reporting week. API catch-up includes Sundays in the ledger; Weekly filters them out.
 
-Use the Weekly Aircall CSV upload or `scripts/reconcile-aircall-ledger.mjs` for independently verified historical corrections. Keep raw event history. A record unavailable in both the API and finalized webhook history remains incomplete until an export or another authoritative record supplies it; an API success alone does not prove historical completeness.
+Use `scripts/reconcile-aircall-ledger.mjs` for independently verified historical corrections. Keep raw event history. A record unavailable in both the API and finalized webhook history remains incomplete until an export or another authoritative record supplies it; an API success alone does not prove historical completeness.
 
 ## Validation
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react'
-import { aggregateWeeklyDoxy, aggregateWeeklyAircallCsv } from '../../api/_lib/weekly-contact.ts'
+import { aggregateWeeklyDoxy } from '../../api/_lib/weekly-contact.ts'
 import WeeklyTeamReport from '../components/WeeklyTeamReport'
 import type { WeeklyReport } from '../components/weekly-types'
 
@@ -74,7 +74,6 @@ function Weekly() {
   const [isAircallRefreshing, setIsAircallRefreshing] = useState(false)
   const [isHubSpotRefreshing, setIsHubSpotRefreshing] = useState(false)
   const doxyFileInput = useRef<HTMLInputElement>(null)
-  const aircallFileInput = useRef<HTMLInputElement>(null)
   const loadReport = useCallback(async () => {
     const response = await fetch(weeklyApiUrl(`/api/weekly-report?week=${encodeURIComponent(selectedWeek)}`))
     const payload = await response.json()
@@ -114,16 +113,16 @@ function Weekly() {
     finally { setRefreshing(false) }
   }
 
-  async function uploadWeeklyContact(event: ChangeEvent<HTMLInputElement>, source: 'aircall' | 'doxy') {
+  async function uploadWeeklyDoxy(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]; event.target.value = ''
     if (!file || (activeTeam !== 'sales' && activeTeam !== 'cs')) return
     setError(''); setDoxyUpload(''); setIsDoxyUploading(true)
     try {
       if (!file.name.toLowerCase().endsWith('.csv')) throw new Error('Please upload the platform export as a CSV file.')
       const text = await file.text()
-      const metrics = source === 'aircall' ? aggregateWeeklyAircallCsv(text, selectedWeek, shiftDate(selectedWeek, 5), activeTeam, report?.contactRosters?.[activeTeam]) : aggregateWeeklyDoxy(text, selectedWeek, shiftDate(selectedWeek, 5), activeTeam, report?.contactRosters?.[activeTeam])
+      const metrics = aggregateWeeklyDoxy(text, selectedWeek, shiftDate(selectedWeek, 5), activeTeam, report?.contactRosters?.[activeTeam])
       if (!metrics.length) throw new Error(`No ${activeTeam === 'sales' ? 'Sales' : 'Customer Service'} calls were found in the selected week.`)
-      const response = await fetch(weeklyApiUrl(`/api/weekly-report?week=${encodeURIComponent(selectedWeek)}&team=${activeTeam}&mode=${source}`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agents: metrics, fileName: file.name, ...(source === 'aircall' ? { csvText: text } : {}) }) })
+      const response = await fetch(weeklyApiUrl(`/api/weekly-report?week=${encodeURIComponent(selectedWeek)}&team=${activeTeam}&mode=doxy`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agents: metrics, fileName: file.name }) })
       const payload = await response.json() as { message?: string; calls?: number }
       if (!response.ok) throw new Error(payload.message ?? 'Unable to save weekly contact data.')
       await loadReport(); setDoxyUpload(`${file.name}: ${payload.calls ?? 0} calls saved for the selected week.`)
@@ -145,8 +144,7 @@ function Weekly() {
         <button type="button" className={activeTeam === 'cs' ? 'active' : ''} onClick={() => setActiveTeam('cs')}><b>CS</b><span>Customer Service<small>CS team report</small></span></button>
         <button type="button" className={activeTeam === 'lm' ? 'active' : ''} onClick={() => setActiveTeam('lm')}><b>LM</b><span>Lead Management<small>LM team report</small></span></button>
         <button type="button" className={activeTeam === 'cc' ? 'active' : ''} onClick={() => setActiveTeam('cc')}><b>CC</b><span>CC Report<small>Customer Care</small></span></button>
-        {(activeTeam === 'sales' || activeTeam === 'cs') ? <div className="weekly-doxy-upload"><span>Aircall history</span><input ref={aircallFileInput} type="file" accept=".csv,text/csv" onChange={(event) => uploadWeeklyContact(event, 'aircall')} /><button type="button" onClick={() => aircallFileInput.current?.click()} disabled={isDoxyUploading || isHubSpotRefreshing || isAircallRefreshing || !report}><b>CSV</b><span>Upload Aircall</span></button><small>Use the full week's New York Call History export.</small></div> : null}
-        {(activeTeam === 'sales' || activeTeam === 'cs') ? <div className="weekly-doxy-upload"><span>Doxy history</span><input ref={doxyFileInput} type="file" accept=".csv,text/csv" onChange={(event) => uploadWeeklyContact(event, 'doxy')} /><button type="button" onClick={() => doxyFileInput.current?.click()} disabled={isDoxyUploading || isHubSpotRefreshing || isAircallRefreshing || !report}><b>CSV</b><span>{isDoxyUploading ? 'Uploadingâ€¦' : 'Upload Doxy'}</span></button><small>Applies to the selected week and team.</small></div> : null}
+        {(activeTeam === 'sales' || activeTeam === 'cs') ? <div className="weekly-doxy-upload"><span>Doxy history</span><input ref={doxyFileInput} type="file" accept=".csv,text/csv" onChange={(event) => uploadWeeklyDoxy(event)} /><button type="button" onClick={() => doxyFileInput.current?.click()} disabled={isDoxyUploading || isHubSpotRefreshing || isAircallRefreshing || !report}><b>CSV</b><span>{isDoxyUploading ? 'Uploadingâ€¦' : 'Upload Doxy'}</span></button><small>Applies to the selected week and team.</small></div> : null}
       </aside>
       <div className="weekly-content">
       <div className="weekly-week-picker"><label>Report week<select value={selectedWeek} disabled={isDoxyUploading || isAircallRefreshing || isHubSpotRefreshing} onChange={(event) => { setSelectedWeek(event.target.value); setReport(null); setError(''); setLoadSeconds(null); setElapsedSeconds(0); setDoxyUpload('') }}>{weekOptions.map((week) => <option value={week} key={week}>{weekLabel(week)}</option>)}</select></label>{activeTeam === 'sales' || activeTeam === 'cs' ? <button className="daily-export-button" type="button" onClick={() => refreshWeeklyData('hubspot')} disabled={isDoxyUploading || isAircallRefreshing || isHubSpotRefreshing || !report}>{isHubSpotRefreshing ? 'Refreshing HubSpot...' : 'Refresh HubSpot'}</button> : null}{report ? <span>{report.source?.selected === 'saved' ? 'Saved weekly data' : 'Fetched live and saved'} Â· comparison {report.source?.prior === 'saved' ? 'loaded from database' : 'fetched live and saved'}</span> : null}</div>
