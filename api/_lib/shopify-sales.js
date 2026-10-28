@@ -8,9 +8,9 @@ const SALES_QUERY = `query SalesForSupplements($after: String, $search: String!)
       legacyResourceId
       name
       createdAt
+      email
       sourceName
       displayFulfillmentStatus
-      fulfillments(first: 100) { createdAt status }
       currentTotalPriceSet { shopMoney { amount } }
       currentTotalTaxSet { shopMoney { amount } }
       totalShippingPriceSet { shopMoney { amount } }
@@ -88,7 +88,7 @@ async function shopifyGraphql(query, variables) {
   return payload.data
 }
 
-export async function fetchShopifySales(date, options = {}) {
+export async function fetchShopifySales(date) {
   validateDate(date)
   const rows = []
   let after = null
@@ -96,25 +96,16 @@ export async function fetchShopifySales(date, options = {}) {
   do {
     const data = await shopifyGraphql(SALES_QUERY, {
       after,
-      // A later edit to an order changes updated_at, so an updated_at window can
-      // permanently hide historical fulfillments from a subsequent COGS fetch.
-      // Search orders created in the prior month, then use the fulfillment
-      // timestamp below as the actual recognition date. This covers delayed
-      // fulfillment without scanning the store's entire history on every click.
-      search: options.costRecognition
-        ? `created_at:>=${previousDate(date, 31)} created_at:<${nextDate(date)}`
-        : `created_at:>=${date} created_at:<${nextDate(date)}`,
+      // Costs and fees belong to the order's creation day in New York.
+      // Pad the search window, then filter locally so UTC midnight and DST
+      // boundaries cannot move an order into the wrong report day.
+      search: `created_at:>=${previousDate(date, 1)} created_at:<${nextDate(nextDate(date))}`,
     })
     const orders = data.orders
 
     for (const order of orders.nodes) {
-      const eligibleFulfillment = ['FULFILLED', 'IN_PROGRESS'].includes(String(order.displayFulfillmentStatus || '').toUpperCase())
-        ? (order.fulfillments ?? []).filter((fulfillment) =>
-            fulfillment.createdAt && !['CANCELLED', 'ERROR', 'FAILURE'].includes(String(fulfillment.status || '').toUpperCase()),
-          ).sort((left, right) => left.createdAt.localeCompare(right.createdAt))[0]
-        : null
-      const costRecognitionDate = eligibleFulfillment ? easternDate(eligibleFulfillment.createdAt) : null
-      if (options.costRecognition && costRecognitionDate !== date) continue
+      const costRecognitionDate = easternDate(order.createdAt)
+      if (costRecognitionDate !== date) continue
       const refundByLineItem = new Map()
       for (const refund of order.refunds ?? []) {
         for (const refundedItem of refund.refundLineItems?.nodes ?? []) {
@@ -138,7 +129,7 @@ export async function fetchShopifySales(date, options = {}) {
         const lineReturnFees = index === 0 ? returnFees : 0
         rows.push({
           id: `${order.name}-${item.id}`,
-          day: order.createdAt.slice(0, 10),
+          day: costRecognitionDate,
           sale_id: String(order.legacyResourceId),
           order_name: order.name,
           product_title: item.product?.title || item.name,
@@ -165,7 +156,8 @@ export async function fetchShopifySales(date, options = {}) {
           shipping_country: order.shippingAddress?.countryCodeV2 ?? null,
           shipping_province: order.shippingAddress?.provinceCode ?? null,
           shipping_service: order.shippingLine?.code || order.shippingLine?.title || null,
-          sales_channel: order.sourceName || null,
+          sales_channel: /tiktok/i.test(order.sourceName ?? '') || /@scs\.tiktokw\.us$/i.test(order.email ?? '')
+            ? 'tiktok' : order.sourceName || null,
           fulfillment_status: order.displayFulfillmentStatus || null,
           cost_recognition_date: costRecognitionDate,
         })
@@ -285,4 +277,58 @@ export async function getSavedShopifySalesDates() {
   const payload = await response.json().catch(() => [])
   if (!response.ok) throw new Error(payload.message || `Supabase history failed with ${response.status}`)
   return { dates: payload.map((row) => row.report_date).filter(Boolean) }
+}
+
+export async function getSavedShopifyMonth(date) {
+  validateDate(date)
+  const start = `${date.slice(0, 7)}-01`
+  const load = async (table) => {
+    const params = new URLSearchParams({ select: '*', order: 'report_date.asc', limit: '1000' })
+    params.append('report_date', `gte.${start}`)
+    params.append('report_date', `lte.${date}`)
+    const response = await fetch(`${supabaseRestUrl()}/${table}?${params}`, { headers: supabaseHeaders() })
+    const payload = await response.json()
+    if (!response.ok) throw new Error(payload.message || `Monthly report failed with ${response.status}`)
+    return payload
+  }
+  const [sales, cogs, ads] = await Promise.all([
+    load('shopify_sales_reports'), load('shopify_cogs_reports'), load('supplements_ads_reports'),
+  ])
+  const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0
+  const monthly = { qty: 0, sales: 0, shopifyQty: 0, shopifySales: 0, tiktokQty: 0, tiktokSales: 0,
+    meta: 0, google: 0, tiktok: 0, cogs: 0, shipping: 0, fulfillment: 0, processingSupliful: 0, processingShopify: 0 }
+  const costs = new Map(cogs.map((row) => [row.report_date, row.report_data]))
+  const salesDates = new Set(sales.map((row) => row.report_date))
+  const adsDates = new Set(ads.map((row) => row.report_date))
+  for (const snapshot of sales) for (const row of snapshot.report_data?.rows ?? []) {
+    monthly.qty += number(row.qty)
+    monthly.sales += number(row.total_sales)
+    const channel = /tiktok/i.test(row.sales_channel ?? '') ? 'tiktok' : 'shopify'
+    monthly[`${channel}Qty`] += number(row.qty)
+    monthly[`${channel}Sales`] += number(row.total_sales)
+  }
+  const adsByDate = new Map(ads.map((row) => [row.report_date, row]))
+  const missingDates = []
+  for (let day = start; day <= date; day = nextDate(day)) {
+    if (!salesDates.has(day) || !adsDates.has(day)) missingDates.push(day)
+    const ad = adsByDate.get(day) ?? {}
+    monthly.meta += number(ad.meta_cost)
+    monthly.google += number(ad.google_cost)
+    monthly.tiktok += number(ad.tiktok_cost)
+    if (costs.has(day)) {
+      for (const row of costs.get(day) ?? []) {
+        monthly.cogs += number(row.subtotal)
+        monthly.shipping += number(row.shipping)
+        monthly.fulfillment += number(row.fulfillment_supliful)
+        monthly.processingSupliful += number(row.processing_supliful)
+        monthly.processingShopify += number(row.processing_shopify)
+      }
+    } else {
+      monthly.cogs += number(ad.cogs)
+      monthly.shipping += number(ad.shipping)
+      monthly.fulfillment += number(ad.fulfillment)
+      monthly.processingSupliful += number(ad.processing)
+    }
+  }
+  return { monthly, missingDates }
 }

@@ -47,6 +47,7 @@ type ShopifySalesRow = {
   qty: number
   sales: number
   product_name: string
+  sales_channel?: string | null
 }
 
 type ShopifyHistoricalProductRow = {
@@ -78,6 +79,10 @@ type SupplementProduct = { id: string; name: string; match_name: string; unit_co
 type FinanceTotals = {
   qty: number
   sales: number
+  shopifyQty: number
+  shopifySales: number
+  tiktokQty: number
+  tiktokSales: number
   meta: number
   tiktok: number
   google: number
@@ -88,12 +93,7 @@ type FinanceTotals = {
   processingShopify: number
 }
 
-type FinanceOverview = { daily: FinanceTotals; monthly: FinanceTotals }
-
-const emptyFinanceTotals = (): FinanceTotals => ({
-  qty: 0, sales: 0, meta: 0, tiktok: 0, google: 0, cogs: 0, shipping: 0,
-  fulfillment: 0, processingSupliful: 0, processingShopify: 0,
-})
+type FinanceOverview = { daily: FinanceTotals; monthly: FinanceTotals | null }
 
 const emptyAdsSummary = (date: string): AdsSummaryRow => ({ date, meta: '', google: '', tiktok: '', cogs: '', shipping: '', fulfillment: '', processing: '' })
 
@@ -112,7 +112,7 @@ const orderHeaders = [
   'Name',
   'Email',
   'Financial Status',
-  'Paid at',
+  'Paid at (New York)',
   'Lineitem quantity',
   'Lineitem name',
   'Lineitem price',
@@ -178,6 +178,10 @@ function numericValue(value: string | number | null | undefined) {
 
 function summarizeFinance(salesRows: ShopifySalesRow[], cogsRows: ShopifyCogsRow[], ads?: AdsSummaryRow): FinanceTotals {
   return {
+    shopifyQty: salesRows.filter((row) => !/tiktok/i.test(row.sales_channel ?? '')).reduce((sum, row) => sum + numericValue(row.qty), 0),
+    shopifySales: salesRows.filter((row) => !/tiktok/i.test(row.sales_channel ?? '')).reduce((sum, row) => sum + numericValue(row.total_sales), 0),
+    tiktokQty: salesRows.filter((row) => /tiktok/i.test(row.sales_channel ?? '')).reduce((sum, row) => sum + numericValue(row.qty), 0),
+    tiktokSales: salesRows.filter((row) => /tiktok/i.test(row.sales_channel ?? '')).reduce((sum, row) => sum + numericValue(row.total_sales), 0),
     qty: salesRows.reduce((sum, row) => sum + numericValue(row.qty), 0),
     // Shopify's order total is emitted once per order. Summing line totals can
     // double-count expanded multi-pack items and does not match Shopify Finance.
@@ -638,6 +642,13 @@ export default function Supplements() {
     }
   }
 
+  async function loadMonthlyOverview(date: string) {
+    const response = await fetch(getApiUrl(`/api/shopify/sales?month=1&date=${encodeURIComponent(date)}`))
+    const payload = await response.json() as { monthly: FinanceTotals; missingDates?: string[]; message?: string }
+    if (!response.ok) throw new Error(payload.message || 'Unable to load month-to-date totals')
+    return payload
+  }
+
   async function fetchDailyOverview() {
     if (!dateInput) return
     const date = dateInput
@@ -709,10 +720,13 @@ export default function Supplements() {
       if (ordersResult.status === 'fulfilled') setSavedOrderDates((dates) => new Set(dates).add(date))
       if (cogsResult.status === 'fulfilled') setSavedCogsDates((dates) => new Set(dates).add(date))
 
-      setOverview({ daily: summarizeFinance(sales, costs, nextAds), monthly: emptyFinanceTotals() })
+      setOverview({ daily: summarizeFinance(sales, costs, nextAds), monthly: null })
+      const month = await loadMonthlyOverview(date)
+      setOverview({ daily: summarizeFinance(sales, costs, nextAds), monthly: month.monthly })
 
       const failures = [salesResult, ordersResult, cogsResult, metaResult, googleResult, savedAdsResult]
         .flatMap((result) => result.status === 'rejected' ? [result.reason instanceof Error ? result.reason.message : 'A source failed to refresh.'] : [])
+      if (month.missingDates?.length) failures.push(`Month-to-date totals are incomplete: missing saved sales or ADS data for ${month.missingDates.join(', ')}.`)
       if (cogsResult.status === 'fulfilled') failures.push(...(cogsResult.value.warnings ?? []))
       if (failures.length) setOverviewError(`Some sources could not be refreshed: ${failures.join(' ')}`)
       setOverviewMessage(`All available report sections were refreshed for ${date}.`)
@@ -770,7 +784,10 @@ export default function Supplements() {
       setOrderRows(orders)
       setCogsRows(costs)
       setAdsRows((rows) => [...rows.filter((row) => row.date !== date), ads].sort((a, b) => a.date.localeCompare(b.date)))
-      setOverview({ daily: summarizeFinance(sales, costs, ads), monthly: emptyFinanceTotals() })
+      setOverview({ daily: summarizeFinance(sales, costs, ads), monthly: null })
+      const month = await loadMonthlyOverview(date)
+      setOverview({ daily: summarizeFinance(sales, costs, ads), monthly: month.monthly })
+      if (month.missingDates?.length) setOverviewError(`Month-to-date totals are incomplete: missing saved sales or ADS data for ${month.missingDates.join(', ')}.`)
 
       const available = [sales.length ? 'sales' : '', orders.length ? 'orders' : '', costs.length ? 'COGS' : '', savedAds ? 'ADS' : ''].filter(Boolean)
       setOverviewMessage(available.length
@@ -833,20 +850,21 @@ export default function Supplements() {
             <table className="supplements-table">
               <thead><tr><th scope="col">Description</th><th scope="col">Qty. Sold</th><th scope="col">Sales Amount</th></tr></thead>
               <tbody>
-                <tr><th scope="row">Shopify Sales Daily</th><td>{daily ? daily.qty.toLocaleString('en-US') : <EmptyAmount />}</td><td>{daily ? moneyAmount(daily.sales) : <EmptyAmount />}</td></tr>
+                <tr><th scope="row">Shopify Sales Daily</th><td>{daily ? daily.shopifyQty.toLocaleString('en-US') : <EmptyAmount />}</td><td>{daily ? moneyAmount(daily.shopifySales) : <EmptyAmount />}</td></tr>
+                <tr><th scope="row">TikTok Shop Sales Daily</th><td>{daily ? daily.tiktokQty.toLocaleString('en-US') : <EmptyAmount />}</td><td>{daily ? moneyAmount(daily.tiktokSales) : <EmptyAmount />}</td></tr>
                 <tr className="supplements-total"><th scope="row">Gross Profit Daily</th><td><EmptyAmount /></td><td>{daily ? moneyAmount(daily.sales) : <EmptyAmount />}</td></tr>
                 {dailyExpenses.map((label, index) => <tr key={label}><th scope="row">{label}</th><td /><td>{daily ? moneyAmount(dailyExpenseValues[index]) : <EmptyAmount />}</td></tr>)}
                 <tr className="supplements-total"><th scope="row">Total Spend Daily</th><td /><td>{daily ? moneyAmount(totalSpend(daily)) : <EmptyAmount />}</td></tr>
                 <tr className="supplements-net"><th scope="row">Net Profit Daily</th><td><EmptyAmount /></td><td>{daily ? moneyAmount(daily.sales - totalSpend(daily)) : <EmptyAmount />}</td></tr>
-                <tr className="supplements-month"><th scope="row">Gross Profit Monthly</th><td><EmptyAmount /></td><td><EmptyAmount /></td></tr>
-                <tr><th scope="row">Spend Monthly <small>(ads, GMV Max &amp; fees)</small></th><td><EmptyAmount /></td><td><EmptyAmount /></td></tr>
-                <tr className="supplements-net"><th scope="row">Net Profit Monthly</th><td><EmptyAmount /></td><td><EmptyAmount /></td></tr>
+                <tr className="supplements-month"><th scope="row">Gross Profit Monthly</th><td><EmptyAmount /></td><td>{overview?.monthly ? moneyAmount(overview.monthly.sales) : <EmptyAmount />}</td></tr>
+                <tr><th scope="row">Spend Monthly <small>(ads, GMV Max &amp; fees)</small></th><td><EmptyAmount /></td><td>{overview?.monthly ? moneyAmount(totalSpend(overview.monthly)) : <EmptyAmount />}</td></tr>
+                <tr className="supplements-net"><th scope="row">Net Profit Monthly</th><td><EmptyAmount /></td><td>{overview?.monthly ? moneyAmount(overview.monthly.sales - totalSpend(overview.monthly)) : <EmptyAmount />}</td></tr>
               </tbody>
             </table>
           </div>
           {overviewError ? <p className="supplements-orders-feedback error" role="alert">{overviewError}</p> : null}
           {overviewMessage ? <p className="supplements-orders-feedback success" role="status">{overviewMessage}</p> : null}
-          <p className="supplements-note"><span /> Fetch all refreshes every sidebar section for this date. TikTok uses the value saved in the ADS sheet.</p>
+          <p className="supplements-note"><span /> Fetch all refreshes every sidebar section for this date. Dates use New York time. Monthly totals include saved reports from the first of the month through the selected date. TikTok ads use the value saved in the ADS sheet.</p>
         </div></> : view === 'ads' ? <section className="supplements-content" aria-labelledby="supplements-ads-title">
           <div className="supplements-table-heading">
             <div><span>Advertising spend</span><h2 id="supplements-ads-title">ADS</h2></div>
@@ -993,7 +1011,7 @@ export default function Supplements() {
                   <td title={row.name}>{row.name}</td>
                   <td title={row.email || undefined}>{row.email || '—'}</td>
                   <td title={row.financial_status.replaceAll('_', ' ')}>{row.financial_status.replaceAll('_', ' ')}</td>
-                  <td title={row.paid_at ? new Date(row.paid_at).toLocaleString() : undefined}>{row.paid_at ? new Date(row.paid_at).toLocaleString() : '—'}</td>
+                  <td title={row.paid_at ? new Date(row.paid_at).toLocaleString('en-US', { timeZone: 'America/New_York' }) : undefined}>{row.paid_at ? new Date(row.paid_at).toLocaleString('en-US', { timeZone: 'America/New_York' }) : '—'}</td>
                   <td>{row.lineitem_quantity}</td>
                   <td title={row.lineitem_name}>{row.lineitem_name}</td>
                   <td>{row.lineitem_price.toFixed(2)}</td>

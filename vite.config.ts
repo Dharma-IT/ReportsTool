@@ -9,7 +9,7 @@ import { promisify } from 'node:util'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { fetchShopifySupplementContacts, getSavedShopifyOrderDates, getSavedShopifyOrders, syncShopifyOrders } from './api/_lib/shopify-orders.js'
-import { getHistoricalShopifySales, getSavedShopifySales, getSavedShopifySalesDates, syncShopifySales, updateHistoricalShopifySales } from './api/_lib/shopify-sales.js'
+import { getHistoricalShopifySales, getSavedShopifySales, getSavedShopifySalesDates, getSavedShopifyMonth, syncShopifySales, updateHistoricalShopifySales } from './api/_lib/shopify-sales.js'
 import { getSavedShopifyCogs, getSavedShopifyCogsDates, saveShopifyCogs, syncShopifyCogs } from './api/_lib/shopify-cogs.js'
 import { fetchGoogleAdsCost } from './api/_lib/google-ads.js'
 import { fetchMetaAdsCost } from './api/_lib/meta-ads.js'
@@ -4346,7 +4346,9 @@ function shopifySalesApi(env: Record<string, string>): Plugin {
           process.env.SUPABASE_SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
           const requestUrl = new URL(request.url ?? '', 'http://localhost')
           const result = request.method === 'GET'
-            ? requestUrl.searchParams.get('history') === '1'
+            ? requestUrl.searchParams.get('month') === '1'
+              ? await getSavedShopifyMonth(requestUrl.searchParams.get('date') ?? '')
+              : requestUrl.searchParams.get('history') === '1'
               ? await getHistoricalShopifySales()
               : requestUrl.searchParams.get('dates') === '1'
               ? await getSavedShopifySalesDates()

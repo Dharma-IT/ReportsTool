@@ -1,4 +1,4 @@
-import { getHistoricalShopifySales, getSavedShopifySales, getSavedShopifySalesDates, syncShopifySales, updateHistoricalShopifySales } from '../_lib/shopify-sales.js'
+import { getHistoricalShopifySales, getSavedShopifySales, getSavedShopifySalesDates, getSavedShopifyMonth, syncShopifySales, updateHistoricalShopifySales } from '../_lib/shopify-sales.js'
 
 export default async function handler(request, response) {
   if (!['GET', 'POST'].includes(request.method)) {
@@ -9,7 +9,9 @@ export default async function handler(request, response) {
   try {
     const body = typeof request.body === 'string' ? JSON.parse(request.body) : request.body ?? {}
     const result = request.method === 'GET'
-      ? request.query?.history === '1'
+      ? request.query?.month === '1'
+        ? await getSavedShopifyMonth(String(request.query?.date ?? ''))
+        : request.query?.history === '1'
         ? await getHistoricalShopifySales()
         : request.query?.dates === '1'
         ? await getSavedShopifySalesDates()

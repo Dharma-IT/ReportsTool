@@ -86,15 +86,17 @@ export async function fetchShopifyOrderLineItems(from, to) {
   do {
     const data = await shopifyGraphql(ORDERS_QUERY, {
       after,
-      search: `created_at:>=${from} created_at:<${nextDate(to)}`,
+      search: `created_at:>=${previousDate(from)} created_at:<${nextDate(nextDate(to))}`,
     })
     const orders = data.orders
     for (const order of orders.nodes) {
+      const createdDate = easternDate(order.createdAt)
+      if (createdDate < from || createdDate > to) continue
       for (const lineitem of order.lineItems.nodes) {
         rows.push({
           shopify_order_id: order.legacyResourceId,
           shopify_lineitem_id: lineitem.id.split('/').at(-1),
-          order_date: from,
+          order_date: createdDate,
           name: order.name,
           email: order.email || null,
           financial_status: order.displayFinancialStatus,
@@ -234,16 +236,27 @@ export async function getSavedShopifyOrders(date) {
 export async function getSavedShopifyOrderDates() {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
   if (!serviceRoleKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY is not configured')
-  const params = new URLSearchParams({
-    select: 'order_date',
-    order: 'order_date.asc',
-    order_date: 'not.is.null',
-    limit: '10000',
-  })
-  const response = await fetch(`${supabaseRestUrl()}/shopify_order_line_items?${params}`, {
-    headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
-  })
-  const payload = await response.json().catch(() => [])
-  if (!response.ok) throw new Error(payload.message || `Supabase history failed with ${response.status}`)
-  return { dates: [...new Set(payload.map((row) => row.order_date).filter(Boolean))] }
+  const dates = new Set()
+  let offset = 0
+  // Supabase caps each response, even when a larger limit is requested.
+  // Read every page so later saved dates also receive the gold highlight.
+  while (true) {
+    const params = new URLSearchParams({
+      select: 'order_date',
+      order: 'order_date.asc,shopify_order_id.asc,shopify_lineitem_id.asc',
+      order_date: 'not.is.null',
+      limit: '1000',
+      offset: String(offset),
+    })
+    const response = await fetch(`${supabaseRestUrl()}/shopify_order_line_items?${params}`, {
+      headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` },
+    })
+    const payload = await response.json()
+    if (!response.ok) throw new Error(payload.message || `Supabase history failed with ${response.status}`)
+    if (!Array.isArray(payload)) throw new Error('Supabase saved dates returned an invalid response')
+    if (!payload.length) break
+    for (const row of payload) if (row.order_date) dates.add(row.order_date)
+    offset += payload.length
+  }
+  return { dates: [...dates] }
 }

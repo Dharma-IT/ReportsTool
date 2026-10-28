@@ -136,7 +136,7 @@ export async function syncShopifyCogs(date) {
   validateDate(date)
   const { products } = await getSupplementProducts()
   const productUnitCost = (name) => findSupplementProductCost(name, products)
-  const report = await fetchShopifySales(date, { costRecognition: true })
+  const report = await fetchShopifySales(date)
   const orderNames = report.rows.map((item) => item.name).filter(Boolean)
   let payouts = new Map()
   let payoutWarning = null

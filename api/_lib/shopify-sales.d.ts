@@ -38,7 +38,7 @@ export type ShopifyHistoricalProductRow = {
   sales_amount: number
 }
 
-export function fetchShopifySales(date: string, options?: { costRecognition?: boolean }): Promise<{
+export function fetchShopifySales(date: string): Promise<{
   date: string
   fetchedAt: string
   rows: ShopifySalesRow[]
@@ -67,3 +67,5 @@ export function getHistoricalShopifySales(): Promise<{
   fetchedAt?: string
   historicalRows: ShopifyHistoricalProductRow[]
 }>
+
+export function getSavedShopifyMonth(date: string): Promise<{ monthly: Record<string, number>; missingDates: string[] }>
