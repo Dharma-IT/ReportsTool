@@ -32,6 +32,19 @@ const escapeCsv = (value: string) => `"${value.replaceAll('"', '""')}"`
 const escapeXml = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
 function FilterIcon() { return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h12M4.5 8h7M7 12h2" /></svg> }
 
+function FetchDuration({ startedAt, finishedAt, label }: { startedAt: number | null; finishedAt: number | null; label: string }) {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (!startedAt || finishedAt) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000)
+    return () => window.clearInterval(timer)
+  }, [startedAt, finishedAt])
+  if (!startedAt) return null
+  const seconds = Math.max(0, Math.floor(((finishedAt ?? now) - startedAt) / 1_000))
+  const elapsed = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+  return <div className="ac-sheet-notice" role="status" aria-live="off">{finishedAt ? `Request finished in ${elapsed}.` : `${label}: elapsed ${elapsed}. Please keep this page open.`}</div>
+}
+
 function ACAutomation() {
   const [section, setSection] = useState<'general' | 'supplements'>('general')
   const today = useMemo(() => easternToday(), [])
@@ -39,6 +52,10 @@ function ACAutomation() {
   const [rows, setRows] = useState<Record<string, string>[]>([])
   const [query, setQuery] = useState(''), [filtering, setFiltering] = useState(false), [exportOpen, setExportOpen] = useState(false)
   const [loading, setLoading] = useState(false), [error, setError] = useState('')
+  const [fetchStartedAt, setFetchStartedAt] = useState<number | null>(null)
+  const [fetchFinishedAt, setFetchFinishedAt] = useState<number | null>(null)
+  const [supplementStartedAt, setSupplementStartedAt] = useState<number | null>(null)
+  const [supplementFinishedAt, setSupplementFinishedAt] = useState<number | null>(null)
   const [connectingStripe, setConnectingStripe] = useState(false)
   const [summary, setSummary] = useState('')
   const [supplementDate, setSupplementDate] = useState(today)
@@ -54,6 +71,7 @@ function ACAutomation() {
   const loadContacts = async () => {
     if (!date) { setError('Choose a valid EST date.'); return }
     if (!statuses.length) { setError('Select at least one Stripe status.'); return }
+    setFetchStartedAt(Date.now()); setFetchFinishedAt(null)
     setLoading(true); setError(''); setSummary('')
     try {
       const response = await fetch(getApiUrl(`/api/ac-automation?date=${encodeURIComponent(date)}&statuses=${encodeURIComponent(statuses.join(','))}`))
@@ -67,7 +85,7 @@ function ACAutomation() {
       const recovered = Object.entries(payload.phoneRecovery ?? {}).filter(([source]) => source !== 'unavailable').map(([source, count]) => `${count} via ${source.replaceAll('_', ' ')}`).join(', ')
       setSummary(`${payload.message || `${payload.contacts?.length ?? 0} unique contacts imported. ${payload.unavailablePhones ?? 0} phone numbers unavailable.`}${recovered ? ` Phone recovery: ${recovered}.` : ''}`)
     } catch (caught) { setRows([]); setError(caught instanceof Error ? caught.message : 'Unable to load abandoned carts.') }
-    finally { setLoading(false) }
+    finally { setFetchFinishedAt(Date.now()); setLoading(false) }
   }
 
   const exportCsv = () => { const lines = [columns.map((column) => escapeCsv(column.label)).join(','), ...filteredRows.map((row) => columns.map((column) => escapeCsv(row[column.key] ?? '')).join(','))]; downloadFile(`\uFEFF${lines.join('\r\n')}`, 'text/csv;charset=utf-8', 'csv'); setExportOpen(false) }
@@ -77,6 +95,7 @@ function ACAutomation() {
 
   const loadSupplementContacts = async () => {
     if (!supplementDate) return
+    setSupplementStartedAt(Date.now()); setSupplementFinishedAt(null)
     setSupplementLoading(true); setSupplementError('')
     try {
       const response = await fetch(getApiUrl('/api/shopify/orders'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: supplementDate, mode: 'contacts' }) })
@@ -93,7 +112,7 @@ function ACAutomation() {
         }
       }))
     } catch (caught) { setSupplementRows([]); setSupplementError(caught instanceof Error ? caught.message : 'Unable to load Shopify orders.') }
-    finally { setSupplementLoading(false) }
+    finally { setSupplementFinishedAt(Date.now()); setSupplementLoading(false) }
   }
 
   const connectStripe = async () => {
@@ -142,6 +161,7 @@ function ACAutomation() {
         <button type="button" onClick={() => setFiltering(true)}><FilterIcon /> Filter</button>
         <div className="ac-export-menu" ref={exportMenu}><button type="button" disabled={!filteredRows.length} aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)}>Export <span>⌄</span></button>{exportOpen ? <div className="ac-export-options" role="menu"><button type="button" onClick={exportCsv}><b>CSV</b><span>.csv</span><small>Comma-separated values</small></button><button type="button" onClick={exportExcel}><b>Excel</b><span>.xls</span><small>Microsoft Excel workbook</small></button></div> : null}</div>
       </div></div>
+      <FetchDuration startedAt={fetchStartedAt} finishedAt={fetchFinishedAt} label="Fetching Stripe contacts" />
       {summary ? <div className="ac-sheet-notice" role="status">{summary}</div> : null}
       {error ? <div className="ac-sheet-error" role="alert">{error}</div> : null}
       <div className="ac-spreadsheet-wrap"><table className="ac-spreadsheet" style={{ minWidth: columns.reduce((sum, column) => sum + column.width, 38) }}><colgroup><col style={{ width: 38 }} />{columns.map((column) => <col key={column.key} style={{ width: column.width }} />)}</colgroup><thead><tr className="ac-letter-row"><th />{columns.map((column, index) => <th key={column.key}>{letters[index]}</th>)}</tr><tr className="ac-heading-row"><th>1</th>{columns.map((column) => <th key={column.key}><span>{column.label}</span><button type="button" onClick={() => setFiltering(true)}><FilterIcon /></button></th>)}</tr></thead><tbody>{filteredRows.map((row, index) => <tr key={`${row.email}-${index}`}><th>{index + 2}</th>{columns.map((column) => <td key={column.key}>{row[column.key] ?? ''}</td>)}</tr>)}</tbody></table>
@@ -152,6 +172,7 @@ function ACAutomation() {
       <header className="ac-sheet-hero"><div><span className="ac-eyebrow"><i /> Customer recovery</span><h1>CS Supplements</h1><p>Supplement abandoned checkouts, ready for follow-up.</p></div><div className="ac-sheet-summary"><div><span>Total contacts</span><strong>{supplementRows.length}</strong></div><div><span>Source</span><strong>Shopify</strong></div><i /><small>{supplementLoading ? 'Loading checkouts...' : 'Billing phone · shipping name'}</small></div></header>
       <section className="ac-sheet-card" aria-labelledby="ac-supplements-title">
         <div className="ac-sheet-toolbar"><div><span>SHOPIFY ABANDONED CHECKOUTS</span><h2 id="ac-supplements-title">Supplement recovery contacts</h2></div><div className="ac-sheet-actions"><label className="ac-date-field">Date equals <input type="date" value={supplementDate} onChange={(event) => setSupplementDate(event.target.value)} /></label><button type="button" onClick={loadSupplementContacts} disabled={supplementLoading || !supplementDate}>{supplementLoading ? 'Loading...' : 'Apply'}</button><div className="ac-export-menu" ref={exportMenu}><button type="button" disabled={!supplementRows.length} aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)}>Export <span>⌄</span></button>{exportOpen ? <div className="ac-export-options" role="menu"><button type="button" onClick={exportSupplementCsv}><b>CSV</b><span>.csv</span><small>Comma-separated values</small></button><button type="button" onClick={exportSupplementExcel}><b>Excel</b><span>.xls</span><small>Microsoft Excel workbook</small></button></div> : null}</div></div></div>
+        <FetchDuration startedAt={supplementStartedAt} finishedAt={supplementFinishedAt} label="Fetching Shopify contacts" />
         {supplementError ? <div className="ac-sheet-error" role="alert">{supplementError}</div> : null}
         <div className="ac-spreadsheet-wrap"><table className="ac-spreadsheet" style={{ minWidth: columns.reduce((sum, column) => sum + column.width, 38) }}><colgroup><col style={{ width: 38 }} />{columns.map((column) => <col key={column.key} style={{ width: column.width }} />)}</colgroup><thead><tr className="ac-letter-row"><th />{columns.map((column, index) => <th key={column.key}>{letters[index]}</th>)}</tr><tr className="ac-heading-row"><th>1</th>{columns.map((column) => <th key={column.key}><span>{column.label}</span><button type="button" aria-label={`Filter ${column.label}`}><FilterIcon /></button></th>)}</tr></thead><tbody>{supplementRows.map((row, index) => <tr key={`${row.email}-${index}`}><th>{index + 2}</th>{columns.map((column) => <td key={column.key}>{row[column.key] ?? ''}</td>)}</tr>)}</tbody></table>
           {!supplementLoading && !supplementRows.length ? <div className="ac-sheet-empty"><strong>No contacts</strong><p>Select a date and click Apply to load Shopify orders.</p></div> : null}

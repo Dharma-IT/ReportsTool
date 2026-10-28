@@ -12,16 +12,18 @@ const debug = process.argv.includes('--debug')
 const headless = process.argv.includes('--headless')
 const context = await chromium.launchPersistentContext(profilePath, { headless })
 const phones = {}
-let loginPages = 0
+const loginPages = new Set()
+const deadline = Date.now() + 150_000
 
 try {
-  const runBatch = async (batch) => {
+  const runBatch = async (batch, concurrency = 6) => {
     let nextIndex = 0
     const worker = async () => {
       let page
       try {
         page = await context.newPage()
         while (nextIndex < batch.length) {
+          if (Date.now() >= deadline) break
           const { id, testMode } = batch[nextIndex++]
           let text = ''
           try {
@@ -30,17 +32,20 @@ try {
         // every Dashboard request to settle.
         const modePath = testMode ? 'test/' : ''
         await page.goto(`https://dashboard.stripe.com/${modePath}payments/${encodeURIComponent(id)}`, { waitUntil: 'commit', timeout: 20_000 })
-        // Stripe's test-mode route can briefly render an empty application
-        // shell. Poll for real content without depending on a specific label.
-        for (let attempt = 0; attempt < 15; attempt += 1) {
+        // The payment ID renders before Checkout summary's customer details.
+        // Keep waiting for the phone instead of treating that early shell as
+        // a completed lookup (which made the same contact succeed on retry).
+        for (let attempt = 0; attempt < 25 && Date.now() < deadline; attempt += 1) {
           await page.waitForTimeout(1_000)
           text = await page.locator('body').innerText()
-          if (text.includes(id) || /checkout summary|transaction not found|payment details/i.test(text)) break
+          const summary = text.match(/Checkout summary([\s\S]{0,1600}?)(?:Items|Payment breakdown|Details)/i)?.[1]
+          if (summary && /(?:\+?1[\s.-]?)?\(?[2-9]\d{2}\)?[\s.-]?\d{3}[\s.-]?\d{4}/.test(summary)) break
+          if (/transaction not found|sign in to (?:your )?stripe/i.test(text)) break
         }
         const loginRoute = /\/(?:login|signin)(?:[/?#]|$)/i.test(new URL(page.url()).pathname)
         const loginScreen = /sign in to (?:your )?stripe|email address[\s\S]{0,200}password/i.test(text)
         if (loginRoute && loginScreen) {
-          loginPages += 1
+          loginPages.add(id)
           continue
         }
         if (debug) {
@@ -60,12 +65,15 @@ try {
         await page?.close().catch(() => {})
       }
     }
-    // Six tabs keep a full date crawl below the API timeout. The previous
-    // failure came from crawling every unresolved payment twice.
-    await Promise.all(Array.from({ length: Math.min(6, batch.length) }, worker))
+    await Promise.all(Array.from({ length: Math.min(concurrency, batch.length) }, worker))
   }
   await runBatch(targets)
-  if (targets.length && loginPages === targets.length) {
+  // Retry only unresolved payment pages with fewer tabs. The Dashboard can
+  // return a partial SPA shell under load even with a valid saved session.
+  // One shared deadline keeps both passes below the caller's 180s timeout.
+  const retry = targets.filter(({ id }) => !phones[id] && /^(?:pi|ch|py)_/.test(id))
+  if (loginPages.size !== targets.length && retry.length && Date.now() < deadline) await runBatch(retry, 3)
+  if (targets.length && loginPages.size === targets.length) {
     console.error(JSON.stringify({ message: 'Saved Stripe session expired. Click Connect Stripe and sign in again.' }))
     process.exitCode = 1
   } else {
