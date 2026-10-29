@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createAdsAutosave } from '../lib/ads-autosave'
+import type { SaveStatus } from '../lib/ads-autosave'
 
 const earliestShopifyDate = '2026-09-01'
 const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
@@ -265,6 +267,22 @@ export default function Supplements() {
   const [adsCostsLoading, setAdsCostsLoading] = useState(false)
   const [adsFeedback, setAdsFeedback] = useState('')
   const [adsError, setAdsError] = useState('')
+  const [adsSaveStatus, setAdsSaveStatus] = useState<Record<string, { status: SaveStatus; error?: string }>>({})
+  const adsAutosaveRef = useRef<ReturnType<typeof createAdsAutosave<AdsSummaryRow>> | null>(null)
+  if (!adsAutosaveRef.current) {
+    adsAutosaveRef.current = createAdsAutosave<AdsSummaryRow>(async (row) => {
+      const response = await fetch(getApiUrl('/api/supplements/ads'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report_date: row.date, meta: row.meta, google: row.google, tiktok: row.tiktok, ads_only: true }),
+      })
+      const payload = await response.json() as { message?: string }
+      if (!response.ok) throw new Error(payload.message || 'Unable to save ADS data.')
+    }, (date, status, error) => {
+      setAdsSaveStatus((current) => ({ ...current, [date]: { status, error } }))
+    })
+  }
+  const adsAutosave = adsAutosaveRef.current
+
   const [cogsDate, setCogsDate] = useState(getToday())
   const [savedCogsDates, setSavedCogsDates] = useState<Set<string>>(new Set())
   const [cogsRows, setCogsRows] = useState<ShopifyCogsRow[]>([])
@@ -281,6 +299,20 @@ export default function Supplements() {
   const [overviewAction, setOverviewAction] = useState<'fetch' | 'view' | ''>('')
   const [overviewMessage, setOverviewMessage] = useState('')
   const [overviewError, setOverviewError] = useState('')
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (adsAutosave.hasPending()) {
+        event.preventDefault()
+        event.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', beforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', beforeUnload)
+      void adsAutosave.flushAll()
+    }
+  }, [adsAutosave])
+
   const activeView = supplementViews.find((item) => item.key === view) ?? supplementViews[0]
 
   useEffect(() => {
@@ -353,12 +385,29 @@ export default function Supplements() {
       .catch(() => undefined)
   }, [view, adsDate])
 
-  function updateAdsRow(date: string, field: keyof AdsSummaryRow, value: string) {
-    setAdsRows((rows) => {
-      const exists = rows.some((row) => row.date === date)
-      const next = exists ? rows : [...rows, emptyAdsSummary(date)]
-      return next.map((row) => row.date === date ? { ...row, [field]: value } : row).sort((a, b) => a.date.localeCompare(b.date))
+  function applyAdsOverviewChange(previous: AdsSummaryRow, next: AdsSummaryRow) {
+    setOverview((current) => {
+      if (!current) return current
+      const fields = ['meta', 'google', 'tiktok'] as const
+      const daily = { ...current.daily }
+      const monthly = current.monthly ? { ...current.monthly } : null
+      for (const field of fields) {
+        const delta = numericValue(next[field]) - numericValue(previous[field])
+        if (next.date === reportDate) daily[field] += delta
+        if (monthly && next.date.slice(0, 7) === reportDate.slice(0, 7) && next.date <= reportDate) monthly[field] += delta
+      }
+      return { daily, monthly }
     })
+  }
+
+  function updateAdsRow(date: string, field: 'meta' | 'google' | 'tiktok', value: string) {
+    if (!/^\d*(?:\.\d{0,2})?$/.test(value)) return
+    const previous = adsRows.find((row) => row.date === date) ?? emptyAdsSummary(date)
+    const updated = { ...previous, [field]: value }
+    setAdsRows((rows) => [...rows.filter((row) => row.date !== date), updated].sort((a, b) => a.date.localeCompare(b.date)))
+    applyAdsOverviewChange(previous, updated)
+    adsAutosave.schedule(updated)
+    setAdsFeedback('')
   }
 
   async function saveAdsRow(row: AdsSummaryRow) {
@@ -394,6 +443,8 @@ export default function Supplements() {
   }
 
   async function fetchAdsCosts() {
+    if (!await adsAutosave.flushAll()) return
+    if (!window.confirm('Fetch ad costs replaces saved Meta and Google values for this date. Continue?')) return
     setAdsCostsLoading(true); setAdsError(''); setAdsFeedback('')
     const sources = [
       { name: 'Meta', field: 'meta' as const, path: '/api/meta-ads/cost' },
@@ -410,6 +461,7 @@ export default function Supplements() {
     if (fetched.length) {
       const existing = adsRows.find((row) => row.date === adsDate) ?? emptyAdsSummary(adsDate)
       const updated = results.reduce((row, result) => result.field ? { ...row, [result.field]: result.value } : row, existing)
+      applyAdsOverviewChange(existing, updated)
       setAdsRows((rows) => [...rows.filter((row) => row.date !== adsDate), updated].sort((a, b) => a.date.localeCompare(b.date)))
       if (await saveAdsRow(updated)) setAdsFeedback(`${fetched.join(' and ')} Ads cost for ${adsDate} was fetched and saved to Supabase.`)
     }
@@ -651,6 +703,8 @@ export default function Supplements() {
 
   async function fetchDailyOverview() {
     if (!dateInput) return
+    if (!window.confirm('Fetch all refreshes external data and replaces saved Meta and Google ad values for this date. Continue?')) return
+    if (!await adsAutosave.flushAll()) return
     const date = dateInput
     setOverviewLoading(true)
     setOverviewAction('fetch')
@@ -740,6 +794,7 @@ export default function Supplements() {
 
   async function viewSavedOverview() {
     if (!dateInput) return
+    if (!await adsAutosave.flushAll()) return
     const date = dateInput
     setOverviewLoading(true)
     setOverviewAction('view')
@@ -816,7 +871,7 @@ export default function Supplements() {
       <aside className="supplements-sidebar" aria-label="Supplements report sections">
         <span>Report section</span>
         {supplementViews.map((item) => (
-          <button className={view === item.key ? 'active' : ''} key={item.key} type="button" onClick={() => setView(item.key)}>
+          <button className={view === item.key ? 'active' : ''} key={item.key} type="button" onClick={() => { void adsAutosave.flushAll(); setView(item.key) }}>
             <b>{item.short}</b><span>{item.label}<small>{item.detail}</small></span>
           </button>
         ))}
@@ -831,6 +886,10 @@ export default function Supplements() {
           <div className="supplements-hero-mark" aria-hidden="true"><span>$</span><i /><i /><i /></div>
         </header>
 
+        {Object.entries(adsSaveStatus).map(([date, state]) => <p key={date} className={`supplements-orders-feedback ${state.status === 'error' ? 'error' : 'success'}`} role={state.status === 'error' ? 'alert' : 'status'}>
+          {date}: {state.status === 'unsaved' ? 'Unsaved changes; autosaving after 5 seconds.' : state.status === 'saving' ? 'Saving...' : state.status === 'saved' ? 'Saved' : `Unsaved changes: ${state.error}`}
+          {state.status === 'error' ? <button type="button" onClick={() => void adsAutosave.flushAll()}>Retry save</button> : null}
+        </p>)}
         {view === 'daily' ? <><div className="supplements-toolbar">
           <div><span>Report controls</span><strong>Select a reporting date</strong></div>
           <form onSubmit={(event) => { event.preventDefault(); void fetchDailyOverview() }}>
@@ -870,18 +929,18 @@ export default function Supplements() {
             <div><span>Advertising spend</span><h2 id="supplements-ads-title">ADS</h2></div>
           </div>
           <form className="supplements-ads-controls" onSubmit={(event) => { event.preventDefault(); void fetchAdsCosts() }}>
-            <label>Report date<input type="date" value={adsDate} onChange={(event) => setAdsDate(event.target.value)} /></label>
+            <label>Report date<input type="date" value={adsDate} onChange={(event) => { void adsAutosave.flushAll(); setAdsDate(event.target.value) }} /></label>
             <button type="submit" disabled={adsCostsLoading || !adsDate}>{adsCostsLoading ? 'Fetching…' : 'Fetch ad costs'}</button>
           </form>
           {adsError ? <p className="supplements-orders-feedback error" role="alert">{adsError}</p> : null}
           {adsFeedback ? <p className="supplements-orders-feedback success" role="status">{adsFeedback}</p> : null}
           <div className="supplements-table-wrap">
             <table className="supplements-ads-sheet supplements-ads-summary-table">
-              <caption>Advertising &amp; Cost Sheet</caption>
+              <caption>Advertising &amp; Cost Sheet: ad edits save after 5 seconds. Cost totals come from COGS &amp; Fee.</caption>
               <thead><tr>{adsSummaryHeaders.map((header) => <th scope="col" key={header}>{header}</th>)}</tr></thead>
               <tbody>{adsRows.length ? adsRows.map((row) => <tr key={row.date}>
                 <th scope="row">{new Date(`${row.date}T12:00:00`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' })}</th>
-                {(['meta', 'google', 'tiktok', 'cogs', 'shipping', 'fulfillment', 'processing'] as const).map((field) => <td key={field}><input aria-label={`${adsSummaryHeaders[(['meta', 'google', 'tiktok', 'cogs', 'shipping', 'fulfillment', 'processing'] as const).indexOf(field) + 1]} ${row.date}`} inputMode="decimal" value={row[field]} onChange={(event) => updateAdsRow(row.date, field, event.target.value)} onBlur={() => void saveAdsRow(row)} placeholder="0.00" /></td>)}
+                {(['meta', 'google', 'tiktok', 'cogs', 'shipping', 'fulfillment', 'processing'] as const).map((field) => <td key={field}><input aria-label={`${adsSummaryHeaders[(['meta', 'google', 'tiktok', 'cogs', 'shipping', 'fulfillment', 'processing'] as const).indexOf(field) + 1]} ${row.date}`} inputMode="decimal" value={row[field]} readOnly={field !== 'meta' && field !== 'google' && field !== 'tiktok'} disabled={overviewLoading || adsCostsLoading} onChange={(event) => { if (field === 'meta' || field === 'google' || field === 'tiktok') updateAdsRow(row.date, field, event.target.value) }} placeholder="0.00" /></td>)}
               </tr>) : <tr><td className="supplements-ads-empty" colSpan={adsSummaryHeaders.length}>Select a date and fetch Google cost to begin the report.</td></tr>}</tbody>
             </table>
           </div>

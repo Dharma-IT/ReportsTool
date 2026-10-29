@@ -1,6 +1,8 @@
 const DEFAULT_PRODUCTS = [
   ['Fat Burner with MCT', 7.59],
-  ['Berberine', 5.55],
+  ['Berberine', 5.04],
+  ['Detox tea', 1.98],
+  ['Slim Boost', 16],
   ['Maca Plus', 5.75],
   ['Brain & Focus Formula', 4.85],
   ['Energy Strips', 8.19],

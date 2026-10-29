@@ -1,4 +1,5 @@
 export type SupplementsAdsRow = {
+  ads_only?: boolean
   report_date: string
   meta: number | string
   google: number | string

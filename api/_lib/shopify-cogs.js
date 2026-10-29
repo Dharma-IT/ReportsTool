@@ -1,11 +1,20 @@
 import { fetchShopifySales } from './shopify-sales.js'
 import { shopify2AdminFetch } from './shopify.js'
-import { findSupplementProductCost, getSupplementProducts } from './supplement-products.js'
+import { findSupplementProductCost, getSupplementProducts, normalizeSupplementProductName } from './supplement-products.js'
 
 const EARLIEST_DATE = '2026-09-01'
 const SUPLIFUL_PROCESSING_RATE = 0.0299
 const SUPLIFUL_FIRST_UNIT_FEE = 1.99
 const SUPLIFUL_ADDITIONAL_UNIT_FEE = 1.29
+
+// Dashboard-specific supplier costs override older catalog entries.
+function productRule(name) {
+  const normalized = normalizeSupplementProductName(name)
+  if (/\bberberine\b/.test(normalized)) return { unitCost: 5.04, shipping: 6.02 }
+  if (/\bdetox tea\b/.test(normalized)) return { unitCost: 1.98 }
+  if (/\bslim\s*boost\b/.test(normalized)) return { unitCost: 16, shipping: 6.02 }
+  return null
+}
 
 const INTERNATIONAL_ZONES = {
   CA: 1,
@@ -77,7 +86,7 @@ function headers(extra = {}) {
 const PAYOUT_FEES_QUERY = `query PayoutFeesForOrders($after: String, $search: String!) {
   shopifyPaymentsAccount {
     balanceTransactions(first: 250, after: $after, query: $search) {
-      nodes { fee { amount } net { amount } associatedOrder { name } }
+      nodes { type fee { amount } net { amount } associatedOrder { name } }
       pageInfo { hasNextPage endCursor }
     }
   }
@@ -105,7 +114,7 @@ async function fetchShopifyProcessingFees(orderNames) {
       if (!transactions) throw new Error('The Shopify2 app does not have access to Shopify Payments payouts. Add the read_shopify_payments scope and view_payouts permission.')
       for (const transaction of transactions.nodes) {
         const order = String(transaction.associatedOrder?.name || '').trim()
-        if (!order) continue
+        if (!order || !names.includes(order) || transaction.type !== 'CHARGE') continue
         const current = payouts.get(order) || { fee: 0, net: 0 }
         current.fee += Math.abs(Number(transaction.fee?.amount || 0))
         current.net += Number(transaction.net?.amount || 0)
@@ -135,9 +144,10 @@ export async function saveShopifyCogs(date, rows) {
 export async function syncShopifyCogs(date) {
   validateDate(date)
   const { products } = await getSupplementProducts()
-  const productUnitCost = (name) => findSupplementProductCost(name, products)
+  const productUnitCost = (name) => productRule(name)?.unitCost ?? findSupplementProductCost(name, products)
   const report = await fetchShopifySales(date)
-  const orderNames = report.rows.map((item) => item.name).filter(Boolean)
+  const orderNames = report.rows.filter((item) => item.name && Number(item.total_sales) > 0
+    && !/tiktok/i.test(String(item.sales_channel || ''))).map((item) => item.name)
   let payouts = new Map()
   let payoutWarning = null
   try {
@@ -148,18 +158,16 @@ export async function syncShopifyCogs(date) {
   } catch (error) {
     payoutWarning = error instanceof Error ? error.message : 'Shopify payout fees are unavailable.'
   }
-  const feeExemptProduct = (name) => {
-    const normalized = String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-    return normalized.replace(/\s+/g, '').includes('slimboost') || normalized.includes('detox')
-  }
   const orderDetails = new Map()
   let detailOrder = ''
   for (const item of report.rows) {
     if (item.name) detailOrder = item.name
-    const detail = orderDetails.get(detailOrder) || { weight: 0, subtotal: 0, fulfillment: 0, fallbackShipping: 0, country: null, province: null, service: null, feeTargetId: null, tiktok: false }
+    const detail = orderDetails.get(detailOrder) || { weight: 0, subtotal: 0, fulfillment: 0, fallbackShipping: 0, country: null, province: null, service: null, feeTargetId: null, tiktok: false, free: false, firstId: item.id, fixedShipping: 0 }
     const qty = Number(item.qty || 0)
     detail.tiktok ||= String(item.sales_channel || '').toLowerCase().includes('tiktok')
-    if (!detail.tiktok && !feeExemptProduct(item.product_name)) {
+    if (item.name) detail.free = Number(item.total_sales) === 0
+    detail.fixedShipping = Math.max(detail.fixedShipping, productRule(item.product_name)?.shipping || 0)
+    if (!detail.tiktok && !productRule(item.product_name)) {
       detail.feeTargetId ||= item.id
       detail.weight += weightInPounds(item.unit_weight, item.weight_unit) * qty
       detail.subtotal += (productUnitCost(item.product_name) ?? 0) * qty
@@ -176,15 +184,16 @@ export async function syncShopifyCogs(date) {
     if (item.name) currentOrder = item.name
     const qty = Number(item.qty || 0)
     const detail = orderDetails.get(currentOrder)
-    const exemptProduct = feeExemptProduct(item.product_name)
+    const exemptProduct = Boolean(productRule(item.product_name))
     const tiktokOrder = Boolean(detail?.tiktok)
     const receivesFees = Boolean(detail && !detail.tiktok && detail.feeTargetId === item.id)
+    const receivesOrderFees = detail?.firstId === item.id
     const calculatedShipping = detail && suplifulShippingCost(detail.weight, detail.country, detail.province, detail.service)
-    const shipping = receivesFees ? (calculatedShipping ?? detail?.fallbackShipping ?? 0) : 0
-    const unitPrice = tiktokOrder ? 0.01 : productUnitCost(item.product_name)
+    const shipping = (receivesOrderFees ? detail?.fixedShipping || 0 : 0) + (receivesFees ? (calculatedShipping ?? detail?.fallbackShipping ?? 0) : 0)
+    const unitPrice = productUnitCost(item.product_name)
     const fulfillment = tiktokOrder || exemptProduct ? 0 : suplifulFulfillmentFee(qty)
     const processingBase = (detail?.subtotal || 0) + (calculatedShipping ?? detail?.fallbackShipping ?? 0) + (detail?.fulfillment || 0)
-    const processing = receivesFees ? roundMoney(processingBase * SUPLIFUL_PROCESSING_RATE) : 0
+    const processing = receivesFees && !detail.free ? roundMoney(processingBase * SUPLIFUL_PROCESSING_RATE) : 0
     const row = {
       id: item.id,
       date,
@@ -196,8 +205,8 @@ export async function syncShopifyCogs(date) {
       shipping,
       fulfillment_supliful: fulfillment,
       processing_supliful: processing,
-      processing_shopify: receivesFees ? Math.round(Number(payouts.get(currentOrder)?.fee || 0) * 100) / 100 : 0,
-      payout_received: receivesFees ? Math.round(Number(payouts.get(currentOrder)?.net || 0) * 100) / 100 : 0,
+      processing_shopify: receivesOrderFees && !detail.free ? (tiktokOrder ? 10 : roundMoney(payouts.get(currentOrder)?.fee || 0)) : 0,
+      payout_received: receivesOrderFees && !detail.free && !tiktokOrder ? Math.round(Number(payouts.get(currentOrder)?.net || 0) * 100) / 100 : 0,
       total: 0,
     }
     row.total = roundMoney((row.subtotal ?? 0) + row.shipping + row.fulfillment_supliful + row.processing_supliful + row.processing_shopify)

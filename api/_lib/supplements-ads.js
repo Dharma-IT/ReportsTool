@@ -49,6 +49,12 @@ export async function getSupplementsAds(date) {
 
 export async function saveSupplementsAds(row) {
   if (!validDate(row?.report_date)) throw new Error('Choose a valid report date')
+  for (const field of ['meta', 'google', 'tiktok']) {
+    const value = row[field]
+    if (value == null || !Number.isFinite(Number(value)) || Number(value) < 0) {
+      throw new Error(`${field} must be a valid non-negative amount`)
+    }
+  }
   const saved = {
     report_date: row.report_date,
     timezone: 'America/New_York',
@@ -61,6 +67,10 @@ export async function saveSupplementsAds(row) {
     fulfillment: amount(row.fulfillment),
     processing: amount(row.processing),
     fetched_at: new Date().toISOString(),
+  }
+  // Manual advertising edits must not overwrite the independently saved costs.
+  if (row.ads_only === true) {
+    for (const field of ['cogs', 'shipping', 'fulfillment', 'processing']) delete saved[field]
   }
   const response = await fetch(`${supabaseRestUrl()}/supplements_ads_reports?on_conflict=report_date`, {
     method: 'POST',

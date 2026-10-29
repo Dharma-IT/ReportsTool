@@ -46,7 +46,11 @@ test('COGS uses creation day regardless of fulfillment, across midnight and DST'
       const body = JSON.parse(options.body)
       if (body.query.includes('PayoutFeesForOrders')) return Response.json({ data: {
         shopifyPaymentsAccount: { balanceTransactions: {
-          nodes: [{ associatedOrder: { name: '#2' }, fee: { amount: '1.25' }, net: { amount: '23.75' } }],
+          nodes: [
+            { type: 'CHARGE', associatedOrder: { name: '#2' }, fee: { amount: '1.25' }, net: { amount: '23.75' } },
+            { type: 'REFUND', associatedOrder: { name: '#2' }, fee: { amount: '9' }, net: { amount: '-20' } },
+            { type: 'ADJUSTMENT', associatedOrder: { name: '#2' }, fee: { amount: '8' }, net: { amount: '-8' } },
+          ],
           pageInfo: { hasNextPage: false },
         } },
       } })
@@ -97,14 +101,48 @@ test('COGS uses creation day regardless of fulfillment, across midnight and DST'
   const costs = await syncShopifyCogs('2026-10-27')
   assert.equal(costs.rows.length, 1)
   assert.equal(costs.rows[0].order, '#2')
-  assert.equal(costs.rows[0].subtotal, 5.55)
-  assert.equal(costs.rows[0].shipping, 5.29)
-  assert.equal(costs.rows[0].fulfillment_supliful, 1.99)
-  assert.equal(costs.rows[0].processing_supliful, 0.38)
+  assert.equal(costs.rows[0].subtotal, 5.04)
+  assert.equal(costs.rows[0].shipping, 6.02)
+  assert.equal(costs.rows[0].fulfillment_supliful, 0)
+  assert.equal(costs.rows[0].processing_supliful, 0)
   assert.equal(costs.rows[0].processing_shopify, 1.25)
-  assert.equal(costs.rows[0].total, 14.46)
+  assert.equal(costs.rows[0].total, 12.31)
   assert.equal(saved.report_date, '2026-10-27')
   assert.deepEqual(saved.report_data, costs.rows)
+
+  const makeProductOrder = (name, product, channel = 'web', price = 25) => {
+    const result = order(name, '2026-10-27T12:00:00Z')
+    result.sourceName = channel
+    result.currentTotalPriceSet = money(price)
+    result.lineItems.nodes[0].name = product
+    result.lineItems.nodes[0].product.title = product
+    return result
+  }
+  const multi = makeProductOrder('#multi', 'Berberine', 'tiktok')
+  multi.lineItems.nodes.push({ ...multi.lineItems.nodes[0], id: 'extra', name: 'Slim Boost', quantity: 2 })
+  pages = [[
+    makeProductOrder('#2', 'Detox tea'),
+    makeProductOrder('#paid', 'Slim Boost', 'TikTok'),
+    makeProductOrder('#free', 'Berberine', 'tiktok', 0),
+    makeProductOrder('#freeweb', 'Berberine', 'web', 0),
+    makeProductOrder('#missing', 'Detox tea'),
+    multi,
+  ]]
+  const rules = (await syncShopifyCogs('2026-10-27')).rows
+  const byOrder = (name) => rules.filter((row) => row.order === name)
+  assert.equal(byOrder('#2')[0].unit_price, 1.98)
+  assert.equal(byOrder('#2')[0].processing_shopify, 1.25)
+  assert.equal(byOrder('#paid')[0].unit_price, 16)
+  assert.equal(byOrder('#paid')[0].shipping, 6.02)
+  assert.equal(byOrder('#paid')[0].processing_shopify, 10)
+  assert.equal(byOrder('#free')[0].processing_shopify, 0)
+  assert.equal(byOrder('#freeweb')[0].processing_shopify, 0)
+  assert.equal(byOrder('#missing')[0].processing_shopify, 0)
+  assert.equal(byOrder('#multi').reduce((sum, row) => sum + row.shipping, 0), 6.02)
+  assert.equal(byOrder('#multi').reduce((sum, row) => sum + row.processing_shopify, 0), 10)
+  assert.equal(byOrder('#multi')[1].subtotal, 32)
+  assert(rules.every((row) => row.fulfillment_supliful === 0 && row.processing_supliful === 0))
+
 })
 
 test('month-to-date includes selected day, excludes later dates, and counts costs once', async (t) => {
