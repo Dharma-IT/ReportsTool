@@ -104,8 +104,8 @@ export default function WeeklyTeamReport({ report, team, error, onReconcile, rec
   const gradient = productGroups.map((product) => { const start = position; position += productBase ? Math.max(0, product.revenue) / productBase * 100 : 0; return `${product.color} ${start}% ${position}%` }).join(',')
   const callRows = names.map((name) => ({ name, row: aircallRow(name, 'lastWeek') }))
   const activeCallRows = callRows.filter(({ row }) => row && (row.aircallCalls > 0 || row.doxyCalls > 0))
-  const sumAircall = calls ? calls.lastWeek.agents.reduce((sum, row) => sum + row.aircallSeconds, 0) : null
-  const sumDoxy = calls?.lastWeek.doxyUploaded ? calls.lastWeek.agents.reduce((sum, row) => sum + row.doxySeconds, 0) : null
+  const sumAircall = calls ? callRows.reduce((sum, { row }) => sum + (row?.aircallSeconds ?? 0), 0) : null
+  const sumDoxy = calls?.lastWeek.doxyUploaded ? callRows.reduce((sum, { row }) => sum + (row?.doxySeconds ?? 0), 0) : null
   const sumConnected = sumAircall != null && sumDoxy != null ? sumAircall + sumDoxy : null
   const callPlotRows = [...callRows, ...(calls && activeCallRows.length ? [{ name: 'Average', row: { name: 'Average', aircallSeconds: (sumAircall ?? 0) / activeCallRows.length, doxySeconds: (sumDoxy ?? 0) / activeCallRows.length, aircallCalls: 0, doxyCalls: 0 } }] : [])]
   const maxCall = Math.max(...callRows.map(({ row }) => (row?.aircallSeconds ?? 0) + (sumDoxy != null ? row?.doxySeconds ?? 0 : 0)), 1) * 1.15
