@@ -29,3 +29,5 @@ npm run build
 ```
 
 The database merge test rolls back its synthetic data. Source audits and reference-PDF renders remain in the ignored migration-backups directory, not in the deployed client.
+
+Revenue by Seller includes total Weight Loss Injection quantities (including repurchases) by seller and team total for last week versus two weeks ago, alongside existing new units and paid deals. Each individual product section also compares product quantities by seller and team total for the same two weeks. Both Sales and Customer Service use these quantity tables.

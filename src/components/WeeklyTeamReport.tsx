@@ -24,6 +24,16 @@ function Comparison({ id, title, subtitle, rows, kind = 'percent', note, childre
   </section>
 }
 
+function QuantityComparison({ title, rows }: { title: string; rows: Row[] }) {
+  const total = (key: 'last' | 'prior') => rows.some((row) => row[key] == null) ? null : rows.reduce((sum, row) => sum + (row[key] ?? 0), 0)
+  return <div className="wr-table-wrap wr-quantities"><table>
+    <caption>{title}</caption>
+    <thead><tr><th>Seller</th><th>Qty last week</th><th>Qty two weeks ago</th></tr></thead>
+    <tbody>{rows.map((row) => <tr key={row.name}><th scope="row">{row.name}</th><td>{display(row.last)}</td><td>{display(row.prior)}</td></tr>)}</tbody>
+    <tfoot><tr><th scope="row">Team total</th><td>{display(total('last'))}</td><td>{display(total('prior'))}</td></tr></tfoot>
+  </table></div>
+}
+
 function filterPeriod(period: WeeklyPeriod, keep: (name: string) => boolean, canonical: (name: string) => string): WeeklyPeriod {
   const values = (record: Record<string, number> = {}) => Object.entries(record).reduce<Record<string, number>>((result, [name, value]) => {
     if (keep(name)) { const key = canonical(name); result[key] = (result[key] ?? 0) + value }
@@ -122,12 +132,13 @@ export default function WeeklyTeamReport({ report, team, error, onReconcile, rec
       <div className="wr-legend"><span><i />Last week</span><span><i className="prior" />Two weeks ago</span><span><i className="history-average" />Average</span><span><i className="highest" />Highest</span></div>
       <div className="wr-chart-scroll"><div className="wr-bar-chart" style={{ minWidth: `${Math.max(460, sellerRows.length * 150)}px` }}>{sellerRows.map((row) => <div className="wr-bar-group" key={row.name}><div className="wr-bar-pair wr-four-bars">{(['last', 'prior', 'average', 'highest'] as const).map((key) => <div className={`wr-bar-column ${key}`} key={key}><i style={{ height: `${(row[key] ?? 0) / maxRevenue * 190}px` }} title={`${row.name} ${key}: ${display(row[key], 'money')}`} /></div>)}</div><b>{row.name}</b><small>{last?.newTreatmentsBySeller?.[row.name] ?? 0} new units / {prior?.newTreatmentsBySeller?.[row.name] ?? 0} prior<br />{last?.dealCountsBySeller[row.name] ?? 0} paid deals / {prior?.dealCountsBySeller[row.name] ?? 0} prior</small></div>)}</div></div>
       <div className="wr-table-wrap"><table><thead><tr><th>Seller</th><th>Last week</th><th>Prior week</th><th>Average</th><th>Highest</th></tr></thead><tbody>{sellerRows.map((row) => <tr key={row.name}><th>{row.name}</th><td>{display(last ? row.last : null, 'money')}</td><td>{display(prior ? row.prior : null, 'money')}</td><td>{display(row.average, 'money')}</td><td>{display(row.highest, 'money')}</td></tr>)}</tbody></table></div>
+      <QuantityComparison title="Total injections sold (including repurchases)" rows={names.map((name) => ({ name, last: last ? injectionUnits(last, name) : null, prior: prior ? injectionUnits(prior, name) : null }))} />
     </section>
 
     {['Slim Boost', 'Nutritional Plans', 'NAD+', 'Sermorelin', 'GHK-Cu Troches', 'Glutathione'].map((title) => {
       const l = last?.products[title], p = prior?.products[title]
       const rows = names.map((name) => ({ name, last: last ? ratioPercent(l?.bySeller[name]?.units ?? 0, injectionUnits(last, name)) : null, prior: prior ? ratioPercent(p?.bySeller[name]?.units ?? 0, injectionUnits(prior, name)) : null, detail: `${l?.bySeller[name]?.units ?? 0} units / ${injectionUnits(last, name)} injections` }))
-      return <Comparison key={title} id={`product-${title.toLowerCase().replace(/[^a-z]+/g, '-')}`} title={title} subtitle="Compared to injections" rows={withAverage(rows)} note="Units sold / injection units sold for each agent. Pending means there is no injection denominator. Average excludes undefined ratios."><p>{display(last ? l?.revenue ?? 0 : null, 'money')} revenue and {display(last ? l?.units ?? 0 : null)} units last week, compared with {display(prior ? p?.revenue ?? 0 : null, 'money')} and {display(prior ? p?.units ?? 0 : null)} units in the prior week.</p></Comparison>
+      return <Comparison key={title} id={`product-${title.toLowerCase().replace(/[^a-z]+/g, '-')}`} title={title} subtitle="Compared to injections" rows={withAverage(rows)} note="Units sold / injection units sold for each agent. Pending means there is no injection denominator. Average excludes undefined ratios."><p>{display(last ? l?.revenue ?? 0 : null, 'money')} revenue and {display(last ? l?.units ?? 0 : null)} units last week, compared with {display(prior ? p?.revenue ?? 0 : null, 'money')} and {display(prior ? p?.units ?? 0 : null)} units two weeks ago.</p><QuantityComparison title={`${title} quantity sold`} rows={names.map((name) => ({ name, last: last ? l?.bySeller[name]?.units ?? 0 : null, prior: prior ? p?.bySeller[name]?.units ?? 0 : null }))} /></Comparison>
     })}
 
     <Comparison id="refunds" title="Refunds" subtitle="Per seller" rows={withAverage(refundRows)} kind="money" note="Matches the Refunds dashboard: refund values on deals whose Paid date (all pipelines) is in the selected week, grouped by HubSpot deal owner. This is a paid-deal cohort, not refund-processing-date cash flow. Amounts are shown as positive outflows."><p>{display(last?.refunds, 'money')} refunded last week across {Object.values(last?.refundCountsBySeller ?? {}).reduce((sum, value) => sum + value, 0)} deals, compared with {display(prior?.refunds, 'money')} in the prior week.</p></Comparison>
