@@ -130,7 +130,8 @@ test('COGS uses creation day regardless of fulfillment, across midnight and DST'
   ]]
   const rules = (await syncShopifyCogs('2026-10-27')).rows
   const byOrder = (name) => rules.filter((row) => row.order === name)
-  assert.equal(byOrder('#2')[0].unit_price, 1.98)
+  assert.equal(byOrder('#2')[0].unit_price, 3)
+  assert.equal(byOrder('#2')[0].shipping, 1.98)
   assert.equal(byOrder('#2')[0].processing_shopify, 1.25)
   assert.equal(byOrder('#paid')[0].unit_price, 16)
   assert.equal(byOrder('#paid')[0].shipping, 6.02)

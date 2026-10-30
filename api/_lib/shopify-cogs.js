@@ -11,7 +11,7 @@ const SUPLIFUL_ADDITIONAL_UNIT_FEE = 1.29
 function productRule(name) {
   const normalized = normalizeSupplementProductName(name)
   if (/\bberberine\b/.test(normalized)) return { unitCost: 5.04, shipping: 6.02 }
-  if (/\bdetox tea\b/.test(normalized)) return { unitCost: 1.98 }
+  if (/\bdetox tea\b/.test(normalized)) return { unitCost: 3, shipping: 1.98 }
   if (/\bslim\s*boost\b/.test(normalized)) return { unitCost: 16, shipping: 6.02 }
   return null
 }
