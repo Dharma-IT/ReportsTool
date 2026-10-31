@@ -10,9 +10,9 @@ const SUPLIFUL_ADDITIONAL_UNIT_FEE = 1.29
 // Dashboard-specific supplier costs override older catalog entries.
 function productRule(name) {
   const normalized = normalizeSupplementProductName(name)
-  if (/\bberberine\b/.test(normalized)) return { unitCost: 5.04, shipping: 6.02 }
+  if (/\bberberine\b/.test(normalized)) return { unitCost: 5.04, shipping: 4.10 }
   if (/\bdetox tea\b/.test(normalized)) return { unitCost: 3, shipping: 1.98 }
-  if (/\bslim\s*boost\b/.test(normalized)) return { unitCost: 16, shipping: 6.02 }
+  if (/\bslim\s*boost\b/.test(normalized)) return { unitCost: 16, shipping: 4.10 }
   return null
 }
 
