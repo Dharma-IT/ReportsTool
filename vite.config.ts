@@ -1,5 +1,5 @@
 import { AircallLedger, agentCallMetrics, summarizeAircall, type LedgerRecord, talkSeconds } from './api/_lib/aircall-ledger.ts'
-import { canonicalWeeklySeller, addAppointment, isHubSpotNoAnswer, type AppointmentBucket } from './api/_lib/weekly-summary.ts'
+import { weeklyProductCategory, canonicalWeeklySeller, addAppointment, isHubSpotNoAnswer, type AppointmentBucket } from './api/_lib/weekly-summary.ts'
 import { aggregateWeeklyAircall, aircallCallsFromCsv, contactName, combineWeeklyContact, type AircallMetric, type DoxyMetric } from './api/_lib/weekly-contact.ts'
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, openSync, rmSync, writeFileSync } from 'node:fs'
@@ -1091,21 +1091,6 @@ type WeeklyCsSourceMetrics = {
   repurchaseNoAnswer: Record<string, number>
 }
 
-function weeklyProductCategory(name: string) {
-  const product = name.toLowerCase()
-  if (product.includes('slim boost')) return 'Slim Boost'
-  if (product.includes('nutrition')) return 'Nutritional Plans'
-  // The clinic's NAD+ metric is injection-only. Do not mix in similarly named
-  // oral supplements from HubSpot line items.
-  if ((product.includes('nad+') || /\bnad\b/.test(product)) &&
-      !['capsule', 'supplement', 'tablet', 'troche', 'gummy', 'oral'].some((term) => product.includes(term))) return 'NAD+'
-  if (product.includes('sermorelin')) return 'Sermorelin'
-  if (product.includes('ghk')) return 'GHK-Cu Troches'
-  if (product.includes('glutathione')) return 'Glutathione'
-  if (['semaglutide', 'semaglutida', 'tirzepatide', 'tirzepatida', 'liraglutide', 'retatrutide', 'ozempic', 'wegovy', 'mounjaro', 'zepbound', 'compound'].some((term) => product.includes(term))) return 'Weight Loss Injections'
-  if (isDailyPeptideProduct(name)) return 'Peptides'
-  return null
-}
 
 async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token: string) {
   if (!token) throw new Error('HubSpot reporting is not configured.')
@@ -1172,7 +1157,7 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
     const isRepurchase = [deal.properties.imported_source, deal.properties.source, dealSources.get(String(deal.id))].some((source) => String(source ?? '').toLowerCase().includes('repurchase'))
     let allocatedRevenue = 0
     for (const item of parsed) {
-      const category = weeklyProductCategory(item.name) ?? 'Other products'
+      const category = weeklyProductCategory(item.name) ?? (isDailyPeptideProduct(item.name) ? 'Peptides' : 'Other products')
       const row = products[category] ?? { revenue: 0, units: 0, bySeller: {} }
       const sellerRow = row.bySeller[seller] ?? { revenue: 0, units: 0 }
       row.revenue = roundMoney(row.revenue + item.amount)
@@ -1182,7 +1167,7 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
       row.bySeller[seller] = sellerRow
       products[category] = row
       allocatedRevenue += item.amount
-      if (category === 'Weight Loss Injections') {
+      if (category === 'Weight Loss Injections' || category === 'Microdose') {
         const target = isRepurchase ? repurchaseTreatmentsBySeller : newTreatmentsBySeller
         target[seller] = (target[seller] ?? 0) + item.quantity
         if (isSalesOwner && !isRepurchase) newTreatments += item.quantity
@@ -1489,12 +1474,16 @@ async function saveWeeklyFields(from: string, fields: Partial<StoredWeeklyPeriod
 }
 
 async function upgradeStoredWeeklyPeriod(stored: StoredWeeklyPeriod, from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string, force = false) {
-  if (stored.version >= 9 && !force) return stored
+  if (stored.version >= 10 && !force) return stored
+  if (stored.version === 9 && !force) {
+    const hubSpot = await fetchWeeklyHubSpotPeriod(from, to, hubSpotToken)
+    return saveWeeklyFields(from, { version: 10, hubSpot }, supabaseUrl, serviceRoleKey)
+  }
   const [hubSpot, noShows, csSourceMetrics, revenueHistory] = await Promise.all([
     fetchWeeklyHubSpotPeriod(from, to, hubSpotToken), fetchWeeklyNoShows(from, to, hubSpotToken),
     fetchWeeklyCsSourceMetrics(from, to, hubSpotToken), fetchWeeklyRevenueHistory(from, to, hubSpotToken),
   ])
-  return saveWeeklyFields(from, { version: 9, hubSpot, noShows, csSourceMetrics, revenueHistory }, supabaseUrl, serviceRoleKey)
+  return saveWeeklyFields(from, { version: 10, hubSpot, noShows, csSourceMetrics, revenueHistory }, supabaseUrl, serviceRoleKey)
 }
 
 async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string) {
@@ -1510,7 +1499,7 @@ async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken:
     applySavedAgentReportsToWeeklyPeriod(hubSpotLeadManagement, WEEKLY_LM_AGENTS, supabaseUrl, serviceRoleKey),
     applySavedAgentReportsToWeeklyPeriod(hubSpotCustomerCare, WEEKLY_CC_AGENTS, supabaseUrl, serviceRoleKey),
   ])
-  const reportData: StoredWeeklyPeriod = { version: 9, hubSpot, leadManagement, customerCare, noShows, csSourceMetrics, revenueHistory }
+  const reportData: StoredWeeklyPeriod = { version: 10, hubSpot, leadManagement, customerCare, noShows, csSourceMetrics, revenueHistory }
   if (supabaseUrl && serviceRoleKey) return saveWeeklyFields(from, reportData, supabaseUrl, serviceRoleKey)
   return reportData
 }

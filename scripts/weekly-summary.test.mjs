@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { addAppointment, canonicalWeeklySeller, combineAppointments, historicalRevenue, isHubSpotNoAnswer, mean, meetingStatus, ratioPercent } from '../api/_lib/weekly-summary.ts'
+import { weeklyProductCategory, addAppointment, canonicalWeeklySeller, combineAppointments, historicalRevenue, isHubSpotNoAnswer, mean, meetingStatus, ratioPercent } from '../api/_lib/weekly-summary.ts'
 
 test('Meeting outcomes and English/Spanish/Portuguese titles identify no-shows once', () => {
   for (const title of ['Canceled: Analysis', 'Cancelled: Analysis', 'CANCELADO - Analysis', 'Cancelada: Consulta', 'Cancelación: Consulta']) assert.equal(meetingStatus('SCHEDULED', title), 'CANCELED')
@@ -46,4 +46,20 @@ test('Undefined denominators are not fabricated as zero and mean agent rates sta
 test('HubSpot No Answer disposition is recognized even when generic status says COMPLETED', () => {
   assert.equal(isHubSpotNoAnswer({ hs_call_status: 'COMPLETED', hs_call_disposition: '73a0d17f-1163-4015-bdd5-ec830791da20' }), true)
   assert.equal(isHubSpotNoAnswer({ hs_call_status: 'COMPLETED', hs_call_disposition: 'f240bbac-87c9-4f6e-bf70-924b57d47db7' }), false)
+})
+
+test('Weekly injections exclude Microdose while retaining its own product revenue and units', () => {
+  const products = [
+    ['Compounded Tirzepatide 60mg', 1],
+    ['Compounded Tirzepatide 52mg', 1],
+    ['Microdose Tirzepatide - 2 Months', 3],
+    ['Subscription NAD+ Capsules', 2],
+  ]
+  const units = (category) => products.reduce((sum, [name, qty]) => sum + (weeklyProductCategory(name) === category ? qty : 0), 0)
+  assert.equal(units('Weight Loss Injections'), 2)
+  assert.equal(units('Microdose'), 3)
+  assert.equal(weeklyProductCategory('Compounded Semaglutide'), 'Weight Loss Injections')
+  assert.equal(weeklyProductCategory('Microdose Semaglutide'), 'Microdose')
+  assert.equal(weeklyProductCategory('NAD+ Injection'), 'NAD+')
+  assert.equal(weeklyProductCategory('Subscription NAD+ Capsules'), null)
 })

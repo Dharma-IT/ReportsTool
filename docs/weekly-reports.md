@@ -16,7 +16,7 @@ Both reports follow the supplied Sales PDF sequence: Major Points, treatments, p
 
 ## Refresh and storage
 
-Weekly snapshots use version 9. Older snapshots are upgraded from HubSpot once. Refresh HubSpot rebuilds sales, meetings, source metrics, and historical seller revenue for the selected and comparison periods. The merge RPC preserves uploaded Doxy data and the other team's upload when refreshing or uploading concurrently. Aircall CSV corrections go directly to the shared ledger.
+Weekly snapshots use version 10. Older snapshots are upgraded from HubSpot once. Refresh HubSpot rebuilds sales, meetings, source metrics, and historical seller revenue for the selected and comparison periods. The merge RPC preserves uploaded Doxy data and the other team's upload when refreshing or uploading concurrently. Aircall CSV corrections go directly to the shared ledger.
 
 For a new installation, apply `scripts/create-weekly-report-merge.sql` in addition to the existing weekly/ledger schemas, or use the complete `supabase-schema.sql`. Existing live storage has this function installed. Runtime still uses the existing environment credentials.
 
@@ -31,3 +31,5 @@ npm run build
 The database merge test rolls back its synthetic data. Source audits and reference-PDF renders remain in the ignored migration-backups directory, not in the deployed client.
 
 Revenue by Seller includes total Weight Loss Injection quantities (including repurchases) by seller and team total for last week versus two weeks ago, alongside existing new units and paid deals. Each individual product section also compares product quantities by seller and team total for the same two weeks. Both Sales and Customer Service use these quantity tables.
+
+Injection quantity comparisons and performance count standard Weight Loss Injections only; Microdose has its own product category and retains its revenue and units. New Treatments continues to include Microdose. For October 19?24, 2026, Carlos has 2 standard injections and 3 Microdose units, rather than 5 standard injections.

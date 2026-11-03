@@ -50,3 +50,19 @@ export function isHubSpotNoAnswer(properties: { hs_call_status?: string | null; 
 export function keepWeeklySeller(name: string, team: 'sales' | 'cs', roster?: ContactAgent[]) {
   return Boolean(contactName(name, team, roster)) && !['denis reis', 'paula alfonso', 'maria sandoval'].includes(name.trim().toLowerCase())
 }
+
+export function weeklyProductCategory(name: string) {
+  const product = name.toLowerCase()
+  if (/micro[\s-]?dose/.test(product)) return 'Microdose'
+  if (product.includes('slim boost')) return 'Slim Boost'
+  if (product.includes('nutrition')) return 'Nutritional Plans'
+  // The clinic's NAD+ metric is injection-only. Do not mix in similarly named
+  // oral supplements from HubSpot line items.
+  if ((product.includes('nad+') || /\bnad\b/.test(product)) &&
+      !['capsule', 'supplement', 'tablet', 'troche', 'gummy', 'oral'].some((term) => product.includes(term))) return 'NAD+'
+  if (product.includes('sermorelin')) return 'Sermorelin'
+  if (product.includes('ghk')) return 'GHK-Cu Troches'
+  if (product.includes('glutathione')) return 'Glutathione'
+  if (['semaglutide', 'semaglutida', 'tirzepatide', 'tirzepatida', 'liraglutide', 'retatrutide', 'ozempic', 'wegovy', 'mounjaro', 'zepbound', 'compound'].some((term) => product.includes(term))) return 'Weight Loss Injections'
+  return null
+}

@@ -95,7 +95,7 @@ export default function WeeklyTeamReport({ report, team, error, onReconcile, rec
   const revenueChange = last && prior ? last.revenue - prior.revenue : null
   const pointChange = (a: number | null, b: number | null) => a == null || b == null ? 'Pending' : `${Math.abs(a - b).toFixed(1)} percentage points ${a >= b ? 'higher' : 'lower'}`
   const productGroups = [
-    { name: 'Weight Loss Injections', keys: ['Weight Loss Injections'], color: '#1e754c' }, { name: 'Slim Boost', keys: ['Slim Boost'], color: '#55b78b' },
+    { name: 'Weight Loss Injections', keys: ['Weight Loss Injections'], color: '#1e754c' }, { name: 'Microdose', keys: ['Microdose'], color: '#6589a6' }, { name: 'Slim Boost', keys: ['Slim Boost'], color: '#55b78b' },
     { name: 'Nutritional Plans', keys: ['Nutritional Plans'], color: '#9bcbb4' }, { name: 'NAD+', keys: ['NAD+'], color: '#39d39b' },
     { name: 'Peptides', keys: ['Peptides', 'Sermorelin', 'GHK-Cu Troches', 'Glutathione'], color: '#94ad89' }, { name: 'Other products', keys: ['Other products'], color: '#c7aa64' },
   ].map((group) => ({ ...group, revenue: group.keys.reduce((sum, key) => sum + (last?.products[key]?.revenue ?? 0), 0) }))
@@ -133,6 +133,8 @@ export default function WeeklyTeamReport({ report, team, error, onReconcile, rec
       <div className="wr-chart-scroll"><div className="wr-bar-chart" style={{ minWidth: `${Math.max(460, sellerRows.length * 150)}px` }}>{sellerRows.map((row) => <div className="wr-bar-group" key={row.name}><div className="wr-bar-pair wr-four-bars">{(['last', 'prior', 'average', 'highest'] as const).map((key) => <div className={`wr-bar-column ${key}`} key={key}><i style={{ height: `${(row[key] ?? 0) / maxRevenue * 190}px` }} title={`${row.name} ${key}: ${display(row[key], 'money')}`} /></div>)}</div><b>{row.name}</b><small>{last?.newTreatmentsBySeller?.[row.name] ?? 0} new units / {prior?.newTreatmentsBySeller?.[row.name] ?? 0} prior<br />{last?.dealCountsBySeller[row.name] ?? 0} paid deals / {prior?.dealCountsBySeller[row.name] ?? 0} prior</small></div>)}</div></div>
       <div className="wr-table-wrap"><table><thead><tr><th>Seller</th><th>Last week</th><th>Prior week</th><th>Average</th><th>Highest</th></tr></thead><tbody>{sellerRows.map((row) => <tr key={row.name}><th>{row.name}</th><td>{display(last ? row.last : null, 'money')}</td><td>{display(prior ? row.prior : null, 'money')}</td><td>{display(row.average, 'money')}</td><td>{display(row.highest, 'money')}</td></tr>)}</tbody></table></div>
       <QuantityComparison title="Total injections sold (including repurchases)" rows={names.map((name) => ({ name, last: last ? injectionUnits(last, name) : null, prior: prior ? injectionUnits(prior, name) : null }))} />
+      <p>Microdose is reported separately and remains included in New Treatments.</p>
+      <QuantityComparison title="Microdose sold (including repurchases)" rows={names.map((name) => ({ name, last: last ? last.products.Microdose?.bySeller[name]?.units ?? 0 : null, prior: prior ? prior.products.Microdose?.bySeller[name]?.units ?? 0 : null }))} />
     </section>
 
     {['Slim Boost', 'Nutritional Plans', 'NAD+', 'Sermorelin', 'GHK-Cu Troches', 'Glutathione'].map((title) => {
