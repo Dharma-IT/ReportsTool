@@ -37,3 +37,5 @@ Injection quantity comparisons and performance count standard Weight Loss Inject
 Confirmed HubSpot installment fees appear as Installment fee below product revenue. Only fees covered by the deal/line-item difference are classified; remaining differences retain the Unallocated revenue label. Version 9 and 10 snapshots upgrade only sales data, preserving uploaded calls and other report sections.
 
 Per the requested presentation, Sales Revenue displays all deal/product reconciliation differences together under Installment fee, without a separate Unallocated revenue row. The stored data retains confirmed fee versus residual amounts for audit purposes.
+
+Export PDF prints the selected team and week, including the prior-week comparison, using an A4 landscape layout. Choose Save as PDF in the print dialog. Navigation, uploads, and refresh controls are excluded; report warnings and pending-data labels remain visible.

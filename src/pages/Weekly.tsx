@@ -134,6 +134,19 @@ function Weekly() {
   const etaSeconds = Math.max(0, estimatedSeconds - elapsedSeconds)
   const loadingLabel = etaSeconds ? `${elapsedSeconds}s elapsed | about ${etaSeconds}s remaining` : `${elapsedSeconds}s elapsed | finishing up...`
 
+  async function exportWeeklyPdf() {
+    if (!report || isDoxyUploading || isAircallRefreshing || isHubSpotRefreshing) return
+    const previousTitle = document.title
+    const teamName = { sales: 'Sales', cs: 'Customer Service', lm: 'Lead Management', cc: 'Customer Care' }[activeTeam]
+    try {
+      await document.fonts.ready
+      document.title = `Dharma Weekly ${teamName} ${selectedWeek}`
+      window.print()
+    } finally {
+      document.title = previousTitle
+    }
+  }
+
   const weeklyCalls = report?.calls?.[activeTeam === 'cs' ? 'cs' : 'sales']
 
   return (
@@ -147,7 +160,8 @@ function Weekly() {
         {(activeTeam === 'sales' || activeTeam === 'cs') ? <div className="weekly-doxy-upload"><span>Doxy history</span><input ref={doxyFileInput} type="file" accept=".csv,text/csv" onChange={(event) => uploadWeeklyDoxy(event)} /><button type="button" onClick={() => doxyFileInput.current?.click()} disabled={isDoxyUploading || isHubSpotRefreshing || isAircallRefreshing || !report}><b>CSV</b><span>{isDoxyUploading ? 'Uploading...' : 'Upload Doxy'}</span></button><small>Applies to the selected week and team.</small></div> : null}
       </aside>
       <div className="weekly-content">
-      <div className="weekly-week-picker"><label>Report week<select value={selectedWeek} disabled={isDoxyUploading || isAircallRefreshing || isHubSpotRefreshing} onChange={(event) => { setSelectedWeek(event.target.value); setReport(null); setError(''); setLoadSeconds(null); setElapsedSeconds(0); setDoxyUpload('') }}>{weekOptions.map((week) => <option value={week} key={week}>{weekLabel(week)}</option>)}</select></label>{activeTeam === 'sales' || activeTeam === 'cs' ? <button className="daily-export-button" type="button" onClick={() => refreshWeeklyData('hubspot')} disabled={isDoxyUploading || isAircallRefreshing || isHubSpotRefreshing || !report}>{isHubSpotRefreshing ? 'Refreshing HubSpot...' : 'Refresh HubSpot'}</button> : null}{report ? <span>{report.source?.selected === 'saved' ? 'Saved weekly data' : 'Fetched live and saved'} | comparison {report.source?.prior === 'saved' ? 'loaded from database' : 'fetched live and saved'}</span> : null}</div>
+      <div className="weekly-print-heading"><strong>Dharma Weekly Report - {{ sales: 'Sales', cs: 'Customer Service', lm: 'Lead Management', cc: 'Customer Care' }[activeTeam]}</strong><p>{weekLabel(selectedWeek)} | Compared with {weekLabel(shiftDate(selectedWeek, -7))} | New York time</p></div>
+      <div className="weekly-week-picker"><label>Report week<select value={selectedWeek} disabled={isDoxyUploading || isAircallRefreshing || isHubSpotRefreshing} onChange={(event) => { setSelectedWeek(event.target.value); setReport(null); setError(''); setLoadSeconds(null); setElapsedSeconds(0); setDoxyUpload('') }}>{weekOptions.map((week) => <option value={week} key={week}>{weekLabel(week)}</option>)}</select></label>{activeTeam === 'sales' || activeTeam === 'cs' ? <button className="daily-export-button" type="button" onClick={() => refreshWeeklyData('hubspot')} disabled={isDoxyUploading || isAircallRefreshing || isHubSpotRefreshing || !report}>{isHubSpotRefreshing ? 'Refreshing HubSpot...' : 'Refresh HubSpot'}</button> : null}<button className="daily-export-button" type="button" onClick={exportWeeklyPdf} disabled={!report || isDoxyUploading || isAircallRefreshing || isHubSpotRefreshing} title="Export the selected team and week. Choose Save as PDF in the print dialog.">Export PDF</button>{report ? <span>{report.source?.selected === 'saved' ? 'Saved weekly data' : 'Fetched live and saved'} | comparison {report.source?.prior === 'saved' ? 'loaded from database' : 'fetched live and saved'}</span> : null}</div>
       {!report && !error ? <section className="weekly-load-status" aria-live="polite"><div><span className="weekly-load-spinner" aria-hidden="true" /><p><strong>Loading all weekly reports</strong><small>{loadingLabel}</small></p><b>ETA {etaSeconds ? `~${etaSeconds}s` : 'soon'}</b></div><i><span style={{ width: `${Math.min(94, Math.max(4, elapsedSeconds / estimatedSeconds * 100))}%` }} /></i><small>Fetching Sales, Customer Service, Lead Management, and Customer Care from HubSpot at a rate-safe pace.</small></section> : null}
       {report && loadSeconds !== null ? <div className="weekly-load-complete"> All weekly reports loaded in {loadSeconds}s</div> : null}
       {weeklyCalls?.lastWeek.aircallQuality?.warnings.map((warning) => <div className="daily-warning" role="status" key={warning}>{warning}</div>)}
