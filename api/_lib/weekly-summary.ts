@@ -66,3 +66,14 @@ export function weeklyProductCategory(name: string) {
   if (['semaglutide', 'semaglutida', 'tirzepatide', 'tirzepatida', 'liraglutide', 'retatrutide', 'ozempic', 'wegovy', 'mounjaro', 'zepbound', 'compound'].some((term) => product.includes(term))) return 'Weight Loss Injections'
   return null
 }
+
+export function weeklyRevenueAdjustments(dealRevenue: number, productRevenue: number, installmentFee: number) {
+  const cents = (value: number) => Math.round((value + Number.EPSILON) * 100)
+  const difference = cents(dealRevenue) - cents(productRevenue)
+  const fee = cents(installmentFee)
+  const confirmedFee = fee > 0 && difference >= fee ? fee : 0
+  const result: Record<string, number> = {}
+  if (confirmedFee) result['Installment fee'] = confirmedFee / 100
+  if (difference - confirmedFee) result['Unallocated revenue'] = (difference - confirmedFee) / 100
+  return result
+}

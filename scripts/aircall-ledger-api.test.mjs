@@ -8,7 +8,7 @@ test('Daily and Weekly share the ledger; uploads and API repairs preserve other 
   const keys = ['VITE_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'AIRCALL_API_ID', 'AIRCALL_API_TOKEN']
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
   Object.assign(process.env, { VITE_SUPABASE_URL: 'https://weekly-test.invalid', SUPABASE_SERVICE_ROLE_KEY: 'test', AIRCALL_API_ID: 'test', AIRCALL_API_TOKEN: 'test' })
-  let saved = { version: 10, hubSpot: { revenue: 777, products: {}, bySeller: {} }, leadManagement: {}, customerCare: {}, noShows: {}, csSourceMetrics: {} }
+  let saved = { version: 11, hubSpot: { revenue: 777, products: {}, bySeller: {} }, leadManagement: {}, customerCare: {}, noShows: {}, csSourceMetrics: {} }
   const start = 1792382400
   const rows = new Map([
     [1, { call_id: 1, started_at: start + 36000, answered_at: start + 36000, ended_at: start + 36060, talk_seconds: 60, agent_name: 'Carlos Vargas', finalized: true, source: 'webhook', api_seen_at: null, webhook_seen_at: '2026-10-19', review_reason: null, raw_digits: '15551234567' }],

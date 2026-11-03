@@ -1,5 +1,5 @@
 import { AircallLedger, agentCallMetrics, summarizeAircall, type LedgerRecord, talkSeconds } from './api/_lib/aircall-ledger.ts'
-import { weeklyProductCategory, canonicalWeeklySeller, addAppointment, isHubSpotNoAnswer, type AppointmentBucket } from './api/_lib/weekly-summary.ts'
+import { weeklyRevenueAdjustments, weeklyProductCategory, canonicalWeeklySeller, addAppointment, isHubSpotNoAnswer, type AppointmentBucket } from './api/_lib/weekly-summary.ts'
 import { aggregateWeeklyAircall, aircallCallsFromCsv, contactName, combineWeeklyContact, type AircallMetric, type DoxyMetric } from './api/_lib/weekly-contact.ts'
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, openSync, rmSync, writeFileSync } from 'node:fs'
@@ -1096,7 +1096,7 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
   if (!token) throw new Error('HubSpot reporting is not configured.')
   const deals = await searchAllHubSpotObjects<HubSpotDeal>('deals', {
     filterGroups: [{ filters: [{ propertyName: 'paid_date_all_pipelines', operator: 'BETWEEN', value: String(Date.parse(`${fromDate}T00:00:00Z`)), highValue: String(Date.parse(`${toDate}T00:00:00Z`)) }] }],
-    properties: ['amount', 'value_refund', 'refund_date_all_pipelines', 'hubspot_owner_id', 'deal_description_items__test', 'imported_source', 'source'],
+    properties: ['amount', 'value_refund', 'refund_date_all_pipelines', 'hubspot_owner_id', 'deal_description_items__test', 'imported_source', 'source', 'installment_fee'],
   }, token)
   const owners = await fetchHubSpotOwners(token)
   const ownerNames = new Map(owners.map((owner) => [owner.id, canonicalWeeklySeller(`${owner.firstName ?? ''} ${owner.lastName ?? ''}`.trim())]))
@@ -1173,9 +1173,8 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
         if (isSalesOwner && !isRepurchase) newTreatments += item.quantity
       }
     }
-    const difference = roundMoney(dealRevenue - allocatedRevenue)
-    if (difference) {
-      const category = 'Unallocated revenue'
+    const adjustments = weeklyRevenueAdjustments(dealRevenue, allocatedRevenue, finiteNumber(deal.properties.installment_fee))
+    for (const [category, difference] of Object.entries(adjustments)) {
       const row = products[category] ?? { revenue: 0, units: 0, bySeller: {} }
       const sellerRow = row.bySeller[seller] ?? { revenue: 0, units: 0 }
       row.revenue = roundMoney(row.revenue + difference); sellerRow.revenue = roundMoney(sellerRow.revenue + difference)
@@ -1474,16 +1473,16 @@ async function saveWeeklyFields(from: string, fields: Partial<StoredWeeklyPeriod
 }
 
 async function upgradeStoredWeeklyPeriod(stored: StoredWeeklyPeriod, from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string, force = false) {
-  if (stored.version >= 10 && !force) return stored
-  if (stored.version === 9 && !force) {
+  if (stored.version >= 11 && !force) return stored
+  if (stored.version >= 9 && !force) {
     const hubSpot = await fetchWeeklyHubSpotPeriod(from, to, hubSpotToken)
-    return saveWeeklyFields(from, { version: 10, hubSpot }, supabaseUrl, serviceRoleKey)
+    return saveWeeklyFields(from, { version: 11, hubSpot }, supabaseUrl, serviceRoleKey)
   }
   const [hubSpot, noShows, csSourceMetrics, revenueHistory] = await Promise.all([
     fetchWeeklyHubSpotPeriod(from, to, hubSpotToken), fetchWeeklyNoShows(from, to, hubSpotToken),
     fetchWeeklyCsSourceMetrics(from, to, hubSpotToken), fetchWeeklyRevenueHistory(from, to, hubSpotToken),
   ])
-  return saveWeeklyFields(from, { version: 10, hubSpot, noShows, csSourceMetrics, revenueHistory }, supabaseUrl, serviceRoleKey)
+  return saveWeeklyFields(from, { version: 11, hubSpot, noShows, csSourceMetrics, revenueHistory }, supabaseUrl, serviceRoleKey)
 }
 
 async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string) {
@@ -1499,7 +1498,7 @@ async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken:
     applySavedAgentReportsToWeeklyPeriod(hubSpotLeadManagement, WEEKLY_LM_AGENTS, supabaseUrl, serviceRoleKey),
     applySavedAgentReportsToWeeklyPeriod(hubSpotCustomerCare, WEEKLY_CC_AGENTS, supabaseUrl, serviceRoleKey),
   ])
-  const reportData: StoredWeeklyPeriod = { version: 10, hubSpot, leadManagement, customerCare, noShows, csSourceMetrics, revenueHistory }
+  const reportData: StoredWeeklyPeriod = { version: 11, hubSpot, leadManagement, customerCare, noShows, csSourceMetrics, revenueHistory }
   if (supabaseUrl && serviceRoleKey) return saveWeeklyFields(from, reportData, supabaseUrl, serviceRoleKey)
   return reportData
 }

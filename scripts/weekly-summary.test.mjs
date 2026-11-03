@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { weeklyProductCategory, addAppointment, canonicalWeeklySeller, combineAppointments, historicalRevenue, isHubSpotNoAnswer, mean, meetingStatus, ratioPercent } from '../api/_lib/weekly-summary.ts'
+import { weeklyRevenueAdjustments, weeklyProductCategory, addAppointment, canonicalWeeklySeller, combineAppointments, historicalRevenue, isHubSpotNoAnswer, mean, meetingStatus, ratioPercent } from '../api/_lib/weekly-summary.ts'
 
 test('Meeting outcomes and English/Spanish/Portuguese titles identify no-shows once', () => {
   for (const title of ['Canceled: Analysis', 'Cancelled: Analysis', 'CANCELADO - Analysis', 'Cancelada: Consulta', 'Cancelación: Consulta']) assert.equal(meetingStatus('SCHEDULED', title), 'CANCELED')
@@ -62,4 +62,13 @@ test('Weekly injections exclude Microdose while retaining its own product revenu
   assert.equal(weeklyProductCategory('Microdose Semaglutide'), 'Microdose')
   assert.equal(weeklyProductCategory('NAD+ Injection'), 'NAD+')
   assert.equal(weeklyProductCategory('Subscription NAD+ Capsules'), null)
+})
+
+test('Confirmed installment fees are separated from unexplained differences', () => {
+  assert.deepEqual(weeklyRevenueAdjustments(634.94, 599, 35.94), { 'Installment fee': 35.94 })
+  assert.deepEqual(weeklyRevenueAdjustments(682.64, 644, 38.64), { 'Installment fee': 38.64 })
+  assert.deepEqual(weeklyRevenueAdjustments(650, 599, 35.94), { 'Installment fee': 35.94, 'Unallocated revenue': 15.06 })
+  assert.deepEqual(weeklyRevenueAdjustments(634.94, 634.94, 35.94), {})
+  assert.deepEqual(weeklyRevenueAdjustments(610, 599, 35.94), { 'Unallocated revenue': 11 })
+  assert.deepEqual(weeklyRevenueAdjustments(590, 599, 0), { 'Unallocated revenue': -9 })
 })
