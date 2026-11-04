@@ -77,9 +77,43 @@
 .stat-two b { position:absolute; right:13px; bottom:15px; display:flex; height:20px; align-items:flex-end; gap:3px; }
 .stat-two b i { width:3px; border-radius:2px; background:#9ebc6d; animation:home-mini-bars .9s ease-in-out infinite alternate; }
 .stat-two b i:nth-child(1){height:7px}.stat-two b i:nth-child(2){height:14px;animation-delay:-.3s}.stat-two b i:nth-child(3){height:10px;animation-delay:-.5s}.stat-two b i:nth-child(4){height:18px;animation-delay:-.7s}
-.checker-panel { margin-top: 24px; padding: 36px; border: 1px solid #dfe5d9; border-radius: 20px; background: #fff; }
-.checker-panel h1 { margin: 12px 0; color: #183c2e; font: 500 clamp(30px, 4vw, 46px)/1.1 Georgia, serif; }
-.checker-panel p { color: #75806f; }
+.checker-page { padding-top: 38px; }
+.checker-header { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:30px; }
+.checker-header h1 { margin:10px 0 12px; color:var(--green-deep); font:500 clamp(36px,4vw,52px)/1.1 Georgia,serif; }
+.checker-header p { color:var(--muted); font-size:14px; }
+.checker-team-select { display:grid; gap:8px; min-width:210px; color:var(--green-deep); font-size:12px; font-weight:800; }
+.checker-team-select select { width:100%; padding:12px 15px; border:1px solid var(--border); border-radius:10px; background:var(--panel-bg); color:var(--green-deep); cursor:pointer; }
+.checker-layout { display:grid; grid-template-columns:250px minmax(0,1fr); gap:20px; align-items:start; }
+.checker-members,.checker-table-card { border:1px solid var(--border); border-radius:16px; background:rgba(255,255,255,.88); box-shadow:0 16px 40px rgba(38,64,42,.04); overflow:hidden; }
+.checker-members { padding:22px 12px 14px; }
+.checker-members-heading { display:flex; align-items:center; justify-content:space-between; padding:0 10px; color:var(--green-deep); font-size:14px; font-weight:850; }
+.checker-members-heading b { padding:3px 9px; border-radius:20px; background:var(--green-faint); font-size:11px; }
+.checker-members-hint { padding:6px 10px 20px; color:var(--muted); font-size:11px; }
+.checker-member-list { display:grid; gap:6px; }
+.checker-member-list button { display:flex; align-items:center; gap:10px; width:100%; padding:11px 10px; border:1px solid transparent; border-radius:10px; background:transparent; color:var(--text); text-align:left; font-size:12px; font-weight:650; cursor:pointer; }
+.checker-member-list button:hover { background:#f5f7ed; }
+.checker-member-list button.is-active { border-color:var(--border); background:var(--green-faint); color:var(--green-deep); }
+.checker-avatar { display:grid; place-items:center; flex-shrink:0; width:32px; height:32px; border-radius:10px; background:#f0f2ea; color:var(--green-strong); font-size:10px; font-weight:850; }
+.is-active .checker-avatar { background:var(--green-deep); color:white; }
+.checker-member-arrow { margin-left:auto; font-size:20px; color:var(--green-strong); }
+.checker-roster-note { padding:16px 10px 4px; color:var(--muted); font-size:11px; }
+.checker-table-heading { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:25px; }
+.checker-table-heading h2 { margin-top:8px; color:var(--green-deep); font:500 28px/1.2 Georgia,serif; }
+.checker-record-count { flex-shrink:0; padding:6px 12px; border:1px solid var(--border); border-radius:20px; color:var(--green-strong); background:#f8faf3; font-size:11px; }
+.checker-table-scroll { overflow-x:auto; }
+.checker-table { width:100%; min-width:1060px; border-collapse:collapse; text-align:left; }
+.checker-table th { padding:15px 16px; border-block:1px solid var(--border); border-right:1px solid rgba(100,126,88,.1); background:#eef3e5; color:var(--green-deep); font-size:11px; font-weight:850; white-space:nowrap; }
+.checker-table th:nth-child(2) { min-width:170px; }
+.checker-table td { padding:0; }
+.checker-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:300px; padding:40px 24px; text-align:center; }
+.checker-empty-icon { display:grid; place-items:center; width:52px; height:52px; margin-bottom:18px; border:1px solid rgba(195,162,77,.25); border-radius:15px; background:#fcf8eb; color:var(--gold-strong); }
+.checker-empty-icon svg { width:25px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.checker-empty strong { color:var(--green-deep); font-size:15px; }
+.checker-empty p { max-width:340px; margin-top:8px; color:var(--muted); font-size:12px; line-height:1.7; }
+.checker-table-footer { display:flex; justify-content:space-between; gap:12px; padding:15px 25px; border-top:1px solid var(--border); color:var(--muted); font-size:10px; }
+.checker-page :is(button,select,[tabindex]):focus-visible { outline:2px solid var(--gold-strong); outline-offset:3px; }
+@media(max-width:1000px) { .checker-layout { grid-template-columns:210px minmax(0,1fr); gap:14px; } }
+@media(max-width:700px) { .checker-header { align-items:stretch; flex-direction:column; } .checker-team-select { max-width:100%; } .checker-layout { grid-template-columns:1fr; } .checker-member-list { display:flex; overflow-x:auto; padding-bottom:4px; } .checker-member-list button { flex:0 0 auto; width:auto; } .checker-member-arrow { display:none; } .checker-table-heading { padding:20px; } .checker-table-heading h2 { font-size:24px; } .checker-table-footer { padding:15px 20px; } }
 .home-reports { padding:68px 0 0; }
 .home-section-heading { display:flex; align-items:end; justify-content:space-between; gap:30px; margin-bottom:25px; }
 .home-section-index { color:var(--gold-strong); font-size:10px; font-weight:900; letter-spacing:.14em; }
