@@ -1249,8 +1249,8 @@ async function fetchWeeklyCsSourceMetrics(fromDate: string, toDate: string, toke
   const to = getNewYorkUnixDayRange(toDate).to * 1000 + 999
   const [deals, owners, pipelines] = await Promise.all([
     searchAllHubSpotObjects<{ id: string; properties: Record<string, string | null | undefined> }>('deals', {
-      filterGroups: [{ filters: [{ propertyName: 'date_of_contact', operator: 'GTE', value: String(from) }, { propertyName: 'date_of_contact', operator: 'LTE', value: String(to) }, { propertyName: 'classification', operator: 'HAS_PROPERTY' }] }],
-      properties: ['date_of_contact', 'classification', 'imported_source', 'hubspot_owner_id', 'dealstage'],
+      filterGroups: [{ filters: [{ propertyName: 'createdate', operator: 'GTE', value: String(from) }, { propertyName: 'createdate', operator: 'LTE', value: String(to) }, { propertyName: 'classification', operator: 'HAS_PROPERTY' }] }],
+      properties: ['createdate', 'classification', 'imported_source', 'hubspot_owner_id', 'dealstage'],
     }, token), fetchHubSpotOwners(token),
     hubSpotGet<{ results: Array<{ stages: Array<{ id: string; label: string }> }> }>('https://api.hubapi.com/crm/v3/pipelines/deals', token),
   ])
@@ -1446,22 +1446,26 @@ async function saveWeeklyFields(from: string, fields: Partial<StoredWeeklyPeriod
 }
 
 async function upgradeStoredWeeklyPeriod(stored: StoredWeeklyPeriod, from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string, force = false) {
-  if (stored.version >= 13 && !force) return stored
+  if (stored.version >= 14 && !force) return stored
+  if (stored.version >= 13 && !force) {
+    const csSourceMetrics = await fetchWeeklyCsSourceMetrics(from, to, hubSpotToken)
+    return saveWeeklyFields(from, { version: 14, csSourceMetrics }, supabaseUrl, serviceRoleKey)
+  }
   if (stored.version >= 11 && !force) {
     const hubSpot = await fetchWeeklyHubSpotPeriod(from, to, hubSpotToken)
     const csSourceMetrics = await fetchWeeklyCsSourceMetrics(from, to, hubSpotToken)
-    return saveWeeklyFields(from, { version: 13, hubSpot, csSourceMetrics }, supabaseUrl, serviceRoleKey)
+    return saveWeeklyFields(from, { version: 14, hubSpot, csSourceMetrics }, supabaseUrl, serviceRoleKey)
   }
   if (stored.version >= 9 && !force) {
     const csSourceMetrics = await fetchWeeklyCsSourceMetrics(from, to, hubSpotToken)
     const hubSpot = await fetchWeeklyHubSpotPeriod(from, to, hubSpotToken)
-    return saveWeeklyFields(from, { version: 13, hubSpot, csSourceMetrics }, supabaseUrl, serviceRoleKey)
+    return saveWeeklyFields(from, { version: 14, hubSpot, csSourceMetrics }, supabaseUrl, serviceRoleKey)
   }
   const [hubSpot, noShows, csSourceMetrics, revenueHistory] = await Promise.all([
     fetchWeeklyHubSpotPeriod(from, to, hubSpotToken), fetchWeeklyNoShows(from, to, hubSpotToken),
     fetchWeeklyCsSourceMetrics(from, to, hubSpotToken), fetchWeeklyRevenueHistory(from, to, hubSpotToken),
   ])
-  return saveWeeklyFields(from, { version: 13, hubSpot, noShows, csSourceMetrics, revenueHistory }, supabaseUrl, serviceRoleKey)
+  return saveWeeklyFields(from, { version: 14, hubSpot, noShows, csSourceMetrics, revenueHistory }, supabaseUrl, serviceRoleKey)
 }
 
 async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string) {
@@ -1477,7 +1481,7 @@ async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken:
     applySavedAgentReportsToWeeklyPeriod(hubSpotLeadManagement, WEEKLY_LM_AGENTS, supabaseUrl, serviceRoleKey),
     applySavedAgentReportsToWeeklyPeriod(hubSpotCustomerCare, WEEKLY_CC_AGENTS, supabaseUrl, serviceRoleKey),
   ])
-  const reportData: StoredWeeklyPeriod = { version: 13, hubSpot, leadManagement, customerCare, noShows, csSourceMetrics, revenueHistory }
+  const reportData: StoredWeeklyPeriod = { version: 14, hubSpot, leadManagement, customerCare, noShows, csSourceMetrics, revenueHistory }
   if (supabaseUrl && serviceRoleKey) return saveWeeklyFields(from, reportData, supabaseUrl, serviceRoleKey)
   return reportData
 }
