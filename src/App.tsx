@@ -10,6 +10,7 @@ import Weekly from './pages/Weekly'
 import Refunds from './pages/Refunds'
 import ACAutomation from './pages/ACAutomation'
 import Supplements from './pages/Supplements'
+import Checker from './pages/Checker'
 import CampaignPinLock from './components/CampaignPinLock'
 
 type AppRoute = {
@@ -29,6 +30,7 @@ const routes: AppRoute[] = [
   { path: '/appointment-reports', label: 'Appointment Reports' },
   { path: '/ac-automation', label: 'AC Automation' },
   { path: '/supplements', label: 'Supplements' },
+  { path: '/checker', label: 'Checker' },
 ]
 
 function getActiveRoute() {
@@ -89,6 +91,8 @@ function App() {
         </CampaignPinLock>
       ) : activeRoute === '/supplements' ? (
         <Supplements />
+      ) : activeRoute === '/checker' ? (
+        <Checker />
       ) : activeRoute === '/ac-automation' ? (
         <ACAutomation />
       ) : (

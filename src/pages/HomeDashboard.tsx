@@ -55,9 +55,20 @@ const reportLinks = [
     action: 'Open cart automation',
     icon: 'cart',
   },
+  {
+    path: '/checker',
+    number: '08',
+    title: 'Checker',
+    copy: 'Open your Checker workspace.',
+    action: 'Open Checker',
+    icon: 'check',
+  },
 ]
 
 function ReportIcon({ name }: { name: string }) {
+  if (name === 'check') {
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="m8 12 3 3 5-6"/></svg>
+  }
   if (name === 'finance') {
     return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5h-5a2 2 0 0 0 0 4h3a2 2 0 0 1 0 4h-5M12 6.5v11"/></svg>
   }
