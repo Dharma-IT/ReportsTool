@@ -3485,3 +3485,13 @@ tbody tr:last-child td {
   .weekly-page .lm-kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .weekly-major-points { break-inside: avoid; }
 }
+
+.wr-chart-with-sales { display: flex; align-items: center; gap: 24px; }
+.wr-chart-with-sales > .wr-chart-scroll { flex: 1; min-width: 0; }
+.wr-list-sales { flex: 0 0 340px; padding: 20px; background: #f0f6ef; border-radius: 12px; }
+.wr-list-sales h3 { margin: 0 0 16px; }
+.wr-sales-labels, .wr-sales-agent { display: grid; grid-template-columns: 1.6fr 1fr 1fr; gap: 10px; align-items: center; }
+.wr-sales-labels { font-size: 11px; margin-bottom: 8px; }
+.wr-sales-agent { padding: 12px 0; border-top: 1px solid #d8e5d8; font-size: 12px; }
+.wr-sales-agent strong, .wr-sales-labels span:not(:first-child) { text-align: center; }
+@media (max-width: 1100px) { .wr-chart-with-sales { flex-direction: column; align-items: stretch; } .wr-list-sales { flex-basis: auto; } }

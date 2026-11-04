@@ -8,19 +8,19 @@ const count = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 })
 const display = (value: number | null | undefined, kind: 'money' | 'percent' | 'count' | 'time' = 'count') => value == null ? 'Pending' : kind === 'money' ? money.format(value) : kind === 'percent' ? `${value.toFixed(1)}%` : kind === 'time' ? contactDuration(value) : count.format(value)
 type Row = { name: string; last: number | null; prior: number | null; detail?: string }
 
-function Comparison({ id, title, subtitle, rows, kind = 'percent', note, children }: { id: string; title: string; subtitle: string; rows: Row[]; kind?: 'money' | 'percent' | 'count'; note?: string; children?: ReactNode }) {
+function Comparison({ id, title, subtitle, rows, kind = 'percent', note, children, beside }: { id: string; title: string; subtitle: string; rows: Row[]; kind?: 'money' | 'percent' | 'count'; note?: string; children?: ReactNode; beside?: ReactNode }) {
   const highest = Math.max(...rows.flatMap((row) => [row.last ?? 0, row.prior ?? 0]), kind === 'percent' ? 10 : 1)
   const max = highest * 1.16
   return <section className="wr-card wr-comparison" data-report-section={id} aria-labelledby={`wr-${id}`}>
     <div className="wr-section-title"><span>{subtitle}</span><h2 id={`wr-${id}`}>{title}</h2>{children}</div>
     <div className="wr-legend"><span><i />Last week</span><span><i className="prior" />Two weeks ago</span></div>
-    <div className="wr-chart-scroll"><div className="wr-bar-chart" style={{ minWidth: `${Math.max(460, rows.length * 126)}px` }}>
+    <div className={beside ? "wr-chart-with-sales" : undefined}><div className="wr-chart-scroll"><div className="wr-bar-chart" style={{ minWidth: `${Math.max(460, rows.length * 126)}px` }}>
       {rows.map((row) => <div className={`wr-bar-group ${row.name === 'Average' ? 'average' : ''}`} key={row.name}>
         <div className="wr-bar-pair">{(['last', 'prior'] as const).map((period) => <div className={`wr-bar-column ${period}`} key={period}>
           <strong>{display(row[period], kind)}</strong><i style={{ height: `${(row[period] ?? 0) / max * 180}px` }} title={`${row.name}, ${period === 'last' ? 'last week' : 'prior week'}: ${display(row[period], kind)}`} />
         </div>)}</div><b>{row.name}</b>{row.detail ? <small>{row.detail}</small> : null}
       </div>)}
-    </div></div>{note ? <p className="wr-note">{note}</p> : null}
+    </div></div>{beside}</div>{note ? <p className="wr-note">{note}</p> : null}
   </section>
 }
 
@@ -170,10 +170,11 @@ export default function WeeklyTeamReport({ report, team, error, onReconcile, rec
       <p className="wr-note">Chart height uses seconds on a linear scale. Values retain hours, minutes, and seconds. Combined time remains Pending until a Weekly Doxy file is uploaded.</p>
     </section>
 
-    {team === 'cs' ? <section className="wr-card" data-report-section="cs-lists"><div className="wr-section-title"><span>Customer Service lists</span><h2>CS List Details</h2><p>Unique deals by Imported Source and Create date (Monday?Saturday, New York time). Blank Lead Classification is excluded. Sales means PAID, MEDICALLY APPROVED (WON), or Completed Purchase; Pending Payment is not a sale. Repurchase no-answer means a No Response classification.</p></div>{(['abandonedCart', 'repurchaseList', 'repurchaseNoAnswer'] as const).map((key) => <Comparison key={key} id={`cs-${key}`} title={{ abandonedCart: 'Abandoned Cart', repurchaseList: 'Repurchase List', repurchaseNoAnswer: 'Repurchase No-answer' }[key]} subtitle="Classified deals by Create date" kind="count" rows={names.map((name) => ({ name, last: report?.csSourceMetrics?.lastWeek[key][name] ?? 0, prior: report?.csSourceMetrics?.twoWeeksAgo[key][name] ?? 0 }))} >{key !== 'repurchaseNoAnswer' && <div className="wr-table-wrap"><table><thead><tr><th>Seller / week</th><th>Sales</th><th>Lead Classification</th><th>Deal stage</th></tr></thead><tbody>{names.flatMap((name) => (['lastWeek', 'twoWeeksAgo'] as const).map((week) => {
-      const detail = report?.csSourceMetrics?.[week].details?.[key]?.[name]
-      const breakdown = (values?: Record<string, number>) => Object.entries(values ?? {}).map(([label, value]) => `${label}: ${value}`).join('; ') || 'None'
-      return <tr key={`${name}-${week}`}><th>{name} / {week === 'lastWeek' ? report?.lastWeek.fromDate : report?.twoWeeksAgo.fromDate}</th><td>{detail?.sales ?? 0}</td><td>{breakdown(detail?.classifications)}</td><td>{breakdown(detail?.stages)}</td></tr>
-    }))}</tbody></table></div>}</Comparison>)}</section> : null}
+    {team === 'cs' ? <section className="wr-card" data-report-section="cs-lists"><div className="wr-section-title"><span>Customer Service lists</span><h2>CS List Details</h2><p>Created during each reporting week, Monday-Saturday, New York time.</p></div>
+      {(['abandonedCart', 'repurchaseList', 'repurchaseNoAnswer'] as const).map((key) => <Comparison key={key} id={`cs-${key}`} title={{ abandonedCart: 'Abandoned Cart', repurchaseList: 'Repurchase List', repurchaseNoAnswer: 'Repurchase No-answer' }[key]} subtitle="Weekly totals" kind="count"
+        rows={names.map((name) => ({ name, last: report?.csSourceMetrics?.lastWeek[key][name] ?? 0, prior: report?.csSourceMetrics?.twoWeeksAgo[key][name] ?? 0 }))}
+        beside={key !== 'repurchaseNoAnswer' ? <aside className="wr-list-sales"><h3>Sales</h3><div className="wr-sales-labels"><span>CS agent</span><span>Last week</span><span>Two weeks ago</span></div>{names.map((name) => <div className="wr-sales-agent" key={name}><b>{name}</b><strong>{report?.csSourceMetrics?.lastWeek.details?.[key]?.[name]?.sales ?? 0}</strong><strong>{report?.csSourceMetrics?.twoWeeksAgo.details?.[key]?.[name]?.sales ?? 0}</strong></div>)}</aside> : undefined}
+      />)}
+    </section> : null}
   </div>
 }
