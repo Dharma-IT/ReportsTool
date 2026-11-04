@@ -77,3 +77,8 @@ export function weeklyRevenueAdjustments(dealRevenue: number, productRevenue: nu
   if (difference - confirmedFee) result['Unallocated revenue'] = (difference - confirmedFee) / 100
   return result
 }
+
+// HubSpot CS injection report includes Microdose and Lipo Mino, but not refund deals.
+export function csInjectionUnits(product: string, quantity: number, dealAmount: number) {
+  return dealAmount > 0 && (['Weight Loss Injections', 'Microdose'].includes(weeklyProductCategory(product) ?? '') || /lipo[\s-]*mino/i.test(product)) ? quantity : 0
+}

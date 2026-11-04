@@ -7,6 +7,7 @@ export type WeeklyPeriod = {
   fromDate: string; toDate: string; revenue: number; refunds: number; dealCount: number
   bySeller: Record<string, number>; dealCountsBySeller: Record<string, number>; averageTicketBySeller: Record<string, number>
   refundsBySeller: Record<string, number>; refundCountsBySeller?: Record<string, number>
+  csInjectionUnitsBySeller?: Record<string, number>
   products: Record<string, WeeklyProductTotals>; newTreatments?: number
   newTreatmentsBySeller?: Record<string, number>; repurchaseTreatmentsBySeller?: Record<string, number>
   refundBasis?: string

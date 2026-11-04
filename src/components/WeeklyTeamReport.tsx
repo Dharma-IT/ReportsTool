@@ -49,7 +49,7 @@ function filterPeriod(period: WeeklyPeriod, keep: (name: string) => boolean, can
     return [name, { bySeller, revenue: Object.values(bySeller).reduce((sum, row) => sum + row.revenue, 0), units: Object.values(bySeller).reduce((sum, row) => sum + row.units, 0) }]
   }))
   const refundsBySeller = values(period.refundsBySeller)
-  return { ...period, bySeller, dealCountsBySeller: deals, averageTicketBySeller: Object.fromEntries(Object.keys(bySeller).map((name) => [name, deals[name] ? bySeller[name] / deals[name] : 0])), products, refundsBySeller,
+  return { ...period, csInjectionUnitsBySeller: values(period.csInjectionUnitsBySeller), bySeller, dealCountsBySeller: deals, averageTicketBySeller: Object.fromEntries(Object.keys(bySeller).map((name) => [name, deals[name] ? bySeller[name] / deals[name] : 0])), products, refundsBySeller,
     revenue: Object.values(bySeller).reduce((sum, value) => sum + value, 0), refunds: Object.values(refundsBySeller).reduce((sum, value) => sum + value, 0),
     refundCountsBySeller: values(period.refundCountsBySeller), newTreatmentsBySeller: values(period.newTreatmentsBySeller), repurchaseTreatmentsBySeller: values(period.repurchaseTreatmentsBySeller),
     warnings: period.warnings?.filter((warning) => keep(warning.seller)),
@@ -65,6 +65,7 @@ export default function WeeklyTeamReport({ report, team, error, onReconcile, rec
   const calls = report?.calls?.[team]
   const names = [...new Set([...(roster?.map((agent) => agent.name) ?? []), ...Object.keys(last?.bySeller ?? {}), ...Object.keys(prior?.bySeller ?? {}), ...(calls?.lastWeek.agents.map((agent) => canonical(agent.name)) ?? [])])].filter(keep)
   const aircallRow = (name: string, period: 'lastWeek' | 'twoWeeksAgo') => calls?.[period].agents.find((agent) => canonical(agent.name) === name)
+  const csUnits = (period: WeeklyPeriod | null, name: string) => period?.csInjectionUnitsBySeller?.[name] ?? null
   const injectionUnits = (period: WeeklyPeriod | null, name: string) => period?.products['Weight Loss Injections']?.bySeller[name]?.units ?? 0
   const performance = names.map((name) => ({ name,
     last: calls ? ratioPercent(injectionUnits(last, name), aircallRow(name, 'lastWeek')?.aircallValidCalls ?? 0) : null,
@@ -132,14 +133,15 @@ export default function WeeklyTeamReport({ report, team, error, onReconcile, rec
       <div className="wr-legend"><span><i />Last week</span><span><i className="prior" />Two weeks ago</span><span><i className="history-average" />Average</span><span><i className="highest" />Highest</span></div>
       <div className="wr-chart-scroll"><div className="wr-bar-chart" style={{ minWidth: `${Math.max(460, sellerRows.length * 150)}px` }}>{sellerRows.map((row) => <div className="wr-bar-group" key={row.name}><div className="wr-bar-pair wr-four-bars">{(['last', 'prior', 'average', 'highest'] as const).map((key) => <div className={`wr-bar-column ${key}`} key={key}><i style={{ height: `${(row[key] ?? 0) / maxRevenue * 190}px` }} title={`${row.name} ${key}: ${display(row[key], 'money')}`} /></div>)}</div><b>{row.name}</b><small>{last?.newTreatmentsBySeller?.[row.name] ?? 0} new units / {prior?.newTreatmentsBySeller?.[row.name] ?? 0} prior<br />{last?.dealCountsBySeller[row.name] ?? 0} paid deals / {prior?.dealCountsBySeller[row.name] ?? 0} prior</small></div>)}</div></div>
       <div className="wr-table-wrap"><table><thead><tr><th>Seller</th><th>Last week</th><th>Prior week</th><th>Average</th><th>Highest</th></tr></thead><tbody>{sellerRows.map((row) => <tr key={row.name}><th>{row.name}</th><td>{display(last ? row.last : null, 'money')}</td><td>{display(prior ? row.prior : null, 'money')}</td><td>{display(row.average, 'money')}</td><td>{display(row.highest, 'money')}</td></tr>)}</tbody></table></div>
-      <QuantityComparison title="Standard injections sold (including repurchases, excluding Microdose)" rows={names.map((name) => ({ name, last: last ? injectionUnits(last, name) : null, prior: prior ? injectionUnits(prior, name) : null }))} />
+      <QuantityComparison title={team === 'cs' ? 'Total injections sold (including Microdose, Lipo Mino and repurchases)' : 'Standard injections sold (including repurchases, excluding Microdose)'} rows={names.map((name) => ({ name, last: team === 'cs' ? csUnits(last, name) : last ? injectionUnits(last, name) : null, prior: team === 'cs' ? csUnits(prior, name) : prior ? injectionUnits(prior, name) : null }))} />
+      {team === 'cs' && <p>Matches the HubSpot injection report: associated injection line-item quantities on positive-value paid deals. Negative-value refund deals are excluded.</p>}
       {team === 'cs' && <>
         <div className="wr-section-title"><h3>HubSpot injection comparison (including Microdose)</h3><p>Injection product net revenue and quantities, including repurchases. Alice F and Aline Strelow are grouped as one seller. Revenue by Seller above includes all products and deal adjustments.</p></div>
         <div className="wr-table-wrap"><table><thead><tr><th>Seller</th><th>Last week injection revenue</th><th>Prior week injection revenue</th></tr></thead><tbody>{names.map((name) => {
           const revenue = (period: WeeklyPeriod | null) => period ? ['Weight Loss Injections', 'Microdose'].reduce((sum, category) => sum + (period.products[category]?.bySeller[name]?.revenue ?? 0), 0) : null
           return <tr key={name}><th>{name}</th><td>{display(revenue(last), 'money')}</td><td>{display(revenue(prior), 'money')}</td></tr>
         })}</tbody></table></div>
-        <QuantityComparison title="All injections sold (including Microdose and repurchases)" rows={names.map((name) => ({ name, last: last ? injectionUnits(last, name) + (last.products.Microdose?.bySeller[name]?.units ?? 0) : null, prior: prior ? injectionUnits(prior, name) + (prior.products.Microdose?.bySeller[name]?.units ?? 0) : null }))} />
+
       </>}
       <p>Microdose is reported separately and remains included in New Treatments.</p>
       <QuantityComparison title="Microdose sold (including repurchases)" rows={names.map((name) => ({ name, last: last ? last.products.Microdose?.bySeller[name]?.units ?? 0 : null, prior: prior ? prior.products.Microdose?.bySeller[name]?.units ?? 0 : null }))} />

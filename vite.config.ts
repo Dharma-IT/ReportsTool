@@ -1,6 +1,6 @@
 import { aggregateCsDeals, type CsSourceMetrics } from './api/_lib/weekly-cs.ts'
 import { AircallLedger, agentCallMetrics, summarizeAircall, type LedgerRecord, talkSeconds } from './api/_lib/aircall-ledger.ts'
-import { weeklyRevenueAdjustments, weeklyProductCategory, canonicalWeeklySeller, addAppointment, type AppointmentBucket } from './api/_lib/weekly-summary.ts'
+import { weeklyRevenueAdjustments, csInjectionUnits, weeklyProductCategory, canonicalWeeklySeller, addAppointment, type AppointmentBucket } from './api/_lib/weekly-summary.ts'
 import { aggregateWeeklyAircall, aircallCallsFromCsv, contactName, combineWeeklyContact, type AircallMetric, type DoxyMetric } from './api/_lib/weekly-contact.ts'
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, openSync, rmSync, writeFileSync } from 'node:fs'
@@ -1134,6 +1134,7 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
   const repurchaseTreatmentsBySeller: Record<string, number> = {}
   const warnings: Array<{ seller: string; message: string }> = []
   const products: Record<string, WeeklyProductTotals> = {}
+  const csInjectionUnitsBySeller: Record<string, number> = {}
   let revenue = 0
   let refunds = 0
   let newTreatments = 0
@@ -1150,6 +1151,7 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
     }
     const associated = (dealToItems.get(deal.id) ?? []).map((id) => items.get(id)).filter(Boolean) as HubSpotLineItem[]
     const parsed = associated.length ? associated.map((item) => ({ name: item.properties.name ?? '', quantity: finiteNumber(item.properties.quantity, 1), amount: finiteNumber(item.properties.amount, finiteNumber(item.properties.price) * finiteNumber(item.properties.quantity, 1)) })) : parseDailyCsDealDescription(deal.properties.deal_description_items__test ?? '').map((item) => ({ ...item, amount: 0 }))
+    for (const item of associated) csInjectionUnitsBySeller[seller] = (csInjectionUnitsBySeller[seller] ?? 0) + csInjectionUnits(item.properties.name ?? '', finiteNumber(item.properties.quantity, 1), dealRevenue)
     const isSalesOwner = Boolean(contactName(seller, 'sales'))
     const isRepurchase = [deal.properties.imported_source, deal.properties.source, dealSources.get(String(deal.id))].some((source) => String(source ?? '').toLowerCase().includes('repurchase'))
     let allocatedRevenue = 0
@@ -1186,7 +1188,7 @@ async function fetchWeeklyHubSpotPeriod(fromDate: string, toDate: string, token:
     refundsBySeller[seller] = roundMoney((refundsBySeller[seller] ?? 0) + value)
     refundCountsBySeller[seller] = (refundCountsBySeller[seller] ?? 0) + 1
   }
-  return { fromDate, toDate, revenue: roundMoney(revenue), refunds: roundMoney(refunds), dealCount: deals.length, bySeller, dealCountsBySeller, averageTicketBySeller, refundsBySeller, refundCountsBySeller, products, newTreatments, newTreatmentsBySeller, repurchaseTreatmentsBySeller, refundBasis: 'paid_date_all_pipelines', warnings, checkedAt: new Date().toISOString() }
+  return { fromDate, toDate, csInjectionUnitsBySeller, revenue: roundMoney(revenue), refunds: roundMoney(refunds), dealCount: deals.length, bySeller, dealCountsBySeller, averageTicketBySeller, refundsBySeller, refundCountsBySeller, products, newTreatments, newTreatmentsBySeller, repurchaseTreatmentsBySeller, refundBasis: 'paid_date_all_pipelines', warnings, checkedAt: new Date().toISOString() }
 }
 
 async function fetchWeeklyNoShows(fromDate: string, toDate: string, token: string) {
@@ -1444,21 +1446,22 @@ async function saveWeeklyFields(from: string, fields: Partial<StoredWeeklyPeriod
 }
 
 async function upgradeStoredWeeklyPeriod(stored: StoredWeeklyPeriod, from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string, force = false) {
-  if (stored.version >= 12 && !force) return stored
+  if (stored.version >= 13 && !force) return stored
   if (stored.version >= 11 && !force) {
+    const hubSpot = await fetchWeeklyHubSpotPeriod(from, to, hubSpotToken)
     const csSourceMetrics = await fetchWeeklyCsSourceMetrics(from, to, hubSpotToken)
-    return saveWeeklyFields(from, { version: 12, csSourceMetrics }, supabaseUrl, serviceRoleKey)
+    return saveWeeklyFields(from, { version: 13, hubSpot, csSourceMetrics }, supabaseUrl, serviceRoleKey)
   }
   if (stored.version >= 9 && !force) {
     const csSourceMetrics = await fetchWeeklyCsSourceMetrics(from, to, hubSpotToken)
     const hubSpot = await fetchWeeklyHubSpotPeriod(from, to, hubSpotToken)
-    return saveWeeklyFields(from, { version: 12, hubSpot, csSourceMetrics }, supabaseUrl, serviceRoleKey)
+    return saveWeeklyFields(from, { version: 13, hubSpot, csSourceMetrics }, supabaseUrl, serviceRoleKey)
   }
   const [hubSpot, noShows, csSourceMetrics, revenueHistory] = await Promise.all([
     fetchWeeklyHubSpotPeriod(from, to, hubSpotToken), fetchWeeklyNoShows(from, to, hubSpotToken),
     fetchWeeklyCsSourceMetrics(from, to, hubSpotToken), fetchWeeklyRevenueHistory(from, to, hubSpotToken),
   ])
-  return saveWeeklyFields(from, { version: 12, hubSpot, noShows, csSourceMetrics, revenueHistory }, supabaseUrl, serviceRoleKey)
+  return saveWeeklyFields(from, { version: 13, hubSpot, noShows, csSourceMetrics, revenueHistory }, supabaseUrl, serviceRoleKey)
 }
 
 async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken: string, supabaseUrl: string, serviceRoleKey: string) {
@@ -1474,7 +1477,7 @@ async function buildAndStoreWeeklyPeriod(from: string, to: string, hubSpotToken:
     applySavedAgentReportsToWeeklyPeriod(hubSpotLeadManagement, WEEKLY_LM_AGENTS, supabaseUrl, serviceRoleKey),
     applySavedAgentReportsToWeeklyPeriod(hubSpotCustomerCare, WEEKLY_CC_AGENTS, supabaseUrl, serviceRoleKey),
   ])
-  const reportData: StoredWeeklyPeriod = { version: 12, hubSpot, leadManagement, customerCare, noShows, csSourceMetrics, revenueHistory }
+  const reportData: StoredWeeklyPeriod = { version: 13, hubSpot, leadManagement, customerCare, noShows, csSourceMetrics, revenueHistory }
   if (supabaseUrl && serviceRoleKey) return saveWeeklyFields(from, reportData, supabaseUrl, serviceRoleKey)
   return reportData
 }
