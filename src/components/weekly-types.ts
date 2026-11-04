@@ -20,7 +20,8 @@ export type WeeklyCallAgent = { name: string; aircallSeconds: number; aircallCal
 export type WeeklyCallPeriod = { agents: WeeklyCallAgent[]; doxyUploaded: boolean; unknownDurationCalls: number; aircallUploaded: boolean; aircallAvailable: boolean; aircallQuality: AircallQuality }
 type WeeklyCalls = { lastWeek: WeeklyCallPeriod; twoWeeksAgo: WeeklyCallPeriod }
 export type NoShowPeriod = { bySeller: Record<string, AppointmentBucket>; byWeekday: Record<string, AppointmentBucket>; bySellerWeekday?: Record<string, Record<string, AppointmentBucket>> }
-export type CsSourceMetrics = { abandonedCart: Record<string, number>; repurchaseList: Record<string, number>; repurchaseNoAnswer: Record<string, number> }
+export type { CsSourceMetrics } from '../../api/_lib/weekly-cs.ts'
+import type { CsSourceMetrics } from '../../api/_lib/weekly-cs.ts'
 export type WeeklyReport = {
   timezone: string; contactRosters?: { sales: ContactAgent[]; cs: ContactAgent[] }; lastWeek: WeeklyPeriod; twoWeeksAgo: WeeklyPeriod
   revenueHistory?: RevenueWeek[]; source?: { selected: 'live' | 'saved'; prior: 'live' | 'saved' }

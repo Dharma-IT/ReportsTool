@@ -16,7 +16,7 @@ Both reports follow the supplied Sales PDF sequence: Major Points, treatments, p
 
 ## Refresh and storage
 
-Weekly snapshots use version 11. Older snapshots are upgraded from HubSpot once. Refresh HubSpot rebuilds sales, meetings, source metrics, and historical seller revenue for the selected and comparison periods. The merge RPC preserves uploaded Doxy data and the other team's upload when refreshing or uploading concurrently. Aircall CSV corrections go directly to the shared ledger.
+Weekly snapshots use version 12. Older snapshots are upgraded from HubSpot once. Refresh HubSpot rebuilds sales, meetings, source metrics, and historical seller revenue for the selected and comparison periods. The merge RPC preserves uploaded Doxy data and the other team's upload when refreshing or uploading concurrently. Aircall CSV corrections go directly to the shared ledger.
 
 For a new installation, apply `scripts/create-weekly-report-merge.sql` in addition to the existing weekly/ledger schemas, or use the complete `supabase-schema.sql`. Existing live storage has this function installed. Runtime still uses the existing environment credentials.
 
@@ -41,3 +41,5 @@ Per the requested presentation, Sales Revenue displays all deal/product reconcil
 Export PDF prints the selected team and week, including the prior-week comparison, using an A4 landscape layout. Choose Save as PDF in the print dialog. Navigation, uploads, and refresh controls are excluded; report warnings and pending-data labels remain visible.
 
 CS Revenue by Seller also provides a HubSpot injection comparison combining standard injections and Microdose product net revenue and quantities. All-product seller revenue remains based on deal amounts. Alice F and Aline Strelow are one canonical seller. Standard injection quantity tables explicitly exclude Microdose.
+
+CS lists use unique HubSpot deals by Imported Source, grouped by current deal owner and Date of contact in the Monday?Saturday New York reporting week. Blank Lead Classification is excluded. Repurchase No-answer counts No Response classifications, including product-specific No Response variants. Each list shows classification and stage breakdowns plus sales (PAID or MEDICALLY APPROVED (WON) stage, or Completed Purchase classification), counted once per deal. Pending Payment is not a sale. Version 11 upgrades only CS source metrics and preserves uploaded calls and sales data.
