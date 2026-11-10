@@ -90,6 +90,7 @@ export async function fetchShopifyOrderLineItems(from, to) {
     })
     const orders = data.orders
     for (const order of orders.nodes) {
+      if (order.displayFinancialStatus === 'REFUNDED') continue
       const createdDate = easternDate(order.createdAt)
       if (createdDate < from || createdDate > to) continue
       for (const lineitem of order.lineItems.nodes) {

@@ -85,6 +85,20 @@ test('COGS uses creation day regardless of fulfillment, across midnight and DST'
   assert.deepEqual(orders.map((row) => row.name), ['#2', '#3'])
   assert(orders.every((row) => row.order_date === '2026-10-27'))
 
+  // Future fetches omit fully refunded orders from both Orders and COGS inputs.
+  const refundOrders = ['PAID', 'REFUNDED', 'PARTIALLY_REFUNDED'].map((status, index) => ({
+    ...order(`#${index + 1}`, '2026-10-27T12:00:00Z'), displayFinancialStatus: status,
+  }))
+  pages = [refundOrders]
+  const filteredOrders = await fetchShopifyOrderLineItems('2026-10-27', '2026-10-27')
+  assert.deepEqual(filteredOrders.map((row) => row.name), ['#1', '#3'])
+  pages = [refundOrders]
+  const filteredSales = await fetchShopifySales('2026-10-27')
+  assert.deepEqual(filteredSales.rows.map((row) => row.order_name), ['#1', '#3'])
+  pages = [refundOrders]
+  const filteredCosts = await syncShopifyCogs('2026-10-27')
+  assert.deepEqual(filteredCosts.rows.map((row) => row.order), ['#1', '#3'])
+
   for (const [date, start, end] of [
     ['2026-11-01', '2026-11-01T04:00:00Z', '2026-11-02T05:00:00Z'],
     ['2027-03-14', '2027-03-14T05:00:00Z', '2027-03-15T04:00:00Z'],

@@ -10,6 +10,7 @@ const SALES_QUERY = `query SalesForSupplements($after: String, $search: String!)
       createdAt
       email
       sourceName
+      displayFinancialStatus
       displayFulfillmentStatus
       currentTotalPriceSet { shopMoney { amount } }
       currentTotalTaxSet { shopMoney { amount } }
@@ -104,6 +105,7 @@ export async function fetchShopifySales(date) {
     const orders = data.orders
 
     for (const order of orders.nodes) {
+      if (order.displayFinancialStatus === 'REFUNDED') continue
       const costRecognitionDate = easternDate(order.createdAt)
       if (costRecognitionDate !== date) continue
       const refundByLineItem = new Map()
