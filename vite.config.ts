@@ -8,6 +8,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
+import { getMigrationPage } from './api/_lib/migration.js'
 import react from '@vitejs/plugin-react'
 import { fetchShopifySupplementContacts, getSavedShopifyOrderDates, getSavedShopifyOrders, syncShopifyOrders } from './api/_lib/shopify-orders.js'
 import { getHistoricalShopifySales, getSavedShopifySales, getSavedShopifySalesDates, getSavedShopifyMonth, syncShopifySales, updateHistoricalShopifySales } from './api/_lib/shopify-sales.js'
@@ -4499,6 +4500,21 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       react(),
+      {
+        name: 'temporary-migration-api',
+        configureServer(server) {
+          server.middlewares.use('/api/migration/contacts', async (request, response) => {
+            response.setHeader('Cache-Control', 'no-store')
+            if (request.method !== 'GET') return sendJson(response, 405, { message: 'Method not allowed' })
+            try {
+              const url = new URL(request.url ?? '/', 'http://localhost')
+              sendJson(response, 200, await getMigrationPage(env.HUBSPOT_ACCESS_TOKEN ?? '', url.searchParams.get('after') ?? ''))
+            } catch (error) {
+              sendJson(response, 502, { message: error instanceof Error ? error.message : 'Unable to load contacts' })
+            }
+          })
+        },
+      },
       metaAdsCostApi(env),
       supplementsAdsApi(env),
       supplementProductsApi(env),

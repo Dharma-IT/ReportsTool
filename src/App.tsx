@@ -11,6 +11,7 @@ import Refunds from './pages/Refunds'
 import ACAutomation from './pages/ACAutomation'
 import Supplements from './pages/Supplements'
 import Checker from './pages/Checker'
+import Migration from './pages/Migration'
 import CampaignPinLock from './components/CampaignPinLock'
 
 type AppRoute = {
@@ -31,6 +32,8 @@ const routes: AppRoute[] = [
   { path: '/ac-automation', label: 'AC Automation' },
   { path: '/supplements', label: 'Supplements' },
   { path: '/checker', label: 'Checker' },
+  // Temporary migration workspace; remove this entry, render branch, and page when finished.
+  { path: '/migration', label: 'Migration' },
 ]
 
 function getActiveRoute() {
@@ -93,6 +96,8 @@ function App() {
         <Supplements />
       ) : activeRoute === '/checker' ? (
         <Checker />
+      ) : activeRoute === '/migration' ? (
+        <Migration />
       ) : activeRoute === '/ac-automation' ? (
         <ACAutomation />
       ) : (
