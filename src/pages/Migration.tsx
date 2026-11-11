@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import './Migration.css'
 import { rebuildMigrationExports, uniqueMigrationContacts } from '../lib/migration-duplicates.js'
+import PipelineMigration from './PipelineMigration'
 
 type Contact = { name: string; phone: string; email: string }
 type Batch = { number: number; contacts: Contact[] }
@@ -64,7 +65,7 @@ function download(batch: Batch) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export default function Migration() {
+function ContactMigration() {
   const [checkpoint, setCheckpoint] = useState<Checkpoint>(initial)
   const [batches, setBatches] = useState<Batch[]>([])
   const [ready, setReady] = useState(false)
@@ -154,4 +155,12 @@ export default function Migration() {
       {batches.length ? <div className="migration-export-list">{batches.map(batch => <div className="migration-export" key={batch.number}><div><h3>Export {batch.number}</h3><p>{batch.contacts.length.toLocaleString()} contacts · CSV</p></div><button onClick={() => download(batch)}>Download Export {batch.number}</button></div>)}</div> : <div className="migration-empty"><h3>No exports prepared yet</h3><p>Prepare exports to create Export 1, Export 2, and the remaining batches. The final export may contain fewer than 10,000 contacts.</p></div>}
     </section>
   </main>
+}
+
+export default function Migration() {
+  const [view, setView] = useState('contacts')
+  return <>
+    <div className="migration-switch"><label className="migration-select">Migration type<select value={view} onChange={event => setView(event.target.value)}><option value="contacts">Contacts</option><option value="pipelines">Pipelines</option></select></label></div>
+    {view === 'contacts' ? <ContactMigration /> : <main className="migration-page"><header className="migration-header"><span className="migration-badge">Temporary workspace</span><h1>Migration</h1><p>HubSpot pipelines for Bigin - up to 10,000 deals per CSV.</p></header><PipelineMigration /></main>}
+  </>
 }

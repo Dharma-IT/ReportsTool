@@ -9,6 +9,7 @@ import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import { getMigrationPage } from './api/_lib/migration.js'
+import { getMigrationDealMetadata, getMigrationDealPage } from './api/_lib/migration-deals.js'
 import react from '@vitejs/plugin-react'
 import { createOnlineStripe } from './api/_lib/stripe-online.ts'
 import { fetchShopifySupplementContacts, getSavedShopifyOrderDates, getSavedShopifyOrders, syncShopifyOrders } from './api/_lib/shopify-orders.js'
@@ -4509,6 +4510,16 @@ export default defineConfig(({ mode }) => {
       {
         name: 'temporary-migration-api',
         configureServer(server) {
+          server.middlewares.use('/api/migration/deals', async (request, response) => {
+            response.setHeader('Cache-Control', 'no-store')
+            if (request.method !== 'GET') return sendJson(response, 405, { message: 'Method not allowed' })
+            try {
+              const query = new URL(request.url ?? '/', 'http://localhost').searchParams
+              const token = env.HUBSPOT_ACCESS_TOKEN ?? ''
+              const result = query.get('metadata') === '1' ? { pipelines: (await getMigrationDealMetadata(token)).pipelines } : await getMigrationDealPage(token, query.get('pipeline') ?? '', query.get('after') ?? '')
+              sendJson(response, 200, result)
+            } catch (error) { sendJson(response, 502, { message: error instanceof Error ? error.message : 'Unable to load pipeline deals' }) }
+          })
           server.middlewares.use('/api/migration/contacts', async (request, response) => {
             response.setHeader('Cache-Control', 'no-store')
             if (request.method !== 'GET') return sendJson(response, 405, { message: 'Method not allowed' })

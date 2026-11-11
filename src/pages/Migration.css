@@ -28,3 +28,9 @@
 .migration-totals { display: flex; gap: 14px 28px; align-items: center; flex-wrap: wrap; padding: 20px; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 12px; background: #eef3e5; color: var(--green-deep); }
 .migration-totals strong { font-size: 22px; }
 .migration-totals span { font-size: 14px; }
+.migration-switch { width: min(1320px, calc(100% - 36px)); margin: 24px auto 0; }
+.migration-select { display: grid; gap: 8px; max-width: 360px; margin-bottom: 20px; color: var(--green-deep); font-size: 13px; font-weight: 700; }
+.migration-select select { padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--green-deep); font: inherit; }
+.migration-controls details { margin-bottom: 20px; color: var(--green-deep); font-size: 13px; }
+.migration-controls summary { cursor: pointer; }
+.migration-controls ol { padding-left: 24px; margin-top: 12px; line-height: 1.8; }
