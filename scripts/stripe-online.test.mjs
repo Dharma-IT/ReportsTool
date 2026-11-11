@@ -7,7 +7,7 @@ import { chromium } from 'playwright'
 import { createOnlineStripe } from '../api/_lib/stripe-online.ts'
 
 const root = await mkdtemp(join(tmpdir(), 'stripe-online-test-'))
-const key = 'test-admin-key-with-at-least-32-characters'
+const key = '1234'
 const originalLaunch = chromium.launchPersistentContext
 const launches = []
 const entered = []

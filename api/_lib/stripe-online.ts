@@ -17,7 +17,7 @@ export function createOnlineStripe(options: Options) {
   let page: Page | undefined
   let idleTimer: ReturnType<typeof setTimeout> | undefined
   let busy = false
-  const configured = options.enabled && isAbsolute(options.dataDir) && options.adminKey.length >= 32
+  const configured = options.enabled && isAbsolute(options.dataDir) && options.adminKey.length >= 4
   const close = async () => {
     clearTimeout(idleTimer)
     const previous = context
@@ -60,7 +60,7 @@ export function createOnlineStripe(options: Options) {
           response.setHeader('Content-Type', 'application/json')
           response.end(JSON.stringify(payload))
         }
-        if (!configured) return send(503, { message: 'Online Stripe requires STRIPE_ONLINE_ENABLED=true, an absolute STRIPE_ONLINE_DATA_DIR on a persistent disk, and STRIPE_ONLINE_ADMIN_KEY (at least 32 characters).' })
+        if (!configured) return send(503, { message: 'Online Stripe requires STRIPE_ONLINE_ENABLED=true, an absolute STRIPE_ONLINE_DATA_DIR on a persistent disk, and an administrator password of at least 4 characters.' })
         const supplied = Buffer.from((request.headers.authorization || '').replace(/^Bearer /, ''))
         const expected = Buffer.from(options.adminKey)
         if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return send(401, { message: 'Enter the online Stripe administrator key.' })

@@ -4491,7 +4491,7 @@ export default defineConfig(({ mode }) => {
   const onlineStripe = createOnlineStripe({
     enabled: Boolean(process.env.RENDER) && env.STRIPE_ONLINE_ENABLED === 'true',
     dataDir: env.STRIPE_ONLINE_DATA_DIR ?? '',
-    adminKey: env.STRIPE_ONLINE_ADMIN_KEY ?? '',
+    adminKey: env.STRIPE_ONLINE_ADMIN_KEY || '1234',
   })
 
   return {

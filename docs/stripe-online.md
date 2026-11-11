@@ -24,8 +24,8 @@ Upgrading compute alone does not install Chromium or attach a disk.
 3. Set server environment variables:
    - `STRIPE_ONLINE_ENABLED=true`
    - `STRIPE_ONLINE_DATA_DIR=/var/data/stripe-online`
-   - `STRIPE_ONLINE_ADMIN_KEY`: a randomly generated secret of at least 32
-     characters, shared only with the administrator who connects Stripe.
+   - `STRIPE_ONLINE_ADMIN_KEY`: the online connection password. Defaults to
+     `1234` when unset; an explicit Render value overrides that default.
    Keep the existing `STRIPE_SECRET_KEY` and `HUBSPOT_ACCESS_TOKEN` settings.
 4. Deploy the backend and rebuild/deploy the frontend. If Render serves the
    frontend directly, the existing Vite start command serves the updated UI.
