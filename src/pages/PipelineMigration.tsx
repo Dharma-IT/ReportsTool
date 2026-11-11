@@ -12,7 +12,7 @@ async function api(query: string) {
 }
 function openDb(pipeline: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(`temporary-hubspot-deals-v2-${pipeline}`, 1)
+    const request = indexedDB.open(`temporary-hubspot-deals-v3-${pipeline}`, 1)
     request.onupgradeneeded = () => {
       request.result.createObjectStore('batches', { keyPath: 'number' })
       request.result.createObjectStore('progress')
@@ -119,7 +119,7 @@ function PipelineExports({ pipeline }: { pipeline: Pipeline }) {
     <div className="migration-controls">
       <p>Up to 10,000 deals per CSV. Repeat customers and purchases are kept. Deal names exclude NEW SALE, CS, and Sellers prefixes, numbers, and dashes. Deals without a usable name or phone/email are excluded. Missing deal phones are retrieved from linked contacts when available. Email uses the deal phone digits followed by @dummy.com.</p>
       <p>All stages are included; no yesterday filter is applied. Paid date (all pipelines) is explicitly fetched from HubSpot; missing paid dates use the migration placeholder 2020-01-01 in downloaded CSVs. Download exports again to apply the current CSV formatting rules. Date/time values retain the HubSpot UTC timestamp. Progress is saved separately for each pipeline in this browser.</p>
-      <p>Product is WLI for every exported deal. Blank Deal owner values export as Jeuz Vinci. Blank Close Date and Paid date values export as 2020-01-01 (migration placeholder dates). Select the destination pipeline and sub-pipeline in Bigin when importing. Stage labels export as New Leads, PAID, LOST, and Evaluation Scheduled. FUTURE CONTACT and MEDICALLY APPROVED (WON) export as LOST. Other stages retain their HubSpot labels.</p>
+      <p>Product is WLI for every exported deal. Blank Deal owner values export as Jeuz Vinci. Blank Close Date and Paid date values export as 2020-01-01 (migration placeholder dates). Select the destination pipeline and sub-pipeline in Bigin when importing. Stage labels match Bigin exactly: New Leads, PAID, LOST, Future Contact, Waiting for Payment, Refund, Dispute Won, Evaluation Scheduled, and Closed Won. MEDICALLY APPROVED (WON) maps to Closed Won. This export version starts fresh from HubSpot; prepare and download all batches again.</p>
       <details><summary>Export columns ({dealColumns.length})</summary><ol>{dealColumns.map(column => <li key={column}>{column}</li>)}</ol></details>
       <div className="migration-actions"><button disabled={!ready || busy || progress.done} onClick={() => void prepare()}>{progress.scanned ? 'Resume preparation' : 'Prepare pipeline exports'}</button><button disabled={!ready || busy} onClick={() => void prepare(true)}>Re-prepare from scratch</button>{busy && <button onClick={() => { stop.current = true }}>Pause after current page</button>}</div>
       <p>Re-prepare from scratch clears this pipeline's saved exports and progress in this browser, then fetches fresh HubSpot data.</p><p role="status">{progress.scanned.toLocaleString()} HubSpot deals scanned across all pipelines; {progress.total.toLocaleString()} eligible deals in {pipeline.label}. {progress.pending.length.toLocaleString()} in next export.</p>
@@ -128,7 +128,7 @@ function PipelineExports({ pipeline }: { pipeline: Pipeline }) {
       <p>{progress.withPaidDate.toLocaleString()} exported deals have a paid date; {progress.missingPaidDate.toLocaleString()} have no paid date in HubSpot. {progress.recoveredPhone.toLocaleString()} phone numbers recovered from linked contacts.</p><p>Deal owners are exported as HubSpot names. Match them to Bigin users when importing. Select the destination Bigin pipeline and create matching stages first.</p>
       {error && <p role="alert" className="migration-error">{error}</p>}
     </div>
-    {batches.length ? <div className="migration-export-list">{batches.map(batch => <div className="migration-export" key={batch.number}><div><h3>Export {batch.number}</h3><p>{batch.rows.length.toLocaleString()} deals - CSV</p></div><button onClick={() => download(pipeline, batch)}>Download Export {batch.number}</button></div>)}</div> : <div className="migration-empty"><h3>No pipeline exports prepared yet</h3><p>Prepare exports to create the numbered CSV files for this pipeline.</p></div>}
+    {batches.length ? <div className="migration-export-list">{batches.map(batch => <div className="migration-export" key={batch.number}><div><h3>Export {batch.number}</h3><p>{batch.rows.length.toLocaleString()} deals - CSV</p></div><button onClick={() => { try { download(pipeline, batch) } catch (failure) { setError(failure instanceof Error ? failure.message : 'Unable to export CSV') } }}>Download Export {batch.number}</button></div>)}</div> : <div className="migration-empty"><h3>No pipeline exports prepared yet</h3><p>Prepare exports to create the numbered CSV files for this pipeline.</p></div>}
   </section>
 }
 export default function PipelineMigration() {

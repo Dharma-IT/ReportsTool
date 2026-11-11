@@ -1,13 +1,15 @@
 export const dealColumns = ['Deal Name', 'Meeting Type', 'Evaluation date and hour', 'Phone Number', 'Agent Lead Management', 'Lead Classification', 'Deal Stage', 'Close Date', 'Deal owner', 'Amount', 'Email', 'Paid date (all pipelines)', 'Product']
 export function dealCsv(rows) {
-  const stages = { 'NEW LEAD': 'New Leads', 'NEW LEADS': 'New Leads', 'PAID': 'PAID', 'LOST': 'LOST', 'EVALUATION SCHEDULED': 'Evaluation Scheduled', 'FUTURE CONTACT': 'LOST', 'MEDICALLY APPROVED (WON)': 'LOST' }
+  const stages = { 'NEW LEAD': 'New Leads', 'NEW LEADS': 'New Leads', 'PAID': 'PAID', 'LOST': 'LOST', 'EVALUATION SCHEDULED': 'Evaluation Scheduled', 'FUTURE CONTACT': 'Future Contact', 'WAITING FOR PAYMENT': 'Waiting for Payment', 'WAITING FOT PAYMENT': 'Waiting for Payment', 'REFUND': 'Refund', 'DISPUTE WON': 'Dispute Won', 'MEDICALLY APPROVED (WON)': 'Closed Won', 'CLOSED WON': 'Closed Won' }
   const cell = value => {
     const text = String(value ?? '')
     return `"${(/^[=+\-@\t\r]/.test(text) ? "'" : '') + text.replace(/"/g, '""')}"`
   }
   return '\uFEFF' + [dealColumns, ...rows.map(row => {
     const values = row.slice(0, 12)
-    values[6] = stages[String(values[6] ?? '').trim().toUpperCase()] ?? values[6]
+    const sourceStage = String(values[6] ?? '').trim()
+    if (sourceStage && !stages[sourceStage.toUpperCase()]) throw new Error('No confirmed Bigin mapping for HubSpot stage: ' + sourceStage + '. Export stopped to prevent an invalid import.')
+    values[6] = stages[sourceStage.toUpperCase()] ?? values[6]
     for (const index of [7, 11]) {
       if (!String(values[index] ?? '').trim()) values[index] = '2020-01-01'
     }
