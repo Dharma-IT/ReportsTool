@@ -39,4 +39,14 @@
 .todo-feedback [role=alert] { color: #a03228; }
 .todo-feedback button { margin-top: 10px; }
 .todo-empty { padding: 22px 28px; color: var(--muted); font-size: 14px; }
+.todo-reorder-hint { margin: 0; padding: 0 28px 16px; color: var(--muted); font-size: 12px; }
+.todo-page .todo-drag-handle { flex-shrink: 0; padding: 8px 4px; background: transparent; color: #7a8972; cursor: grab; font-size: 26px; line-height: 1; }
+.todo-page .todo-drag-handle:active { cursor: grabbing; }
+.todo-list li { position: relative; gap: 12px; }
+.todo-drop-before::before, .todo-drop-after::after { position: absolute; left: 0; right: 0; height: 3px; background: var(--green-deep); border-radius: 3px; content: ''; pointer-events: none; }
+.todo-drop-before::before { top: -2px; }
+.todo-drop-after::after { bottom: -2px; }
+.todo-move-buttons { display: flex; gap: 3px; }
+.todo-page .todo-move-buttons button { padding: 8px; background: #edf2e5; color: var(--green-deep); font-size: 17px; line-height: 1; }
+.todo-page .todo-move-buttons button:disabled { opacity: .3; }
 @media (max-width: 550px) { .todo-add > div { flex-direction: column; } .todo-card-heading, .todo-add, .todo-feedback { padding-left: 20px; padding-right: 20px; } .todo-list { padding: 0 20px; } .todo-item-status { display: none; } }

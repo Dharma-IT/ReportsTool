@@ -21,14 +21,16 @@ export default function Todo() {
   const mutation = useRef(false)
   const revision = useRef(0)
   const pendingAddId = useRef<string | null>(null)
+  const dragged = useRef<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<{ id: string; after: boolean } | null>(null)
   const completed = items.filter(item => item.completed).length
   async function refresh() {
     const started = revision.current
     try {
       const result = await request()
       if (started === revision.current && !mutation.current) { setItems(result.items ?? []); setLoading(false); setError('') }
-    } catch (failure) {
-      if (started === revision.current) { setError(failure instanceof Error ? failure.message : 'Unable to load checklist'); setLoading(false) }
+    } catch {
+      if (started === revision.current) { setNotice('Loading checklist updates... Retrying automatically.'); setError('') }
     }
   }
   useEffect(() => {
@@ -39,8 +41,8 @@ export default function Todo() {
       try {
         const result = await request()
         if (active && started === revision.current && !mutation.current) { setItems(result.items ?? []); setLoading(false); setError('') }
-      } catch (failure) {
-        if (active && started === revision.current) { setError(failure instanceof Error ? failure.message : 'Unable to load checklist'); setLoading(false) }
+      } catch {
+        if (active && started === revision.current) { setNotice('Loading checklist updates... Retrying automatically.') }
       }
     }
     void poll()
@@ -60,7 +62,7 @@ export default function Todo() {
       setItems(result.items ?? [])
       setNotice(success)
       return true
-    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Unable to save checklist. Retry.'); return false }
+    } catch { setError('Your change could not be saved. Please try again.'); return false }
     finally { revision.current++; mutation.current = false; setSaving(false) }
   }
   async function add(event: FormEvent) {
@@ -68,6 +70,18 @@ export default function Todo() {
     if (!title.trim() || mutation.current) return
     pendingAddId.current ??= crypto.randomUUID()
     if (await update('POST', { id: pendingAddId.current, title: title.trim() }, 'Checklist item added for everyone.')) { setTitle(''); pendingAddId.current = null }
+  }
+  async function move(id: string, targetId: string, after: boolean) {
+    if (mutation.current || id === targetId) return
+    const previous = items
+    const item = items.find(row => row.id === id)
+    if (!item) return
+    const reordered = items.filter(row => row.id !== id)
+    const target = reordered.findIndex(row => row.id === targetId)
+    if (target < 0) return
+    reordered.splice(target + (after ? 1 : 0), 0, item)
+    setItems(reordered)
+    if (!await update('PATCH', { action: 'move', id, targetId, after }, 'Checklist order saved for everyone.')) setItems(previous)
   }
   return <main className="todo-page">
     <header className="todo-heading">
@@ -82,9 +96,23 @@ export default function Todo() {
     <section className="todo-card" aria-labelledby="todo-list-title">
       <div className="todo-card-heading"><div><h2 id="todo-list-title">Our checklist</h2><p>{loading ? 'Loading shared checklist...' : `${completed} of ${items.length} completed`}</p></div><span className="todo-shared">Shared with everyone</span></div>
       <progress aria-label="Checklist completion" value={completed} max={Math.max(items.length, 1)} />
-      {loading ? <p className="todo-empty" role="status">Loading items...</p> : items.length ? <ul className="todo-list">{items.map(item => <li key={item.id} className={item.completed ? 'is-complete' : ''}><label><input type="checkbox" checked={item.completed} disabled={saving} onChange={event => { const checked = event.target.checked; setItems(previous => previous.map(row => row.id === item.id ? { ...row, completed: checked } : row)); void update('PATCH', { id: item.id, completed: checked }, 'Checklist updated for everyone.').then(saved => { if (!saved) setItems(previous => previous.map(row => row.id === item.id ? { ...row, completed: item.completed } : row)) }) }} /><span>{item.title}</span></label><span className="todo-item-status" aria-hidden="true">{item.completed ? 'Done' : 'To do'}</span></li>)}</ul> : <p className="todo-empty">No items yet. Add the first one below.</p>}
+      {loading ? <p className="todo-empty" role="status">Loading items...</p> : items.length ? <>
+        <p className="todo-reorder-hint">Drag the handle to reorder, or use the up and down arrows.</p>
+        <ul className="todo-list">{items.map((item, index) => <li key={item.id}
+          className={`${item.completed ? 'is-complete' : ''} ${dropTarget?.id === item.id ? dropTarget.after ? 'todo-drop-after' : 'todo-drop-before' : ''}`}
+          onDragOver={event => { if (!dragged.current || saving) return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; const bounds = event.currentTarget.getBoundingClientRect(); setDropTarget({ id: item.id, after: event.clientY > bounds.top + bounds.height / 2 }) }}
+          onDrop={event => { event.preventDefault(); const id = dragged.current; const bounds = event.currentTarget.getBoundingClientRect(); const after = event.clientY > bounds.top + bounds.height / 2; dragged.current = null; setDropTarget(null); if (id) void move(id, item.id, after) }}>
+          <button type="button" className="todo-drag-handle" aria-label={`Drag ${item.title} to reorder`} title="Drag to reorder. Use arrow keys, Home, or End to move." draggable={!saving} disabled={saving}
+            onDragStart={event => { dragged.current = item.id; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', item.id) }}
+            onDragEnd={() => { dragged.current = null; setDropTarget(null) }}
+            onKeyDown={event => { const target = event.key === 'ArrowUp' ? items[index - 1] : event.key === 'ArrowDown' ? items[index + 1] : event.key === 'Home' ? items[0] : event.key === 'End' ? items[items.length - 1] : null; if (target) { event.preventDefault(); void move(item.id, target.id, event.key === 'ArrowDown' || event.key === 'End') } }}><span aria-hidden="true">⠿</span></button>
+          <label><input type="checkbox" checked={item.completed} disabled={saving} onChange={event => { const checked = event.target.checked; setItems(previous => previous.map(row => row.id === item.id ? { ...row, completed: checked } : row)); void update('PATCH', { id: item.id, completed: checked }, 'Checklist updated for everyone.').then(saved => { if (!saved) setItems(previous => previous.map(row => row.id === item.id ? { ...row, completed: item.completed } : row)) }) }} /><span>{item.title}</span></label>
+          <span className="todo-item-status" aria-hidden="true">{item.completed ? 'Done' : 'To do'}</span>
+          <div className="todo-move-buttons"><button type="button" aria-label={`Move ${item.title} up`} disabled={saving || index === 0} onClick={() => void move(item.id, items[index - 1].id, false)}>↑</button><button type="button" aria-label={`Move ${item.title} down`} disabled={saving || index === items.length - 1} onClick={() => void move(item.id, items[index + 1].id, true)}>↓</button></div>
+        </li>)}</ul>
+      </> : <p className="todo-empty">No items yet. Add the first one below.</p>}
       <form className="todo-add" onSubmit={event => { void add(event) }}><label htmlFor="new-todo">Add a checklist item</label><div><input id="new-todo" value={title} onChange={event => { setTitle(event.target.value); pendingAddId.current = null }} maxLength={200} placeholder="What else needs to be done?" disabled={saving || loading} required /><button type="submit" disabled={saving || loading || !title.trim()}>{saving ? 'Saving...' : 'Add item'}</button></div></form>
-      <div className="todo-feedback" aria-live="polite">{error ? <div role="alert"><p>{error}</p><button disabled={saving} onClick={() => void refresh()}>Retry loading</button></div> : <p>{saving ? 'Saving shared changes...' : notice || 'Changes are saved for everyone. This page refreshes every 10 seconds.'}</p>}</div>
+      <div className="todo-feedback" aria-live="polite">{error ? <div role="alert"><p>{error}</p><button disabled={saving} onClick={() => void refresh()}>Retry loading</button></div> : <p>{saving ? 'Saving shared changes...' : loading ? 'Loading checklist... Retrying automatically.' : notice || 'Changes are saved for everyone. This page refreshes every 10 seconds.'}</p>}</div>
     </section>
   </main>
 }
