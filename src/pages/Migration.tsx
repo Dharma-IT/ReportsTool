@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import './Migration.css'
 import { rebuildMigrationExports, uniqueMigrationContacts } from '../lib/migration-duplicates.js'
 import PipelineMigration from './PipelineMigration'
+import MigrationSpecialExport from '../components/MigrationSpecialExport'
 
 type Contact = { name: string; phone: string; email: string }
 type Batch = { number: number; contacts: Contact[] }
@@ -137,6 +138,7 @@ function ContactMigration() {
 
   return <main className="migration-page">
     <header className="migration-header"><span className="migration-badge">Temporary workspace</span><h1>Migration</h1><p>HubSpot contacts for Bigin • Up to 10,000 contacts per CSV.</p></header>
+    <MigrationSpecialExport />
     <section className="migration-panel" aria-labelledby="migration-contacts-title">
       <div className="migration-panel-heading"><div><span className="migration-eyebrow">HubSpot ? Bigin</span><h2 id="migration-contacts-title">Contact exports</h2></div><span className="migration-status">{checkpoint.done ? 'All contacts processed' : busy ? 'Preparing exports…' : 'Ready to prepare'}</span></div>
       <div className="migration-controls">

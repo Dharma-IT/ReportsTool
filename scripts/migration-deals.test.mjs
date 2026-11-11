@@ -4,7 +4,7 @@ import { migrationDeal, getMigrationDealPage } from '../api/_lib/migration-deals
 import { dealColumns, dealCsv } from '../src/lib/migration-deal-csv.js'
 const metadata = { pipelines: [{ id: 'p1', stages: [{ id: 'paid', label: 'PAID' }] }], owners: { owner: 'Agent Name' }, options: { meeting_type: { cs: 'Customer Service' }, classification: { hot: 'Hot' } } }
 test('CSV stage labels match the configured Bigin capitalization, including saved rows', () => {
-  for (const [source, expected] of [['NEW LEAD', 'New Leads'], ['NEW LEADS', 'New Leads'], ['EVALUATION SCHEDULED', 'Evaluation Scheduled'], ['paid', 'PAID'], ['LOST', 'LOST'], ['FUTURE CONTACT', 'FUTURE CONTACT']]) {
+  for (const [source, expected] of [['NEW LEAD', 'New Leads'], ['NEW LEADS', 'New Leads'], ['EVALUATION SCHEDULED', 'Evaluation Scheduled'], ['paid', 'PAID'], ['LOST', 'LOST'], ['FUTURE CONTACT', 'LOST'], ['MEDICALLY APPROVED (WON)', 'LOST']]) {
     const row = Array(12).fill('')
     row[6] = source
     assert.equal(dealCsv([row]).split('\r\n')[1].split(',')[6], `"${expected}"`)
