@@ -15,6 +15,7 @@ export default function Todo() {
   const [items, setItems] = useState<Item[]>([])
   const [title, setTitle] = useState('')
   const [parentId, setParentId] = useState('')
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -117,7 +118,16 @@ export default function Todo() {
           <label><input type="checkbox" checked={item.completed} disabled={saving} onChange={event => { const checked = event.target.checked; setItems(previous => previous.map(row => row.id === item.id ? { ...row, completed: checked } : row)); void update('PATCH', { id: item.id, completed: checked }, 'Checklist updated for everyone.').then(saved => { if (!saved) setItems(previous => previous.map(row => row.id === item.id ? { ...row, completed: item.completed } : row)) }) }} /><span>{item.title}</span></label>
           <span className="todo-item-status" aria-hidden="true">{item.completed ? 'Done' : 'To do'}</span>
           <div className="todo-move-buttons"><button type="button" aria-label={`Move ${item.title} up`} disabled={saving || index === 0} onClick={() => void move(item.id, rootItems[index - 1].id, false)}>↑</button><button type="button" aria-label={`Move ${item.title} down`} disabled={saving || index === rootItems.length - 1} onClick={() => void move(item.id, rootItems[index + 1].id, true)}>↓</button></div>
-          {items.some(child => child.parent_id === item.id) && <div className="todo-subchecklist"><p>{items.filter(child => child.parent_id === item.id && child.completed).length} of {items.filter(child => child.parent_id === item.id).length} sub-items completed</p><ul aria-label={`${item.title} sub-checklist`}>{items.filter(child => child.parent_id === item.id).map(child => <li key={child.id} className={child.completed ? 'is-complete' : ''}><label><input type="checkbox" checked={child.completed} disabled={saving} onChange={event => { void toggleChild(child, event.target.checked) }} /><span>{child.title}</span></label><span className="todo-item-status">{child.completed ? 'Done' : 'To do'}</span></li>)}</ul></div>}
+          {items.some(child => child.parent_id === item.id) && <div className="todo-subchecklist-group">
+            <button type="button" className="todo-subchecklist-toggle" aria-expanded={Boolean(expanded[item.id])} aria-controls={`subchecklist-${item.id}`} onClick={() => setExpanded(previous => ({ ...previous, [item.id]: !previous[item.id] }))}>
+              <span className="todo-expand-chevron" aria-hidden="true">{expanded[item.id] ? '▾' : '▸'}</span>
+              <span>{expanded[item.id] ? 'Hide' : 'Show'} {item.title.toLowerCase()} checklist</span>
+              <span className="todo-subchecklist-count">{items.filter(child => child.parent_id === item.id && child.completed).length}/{items.filter(child => child.parent_id === item.id).length}</span>
+            </button>
+            <div id={`subchecklist-${item.id}`} hidden={!expanded[item.id]} className="todo-subchecklist">
+              <ul aria-label={`${item.title} sub-checklist`}>{items.filter(child => child.parent_id === item.id).map(child => <li key={child.id} className={child.completed ? 'is-complete' : ''}><label><input type="checkbox" checked={child.completed} disabled={saving} onChange={event => { void toggleChild(child, event.target.checked) }} /><span>{child.title}</span></label><span className="todo-item-status">{child.completed ? 'Done' : 'To do'}</span></li>)}</ul>
+            </div>
+          </div>}
         </li>)}</ul>
       </> : <p className="todo-empty">No items yet. Add the first one below.</p>}
       <form className="todo-add" onSubmit={event => { void add(event) }}><label htmlFor="new-todo">Add a checklist item</label><label className="todo-parent-label" htmlFor="todo-parent">Add under<select id="todo-parent" value={parentId} disabled={saving || loading} onChange={event => { setParentId(event.target.value); pendingAddId.current = null }}><option value="">Main checklist</option>{rootItems.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><div><input id="new-todo" value={title} onChange={event => { setTitle(event.target.value); pendingAddId.current = null }} maxLength={200} placeholder="What else needs to be done?" disabled={saving || loading} required /><button type="submit" disabled={saving || loading || !title.trim()}>{saving ? 'Saving...' : 'Add item'}</button></div></form>

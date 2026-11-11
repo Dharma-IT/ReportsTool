@@ -62,3 +62,12 @@
 .todo-add .todo-parent-label { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; font-weight: 500; font-size: 12px; }
 .todo-parent-label select { min-width: 150px; max-width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 7px; background: white; color: var(--green-deep); }
 @media (max-width:550px) { .todo-subchecklist { margin-left: 14px; padding-left: 12px; } }
+.todo-subchecklist-group { flex-basis: 100%; min-width: 0; margin: -8px 0 16px 40px; }
+.todo-page .todo-subchecklist-toggle { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; text-align: left; }
+.todo-page .todo-subchecklist-toggle:hover { background: #f1f5e9; color: var(--green-deep); }
+.todo-expand-chevron { width: 12px; font-size: 15px; color: var(--green-deep); }
+.todo-subchecklist-count { padding: 2px 7px; border-radius: 10px; background: #edf2e5; color: var(--green-deep); font-size: 10px; }
+.todo-subchecklist-group .todo-subchecklist { margin: 9px 0 0 15px; padding-left: 17px; }
+.todo-subchecklist-group .todo-subchecklist label { padding: 11px 8px; font-size: 12px; font-weight: 500; }
+.todo-subchecklist-group .todo-subchecklist input { width: 16px; height: 16px; }
+@media (max-width:550px) { .todo-subchecklist-group { margin-left: 25px; } .todo-subchecklist-group .todo-subchecklist { margin-left: 6px; padding-left: 10px; } }
