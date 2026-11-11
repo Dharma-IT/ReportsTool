@@ -52,6 +52,7 @@ function getActiveRoute() {
 
 function App() {
   const activeRoute = getActiveRoute()
+  if (activeRoute === '/todo') return <Todo />
 
   return (
     <>

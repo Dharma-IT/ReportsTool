@@ -1,5 +1,15 @@
 ﻿.todo-page { width: min(850px, calc(100% - 36px)); margin: 0 auto; padding: 42px 0 72px; }
 .todo-heading { margin-bottom: 30px; }
+.todo-illustration { float: right; width: 112px; height: 112px; margin: 0 0 12px 24px; color: var(--green-deep); }
+.todo-illustration svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.todo-moving-pen { transform-origin: 59px 66px; animation: todo-pen-write 3.6s ease-in-out infinite; }
+.todo-paper { transform-origin: 48px 48px; animation: todo-paper-float 5s ease-in-out infinite; }
+.todo-drawn-check { stroke-dasharray: 22; animation: todo-check-draw 3.6s ease-in-out infinite; }
+@keyframes todo-pen-write { 0%,100% { transform: translate(0,0) rotate(-5deg); } 25% { transform: translate(-9px,-7px) rotate(3deg); } 45% { transform: translate(-4px,-10px) rotate(-3deg); } 65% { transform: translate(2px,-3px) rotate(5deg); } }
+@keyframes todo-paper-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes todo-check-draw { 0%,15% { stroke-dashoffset: 22; } 45%,90% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: 22; } }
+@media (prefers-reduced-motion: reduce) { .todo-illustration * { animation: none; } }
+@media (max-width: 550px) { .todo-illustration { width: 76px; height: 76px; margin-left: 12px; } }
 .todo-heading > span { color: var(--green-strong); text-transform: uppercase; letter-spacing: .12em; font-size: 11px; font-weight: 800; }
 .todo-heading h1 { margin: 12px 0 16px; color: var(--green-deep); font: 500 clamp(38px, 5vw, 56px)/1.1 Georgia, serif; }
 .todo-heading p { max-width: 590px; color: var(--muted); line-height: 1.7; font-size: 14px; }

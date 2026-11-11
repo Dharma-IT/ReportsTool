@@ -70,7 +70,15 @@ export default function Todo() {
     if (await update('POST', { id: pendingAddId.current, title: title.trim() }, 'Checklist item added for everyone.')) { setTitle(''); pendingAddId.current = null }
   }
   return <main className="todo-page">
-    <header className="todo-heading"><span>Migration checklist</span><h1>Things to do</h1><p>A shared checklist for the move to Bigin. Anyone with this link can add items and check off completed work.</p></header>
+    <header className="todo-heading">
+      <div className="todo-illustration" aria-hidden="true">
+        <svg viewBox="0 0 96 96" fill="none">
+          <g className="todo-paper"><rect x="19" y="13" width="58" height="72" rx="9" fill="#fffdf5" stroke="currentColor" strokeWidth="2" /><rect x="35" y="8" width="26" height="12" rx="4" fill="#e9eedb" stroke="currentColor" strokeWidth="2" /><path d="M43 37h22M43 53h22M43 69h14" stroke="#c0cba9" strokeWidth="3" strokeLinecap="round" /><path className="todo-drawn-check" d="m28 36 4 4 6-8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /><rect x="28" y="49" width="8" height="8" rx="2" stroke="#c0cba9" strokeWidth="2" /><rect x="28" y="65" width="8" height="8" rx="2" stroke="#c0cba9" strokeWidth="2" /></g>
+          <g className="todo-moving-pen"><path d="m59 59 18-31a4 4 0 0 1 7 4L66 63l-9 7 2-11Z" fill="#e9c76b" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" /><path d="m74 34 7 4M59 59l7 4M57 70l3-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></g>
+        </svg>
+      </div>
+      <span>Migration checklist</span><h1>Things to do</h1><p>A shared checklist for the move to Bigin. Anyone with this link can add items and check off completed work.</p>
+    </header>
     <section className="todo-card" aria-labelledby="todo-list-title">
       <div className="todo-card-heading"><div><h2 id="todo-list-title">Our checklist</h2><p>{loading ? 'Loading shared checklist...' : `${completed} of ${items.length} completed`}</p></div><span className="todo-shared">Shared with everyone</span></div>
       <progress aria-label="Checklist completion" value={completed} max={Math.max(items.length, 1)} />
