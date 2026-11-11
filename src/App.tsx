@@ -12,6 +12,7 @@ import ACAutomation from './pages/ACAutomation'
 import Supplements from './pages/Supplements'
 import Checker from './pages/Checker'
 import Migration from './pages/Migration'
+import Todo from './pages/Todo'
 import CampaignPinLock from './components/CampaignPinLock'
 
 type AppRoute = {
@@ -40,6 +41,7 @@ function getActiveRoute() {
   const pathname = window.location.pathname.replace(/\/$/, '') || '/'
 
   if (pathname === '/bot-reports') return '/appointment-reports'
+  if (pathname === '/todo') return '/todo'
 
   if (routes.some((route) => route.path === pathname)) {
     return pathname
@@ -74,7 +76,9 @@ function App() {
         </div>
       </nav>
 
-      {activeRoute === '/' ? (
+      {activeRoute === '/todo' ? (
+        <Todo />
+      ) : activeRoute === '/' ? (
         <HomeDashboard />
       ) : activeRoute === '/missed-calls' ? (
         <MissedCalls />
