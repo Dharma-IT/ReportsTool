@@ -8,6 +8,10 @@ export function dealCsv(rows) {
   return '\uFEFF' + [dealColumns, ...rows.map(row => {
     const values = row.slice(0, 12)
     values[6] = stages[String(values[6] ?? '').trim().toUpperCase()] ?? values[6]
+    for (const index of [7, 11]) {
+      if (!String(values[index] ?? '').trim()) values[index] = '2020-01-01'
+    }
+    if (!String(values[8] ?? '').trim()) values[8] = 'Jeuz Vinci'
     return [...values, 'WLI']
   })].map(row => row.map(cell).join(',')).join('\r\n')
 }

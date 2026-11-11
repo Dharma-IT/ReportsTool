@@ -11,6 +11,22 @@ test('CSV stage labels match the configured Bigin capitalization, including save
     assert.equal(row[6], source)
   }
 })
+test('CSV fills blank owners and dates while preserving existing values and saved data', () => {
+  const blank = Array(12).fill('')
+  blank[7] = '  '
+  const existing = [...blank]
+  existing[7] = '2026-11-12'
+  existing[8] = 'Original Owner'
+  existing[11] = '2026-11-11'
+  const lines = dealCsv([blank, existing]).split('\r\n').slice(1).map(line => line.split(','))
+  assert.equal(lines[0][7], '"2020-01-01"')
+  assert.equal(lines[0][8], '"Jeuz Vinci"')
+  assert.equal(lines[0][11], '"2020-01-01"')
+  assert.equal(lines[1][7], '"2026-11-12"')
+  assert.equal(lines[1][8], '"Original Owner"')
+  assert.equal(lines[1][11], '"2026-11-11"')
+  assert.equal(blank[8], '')
+})
 test('deal export has exact 12 fields, decoded labels, date fields, cleaned name and dummy email', () => {
   const row = migrationDeal({ dealname: 'NEW SALE - Maria Cruz', phone: '+1 (347) 500-8081', meeting_type: 'cs', classification: 'hot', dealstage: 'paid', hubspot_owner_id: 'owner', amount: '100.50', paid_date_all_pipelines: '2026-11-11T00:00:00Z', closedate: '2026-11-12T02:00:00Z', evaluation_date_and_hour_2: '2026-11-10T12:00:00Z' }, metadata)
   assert.equal(dealColumns.length, 13)
