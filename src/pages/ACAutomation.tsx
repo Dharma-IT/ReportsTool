@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import StripeOnlineConnection from './StripeOnlineConnection'
 
 type Column = { key: string; label: string; width: number; dropdown?: boolean }
 type StripeContact = { phone: string; email: string; firstName: string; lastName: string }
@@ -155,7 +156,7 @@ function ACAutomation() {
         <fieldset className="ac-status-filter"><legend>Status</legend>{stripeStatuses.map((status) => <label key={status}><input type="checkbox" checked={statuses.includes(status)} onChange={() => setStatuses((current) => current.includes(status) ? current.filter((item) => item !== status) : [...current, status])} /><span>{status}</span></label>)}</fieldset>
         {isLocalDashboard
           ? <button type="button" onClick={connectStripe} disabled={connectingStripe}>{connectingStripe ? 'Opening...' : 'Connect Stripe'}</button>
-          : <button type="button" disabled title="Stripe Dashboard login and crawling require the desktop dashboard.">Stripe crawl: desktop only</button>}
+          : <StripeOnlineConnection apiUrl={getApiUrl} />}
         <button type="button" onClick={loadContacts} disabled={loading || !date}>{loading ? 'Loading...' : 'Apply'}</button>
         {filtering ? <label className="ac-sheet-search"><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter contacts..." /><button type="button" onClick={() => { setFiltering(false); setQuery('') }}>×</button></label> : null}
         <button type="button" onClick={() => setFiltering(true)}><FilterIcon /> Filter</button>

@@ -10,6 +10,7 @@ import { promisify } from 'node:util'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import { getMigrationPage } from './api/_lib/migration.js'
 import react from '@vitejs/plugin-react'
+import { createOnlineStripe } from './api/_lib/stripe-online.ts'
 import { fetchShopifySupplementContacts, getSavedShopifyOrderDates, getSavedShopifyOrders, syncShopifyOrders } from './api/_lib/shopify-orders.js'
 import { getHistoricalShopifySales, getSavedShopifySales, getSavedShopifySalesDates, getSavedShopifyMonth, syncShopifySales, updateHistoricalShopifySales } from './api/_lib/shopify-sales.js'
 import { getSavedShopifyCogs, getSavedShopifyCogsDates, saveShopifyCogs, syncShopifyCogs } from './api/_lib/shopify-cogs.js'
@@ -3995,7 +3996,7 @@ async function listStripeCharges(secretKey: string, start: number, end: number) 
   return charges
 }
 
-function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin {
+function acAutomationApi(stripeSecretKey: string, hubSpotToken: string, onlineCrawl?: (ids: string[]) => Promise<{ phones: Record<string, string>; warning: string }>): Plugin {
   return {
     name: 'ac-automation-api',
     configureServer(server) {
@@ -4191,7 +4192,7 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string): Plugin 
             contact.lookupId,
           )
           const dashboardIds = [...new Set(dashboardCandidates.map((contact) => `${contact.livemode ? '' : 'test:'}${contact.lookupId}`))]
-          const dashboardRecovery = await crawlStripeDashboardPhones(dashboardIds)
+          const dashboardRecovery = await (onlineCrawl ? onlineCrawl(dashboardIds) : crawlStripeDashboardPhones(dashboardIds))
           for (const contact of dashboardCandidates) {
             const phone = stripePhone(dashboardRecovery.phones[contact.lookupId])
             if (phone) {
@@ -4487,6 +4488,11 @@ function supplementProductsApi(env: Record<string, string>): Plugin {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  const onlineStripe = createOnlineStripe({
+    enabled: Boolean(process.env.RENDER) && env.STRIPE_ONLINE_ENABLED === 'true',
+    dataDir: env.STRIPE_ONLINE_DATA_DIR ?? '',
+    adminKey: env.STRIPE_ONLINE_ADMIN_KEY ?? '',
+  })
 
   return {
     server: {
@@ -4522,7 +4528,8 @@ export default defineConfig(({ mode }) => {
       shopifyCogsApi(env),
       shopifySalesApi(env),
       shopifyOrdersApi(env),
-      acAutomationApi(env.STRIPE_SECRET_KEY ?? '', env.HUBSPOT_ACCESS_TOKEN ?? ''),
+      onlineStripe.plugin,
+      acAutomationApi(env.STRIPE_SECRET_KEY ?? '', env.HUBSPOT_ACCESS_TOKEN ?? '', process.env.RENDER ? onlineStripe.crawl : undefined),
       botReportsApi(env.HUBSPOT_ACCESS_TOKEN ?? ''),
       facebookBudgetApi(env.FACEBOOK_SYSTEM_ACCESS_TOKEN ?? ''),
       respondIoReportMetricsApi(

@@ -252,6 +252,16 @@
   box-shadow: 0 10px 24px rgba(28, 84, 60, 0.16);
 }
 
+.stripe-online-overlay { position:fixed; inset:0; z-index:1000; display:flex; align-items:flex-start; justify-content:center; padding:24px; background:rgba(15,35,25,.65); overflow:auto; }
+.stripe-online-dialog { width:min(1148px,100%); padding:24px; background:#fff; color:#173f30; border-radius:14px; box-shadow:0 20px 70px #0004; }
+.stripe-online-dialog p { margin:12px 0; }
+.stripe-online-dialog form,.stripe-online-controls { display:flex; flex-wrap:wrap; align-items:end; gap:8px; margin:12px 0; }
+.stripe-online-dialog label { display:grid; gap:5px; font-size:13px; }
+.stripe-online-dialog input { padding:9px; border:1px solid #aebdaa; border-radius:6px; }
+.stripe-online-dialog button { padding:9px 12px; border:1px solid #aebdaa; border-radius:6px; background:#edf4df; cursor:pointer; }
+.stripe-online-dialog button:disabled { opacity:.5; cursor:wait; }
+.stripe-online-dialog small { display:block; margin-top:12px; }
+.stripe-online-frame { display:block; width:100%; height:auto; border:1px solid #aebdaa; cursor:crosshair; }
 /* Abandoned cart automation */
 .ac-shell { width:min(1320px,calc(100% - 36px)); margin:0 auto; padding:28px 0 64px; }
 .ac-header { position:relative; display:grid; grid-template-columns:1.35fr .65fr; gap:38px; align-items:center; min-height:330px; padding:48px 54px; overflow:hidden; border:1px solid var(--border); border-radius:18px; background:radial-gradient(circle at 82% 12%,rgba(243,205,101,.3),transparent 30%),linear-gradient(135deg,#fbfcf6,#eaf1dc); box-shadow:0 28px 80px rgba(38,64,42,.11); }
