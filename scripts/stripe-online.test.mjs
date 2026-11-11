@@ -14,6 +14,7 @@ const entered = []
 let location = 'https://dashboard.stripe.com/payments'
 let deferredFrame
 let expired = false
+let noPhone = false
 const page = {
   isClosed: () => false,
   goto: async url => { location = expired ? 'https://dashboard.stripe.com/login' : url },
@@ -24,7 +25,7 @@ const page = {
   keyboard: { insertText: async text => entered.push(text), press: async () => {} },
   mouse: { click: async () => {}, wheel: async () => {} },
   waitForTimeout: async () => {},
-  locator: () => ({ innerText: async () => 'Checkout summary Customer +1 (212) 555-0123 Items' }),
+  locator: () => ({ innerText: async () => noPhone ? 'Checkout summary Customer Items' : 'Checkout summary Customer +1 (212) 555-0123 Items' }),
 }
 chromium.launchPersistentContext = async (profile, options) => {
   launches.push({ profile, options })
@@ -72,9 +73,31 @@ try {
   assert.equal((await request('save')).status, 200)
   assert.ok(JSON.parse(await readFile(join(root, 'online-session-ready.json'), 'utf8')).connectedAt)
   assert.deepEqual(await service.crawl(['pi_abc', 'test:pi_def', '../invalid']), {
-    phones: { pi_abc: '12125550123', pi_def: '12125550123' }, warning: '',
+    phones: { pi_abc: '12125550123', pi_def: '12125550123' }, warning: '', pending: 0,
   })
   assert.ok(location.includes('/test/payments/pi_def'))
+  const beforeCached = launches.length
+  assert.equal((await service.crawl(['pi_abc', 'test:pi_def'])).pending, 0)
+  assert.equal(launches.length, beforeCached, 'cached phone numbers do not relaunch Chromium')
+  const many = ['pi_a1', 'pi_a2', 'pi_a3', 'pi_a4', 'pi_a5', 'pi_a6', 'pi_a7']
+  const firstBatch = await service.crawl(many)
+  assert.equal(firstBatch.pending, 4)
+  assert.equal(Object.keys(firstBatch.phones).length, 3)
+  assert.equal((await service.crawl(many)).pending, 1)
+  const lastBatch = await service.crawl(many)
+  assert.equal(lastBatch.pending, 0)
+  assert.equal(Object.keys(lastBatch.phones).length, 7, 'all prior batch results survive continuation')
+  const restarted = createOnlineStripe({ enabled: true, dataDir: root, adminKey: key })
+  assert.equal(Object.keys((await restarted.crawl(many)).phones).length, 7, 'saved results survive service recreation')
+  noPhone = true
+  const missing = ['pi_missing1', 'pi_missing2', 'pi_missing3', 'pi_missing4']
+  assert.equal((await service.crawl(missing)).pending, 4)
+  assert.equal((await service.crawl(missing)).pending, 2)
+  assert.equal((await service.crawl(missing)).pending, 0, 'missing phones stop retrying after two attempts')
+  const beforeCooldown = launches.length
+  assert.equal((await service.crawl(missing)).pending, 0)
+  assert.equal(launches.length, beforeCooldown, 'unavailable phones do not consume every subsequent Apply')
+  noPhone = false
   expired = true
   assert.match((await service.crawl(['pi_expired'])).warning, /expired/)
   await assert.rejects(access(join(root, 'online-session-ready.json')))

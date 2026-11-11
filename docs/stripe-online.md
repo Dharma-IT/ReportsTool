@@ -46,11 +46,18 @@ The server verifies access to Payments and closes the browser to flush its
 profile before marking it ready. Close the dialog and click **Apply**.
 
 API and HubSpot lookup behavior remains intact. Only unresolved payment phones
-are sent to the online crawler. It opens one payment tab at a time, with a shared
-150-second processing deadline. This first version runs recovery inside the
-existing Apply request; it is not a durable job queue. Very large imports can
-return partial recovery and require another attempt. The frontend must stay open.
-No background schedule is enabled.
+are sent to the online crawler. It opens one payment tab at a time and processes
+up to three payments per request with a shared 55-second processing deadline.
+Recovered phones and unsuccessful attempts are saved to the persistent disk in
+`online-phone-progress.json`. The frontend automatically continues with the next
+batch while keeping existing rows visible. Successful phones are reused across
+requests and restarts, so Apply does not keep starting at the first payment.
+Unresolved pages get two attempts, with never-attempted payments checked first;
+unsuccessful results can be retried after one hour. Saving a new online Stripe
+login clears this cache. Some records may still have no recoverable phone.
+Recovery runs inside successive Apply requests, not a background schedule: keep
+the page open. If interrupted, another Apply resumes using saved progress. The UI
+limits a single run to 100 batches; Apply can continue larger imports.
 
 The online browser is exclusive: while login or a crawl is active, other callers
 receive a busy message rather than sharing the browser profile. Interactive login

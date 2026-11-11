@@ -11,9 +11,18 @@ try {
   await page.getByRole('button', { name: 'Connect Stripe', exact: true }).waitFor()
   assert.equal(await page.getByRole('button', { name: 'Connect Stripe online', exact: true }).count(), 0)
   const actions = []
+  let recoveryBatches = 0
   await page.route('**/*', async route => {
     const request = route.request()
     const url = new URL(request.url())
+    if (url.pathname === '/api/ac-automation') {
+      recoveryBatches++
+      return route.fulfill({ json: {
+        contacts: [{ email: 'recovery-test@example.com', firstName: 'Recovery', lastName: 'Test', phone: recoveryBatches > 1 ? '12125550123' : '' }],
+        dashboardPending: recoveryBatches === 1 ? 2 : 0,
+        message: recoveryBatches === 1 ? 'Recovering next batch.' : 'All recovery batches completed.',
+      } })
+    }
     if (url.pathname === '/api/stripe-online') {
       const payload = request.postDataJSON()
       actions.push(payload)
@@ -39,5 +48,9 @@ try {
   assert.equal(await page.evaluate(() => Object.values(localStorage).some(value => value.includes('browser-test-administrator-key'))), false)
   await page.getByRole('button', { name: 'Close', exact: true }).click()
   assert.equal(await page.getByRole('dialog').count(), 0)
+  await page.getByRole('button', { name: 'Apply', exact: true }).click()
+  await page.getByText('All recovery batches completed.', { exact: true }).waitFor()
+  assert.equal(recoveryBatches, 2, 'Apply automatically continues queued online recovery')
+  await page.getByRole('cell', { name: '+12125550123', exact: true }).waitFor()
   console.log('Stripe UI: local button preserved; online login, polling, input, save and secret clearing passed.')
 } finally { await browser.close() }

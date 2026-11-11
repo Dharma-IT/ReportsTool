@@ -1,11 +1,12 @@
 import { chromium, type BrowserContext, type Page } from 'playwright'
-import { mkdir, access, writeFile, unlink } from 'node:fs/promises'
+import { mkdir, access, readFile, writeFile, rename, unlink } from 'node:fs/promises'
 import { resolve, isAbsolute } from 'node:path'
 import { timingSafeEqual } from 'node:crypto'
 import type { Plugin } from 'vite'
 
 type Options = { enabled: boolean; dataDir: string; adminKey: string }
-type Recovery = { phones: Record<string, string>; warning: string }
+type Recovery = { phones: Record<string, string>; warning: string; pending?: number }
+type PhoneProgress = Record<string, { phone: string; attempts: number; checkedAt: number }>
 const viewport = { width: 1100, height: 760 }
 
 // This service owns only its dedicated online profile. Local Stripe scripts and
@@ -13,6 +14,7 @@ const viewport = { width: 1100, height: 760 }
 export function createOnlineStripe(options: Options) {
   const root = options.dataDir ? resolve(options.dataDir) : ''
   const marker = resolve(root || '.', 'online-session-ready.json')
+  const progressPath = resolve(root || '.', 'online-phone-progress.json')
   let context: BrowserContext | undefined
   let page: Page | undefined
   let idleTimer: ReturnType<typeof setTimeout> | undefined
@@ -46,6 +48,7 @@ export function createOnlineStripe(options: Options) {
     // is never treated as proof that a new online login succeeded.
     await page.getByRole('button', { name: /create payment/i }).or(page.getByRole('link', { name: /^customers$/i })).first().waitFor({ timeout: 15_000 })
     await close() // flush the persistent profile before publishing readiness
+    await unlink(progressPath).catch(() => {})
     await writeFile(marker, JSON.stringify({ connectedAt: new Date().toISOString() }), { mode: 0o600 })
   }
 
@@ -124,20 +127,38 @@ export function createOnlineStripe(options: Options) {
     if (!ids.length) return { phones: {}, warning: '' }
     if (!configured) return { phones: {}, warning: 'Online Stripe crawling is not configured.' }
     if (busy || context) return { phones: {}, warning: 'Online Stripe browser is busy. Save or close online login, then retry Apply.' }
-    if (!await connected()) return { phones: {}, warning: 'Connect Stripe online and save the session first.' }
     busy = true
     const phones: Record<string, string> = {}
     let browser: BrowserContext | undefined
     let warning = ''
     try {
+      if (!await connected()) return { phones: {}, warning: 'Connect Stripe online and save the session first.' }
+      let progress: PhoneProgress = {}
+      try { progress = JSON.parse(await readFile(progressPath, 'utf8')) as PhoneProgress } catch { /* first run */ }
+      const targets = [...new Set(ids)].filter(target => /^(?:test:)?(?:pi|ch|py)_[A-Za-z0-9]+$/.test(target))
+      // Keep live/test keys distinct on disk. Successful recovery is reused;
+      // unsuccessful pages get two attempts, then a one hour cooldown.
+      for (const target of targets) {
+        const previous = progress[target]
+        if (previous && !previous.phone && Date.now() - previous.checkedAt > 60 * 60_000) delete progress[target]
+        if (previous?.phone) phones[target.replace(/^test:/, '')] = previous.phone
+      }
+      const queue = targets.filter(target => !progress[target]?.phone && (progress[target]?.attempts ?? 0) < 2)
+        .sort((a, b) => (progress[a]?.attempts ?? 0) - (progress[b]?.attempts ?? 0))
+      const pendingCount = () => targets.filter(target => !progress[target]?.phone && (progress[target]?.attempts ?? 0) < 2).length
+      const saveProgress = async () => {
+        await writeFile(`${progressPath}.tmp`, JSON.stringify(progress), { mode: 0o600 })
+        await rename(`${progressPath}.tmp`, progressPath)
+      }
+      if (!queue.length) return { phones, warning: '', pending: 0 }
       browser = await launch()
       const tab = browser.pages()[0] || await browser.newPage()
-      const deadline = Date.now() + 150_000
-      for (const target of ids) {
-        if (Date.now() >= deadline) { warning = 'Online crawl reached its time limit. Some phone numbers remain unresolved.'; break }
+      const deadline = Date.now() + 55_000
+      for (const target of queue.slice(0, 3)) {
+        if (Date.now() >= deadline) break
         const test = target.startsWith('test:')
         const id = test ? target.slice(5) : target
-        if (!/^(pi|ch|py)_[A-Za-z0-9]+$/.test(id)) continue
+        let sessionExpired = false
         try {
           await tab.goto(`https://dashboard.stripe.com/${test ? 'test/' : ''}payments/${id}`, { waitUntil: 'commit', timeout: 20_000 })
           for (let attempt = 0; attempt < 25 && Date.now() < deadline; attempt++) {
@@ -146,6 +167,7 @@ export function createOnlineStripe(options: Options) {
             if (/\/(login|signin)(?:[/?#]|$)/i.test(new URL(tab.url()).pathname)) {
               await unlink(marker).catch(() => {})
               warning = 'Online Stripe session expired. Reconnect Stripe online.'
+              sessionExpired = true
               break
             }
             const summary = text.match(/Checkout summary([\s\S]{0,1600}?)(?:Items|Payment breakdown|Details)/i)?.[1]
@@ -153,10 +175,12 @@ export function createOnlineStripe(options: Options) {
             if (match) { phones[id] = `1${match[1]}${match[2]}${match[3]}`; break }
             if (/transaction not found/i.test(text)) break
           }
-          if (warning) break
-        } catch { warning = 'Some online Stripe payment pages could not be read.' }
+        } catch { /* Save this unsuccessful attempt and continue with other payments. */ }
+        if (sessionExpired) break
+        progress[target] = { phone: phones[id] || '', attempts: (progress[target]?.attempts ?? 0) + 1, checkedAt: Date.now() }
+        await saveProgress()
       }
-      return { phones, warning }
+      return { phones, warning, pending: warning ? 0 : pendingCount() }
     } catch { return { phones, warning: 'Unable to start online Stripe browser. Check the Render Chromium installation and disk configuration.' } }
     finally { await browser?.close().catch(() => {}); busy = false }
   }

@@ -3,7 +3,7 @@ import StripeOnlineConnection from './StripeOnlineConnection'
 
 type Column = { key: string; label: string; width: number; dropdown?: boolean }
 type StripeContact = { phone: string; email: string; firstName: string; lastName: string }
-type AcResponse = { contacts?: StripeContact[]; message?: string; unavailablePhones?: number; phoneRecovery?: Record<string, number> }
+type AcResponse = { contacts?: StripeContact[]; message?: string; unavailablePhones?: number; phoneRecovery?: Record<string, number>; dashboardPending?: number }
 type ShopifyContact = { orderId: string; orderName: string; email: string; billingPhone: string; shippingName: string; firstName: string; lastName: string }
 type StripeStatus = 'failed' | 'expired' | 'incomplete'
 const stripeStatuses: StripeStatus[] = ['failed', 'expired', 'incomplete']
@@ -74,7 +74,9 @@ function ACAutomation() {
     if (!statuses.length) { setError('Select at least one Stripe status.'); return }
     setFetchStartedAt(Date.now()); setFetchFinishedAt(null)
     setLoading(true); setError(''); setSummary('')
+    setRows([])
     try {
+      for (let batch = 0; batch < 100; batch += 1) {
       const response = await fetch(getApiUrl(`/api/ac-automation?date=${encodeURIComponent(date)}&statuses=${encodeURIComponent(statuses.join(','))}`))
       const payload = await response.json() as AcResponse
       if (!response.ok) throw new Error(payload.message || 'Unable to load abandoned carts.')
@@ -84,8 +86,12 @@ function ACAutomation() {
         source: 'Abandoned Cart', owner: contactOwners[index % contactOwners.length], dealDate: displayDate(date),
       })))
       const recovered = Object.entries(payload.phoneRecovery ?? {}).filter(([source]) => source !== 'unavailable').map(([source, count]) => `${count} via ${source.replaceAll('_', ' ')}`).join(', ')
-      setSummary(`${payload.message || `${payload.contacts?.length ?? 0} unique contacts imported. ${payload.unavailablePhones ?? 0} phone numbers unavailable.`}${recovered ? ` Phone recovery: ${recovered}.` : ''}`)
-    } catch (caught) { setRows([]); setError(caught instanceof Error ? caught.message : 'Unable to load abandoned carts.') }
+      const pending = payload.dashboardPending ?? 0
+      setSummary(`${payload.message || `${payload.contacts?.length ?? 0} unique contacts imported. ${payload.unavailablePhones ?? 0} phone numbers unavailable.`}${recovered ? ` Phone recovery: ${recovered}.` : ''}${pending ? ` Continuing phone recovery: ${pending} payments still queued. Keep this page open.${batch === 99 ? ' Click Apply to continue the remaining batch.' : ''}` : ''}`)
+      if (isLocalDashboard || !pending) break
+      await new Promise(resolve => window.setTimeout(resolve, 500))
+      }
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to load abandoned carts.') }
     finally { setFetchFinishedAt(Date.now()); setLoading(false) }
   }
 
