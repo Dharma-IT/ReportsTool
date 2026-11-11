@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { dealColumns, dealCsv } from '../lib/migration-deal-csv.js'
+import { fetchMigrationDeals } from '../lib/migration-request.js'
 
 type Pipeline = { id: string; label: string }
 type Batch = { number: number; rows: string[][] }
@@ -7,11 +8,7 @@ type Progress = { after: string | null; pending: string[][]; scanned: number; co
 const initial: Progress = { after: '', pending: [], scanned: 0, count: 0, total: 0, missingPhone: 0, missingName: 0, missingPaidDate: 0, withPaidDate: 0, recoveredPhone: 0, done: false }
 const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 async function api(query: string) {
-  const response = await fetch(`${apiBase}/api/migration/deals?${query}`, { cache: 'no-store' })
-  if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('Pipeline migration API unavailable. Restart the server with the latest code.')
-  const result = await response.json()
-  if (!response.ok) throw new Error(result.message ?? 'Unable to load HubSpot deals')
-  return result
+  return fetchMigrationDeals(apiBase, query)
 }
 function openDb(pipeline: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
