@@ -5,7 +5,7 @@ import { dealColumns, dealCsv } from '../src/lib/migration-deal-csv.js'
 const metadata = { pipelines: [{ id: 'p1', stages: [{ id: 'paid', label: 'PAID' }] }], owners: { owner: 'Agent Name' }, options: { meeting_type: { cs: 'Customer Service' }, classification: { hot: 'Hot' } } }
 test('deal export has exact 12 fields, decoded labels, date fields, cleaned name and dummy email', () => {
   const row = migrationDeal({ dealname: 'NEW SALE - Maria Cruz', phone: '+1 (347) 500-8081', meeting_type: 'cs', classification: 'hot', dealstage: 'paid', hubspot_owner_id: 'owner', amount: '100.50', paid_date_all_pipelines: '2026-11-11T00:00:00Z', closedate: '2026-11-12T02:00:00Z', evaluation_date_and_hour_2: '2026-11-10T12:00:00Z' }, metadata)
-  assert.equal(dealColumns.length, 14)
+  assert.equal(dealColumns.length, 13)
   assert.deepEqual(row, ['Maria Cruz', 'Customer Service', '2026-11-10T12:00:00Z', '13475008081', '', 'Hot', 'PAID', '2026-11-12', 'Agent Name', '100.50', '13475008081@dummy.com', '2026-11-11'])
   for (const name of ['CS - Maria', 'Sellers - Maria', 'new sale: Maria']) assert.equal(migrationDeal({ dealname: name }, metadata)[0], 'Maria')
   for (const name of ['Damian - 5492920500281 -', 'CS - Damian - 123 -', 'Damian - -']) assert.equal(migrationDeal({ dealname: name }, metadata)[0], 'Damian')
@@ -13,9 +13,9 @@ test('deal export has exact 12 fields, decoded labels, date fields, cleaned name
   const csv = dealCsv([row, row])
   assert.equal(csv.split('\r\n').length, 3)
   assert.ok(csv.includes('Paid date (all pipelines)'))
-  assert.equal(csv.split('\r\n')[0].split(',').at(-1), '"Sub-Pipeline"')
-  assert.ok(csv.split('\r\n').slice(1).every(line => line.endsWith(',"WLI","New Leads"')))
-  assert.ok(dealCsv([row], 'Customer Service').endsWith(',"WLI","Customer Service"'))
+  assert.equal(csv.split('\r\n')[0].split(',').at(-1), '"Product"')
+  assert.ok(!dealColumns.includes('Sub-Pipeline'))
+  assert.ok(csv.split('\r\n').slice(1).every(line => line.endsWith(',"WLI"')))
   assert.ok(dealCsv([['=danger,"value"']]).includes("'=danger,"))
 })
 test('fresh deal reads preserve repeats, recover linked phones, exclude missing phones and fetch paid dates', async () => {
