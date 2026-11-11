@@ -3,6 +3,14 @@ import assert from 'node:assert/strict'
 import { migrationDeal, getMigrationDealPage } from '../api/_lib/migration-deals.js'
 import { dealColumns, dealCsv } from '../src/lib/migration-deal-csv.js'
 const metadata = { pipelines: [{ id: 'p1', stages: [{ id: 'paid', label: 'PAID' }] }], owners: { owner: 'Agent Name' }, options: { meeting_type: { cs: 'Customer Service' }, classification: { hot: 'Hot' } } }
+test('CSV stage labels match the configured Bigin capitalization, including saved rows', () => {
+  for (const [source, expected] of [['NEW LEAD', 'New Leads'], ['NEW LEADS', 'New Leads'], ['EVALUATION SCHEDULED', 'Evaluation Scheduled'], ['paid', 'PAID'], ['LOST', 'LOST'], ['FUTURE CONTACT', 'FUTURE CONTACT']]) {
+    const row = Array(12).fill('')
+    row[6] = source
+    assert.equal(dealCsv([row]).split('\r\n')[1].split(',')[6], `"${expected}"`)
+    assert.equal(row[6], source)
+  }
+})
 test('deal export has exact 12 fields, decoded labels, date fields, cleaned name and dummy email', () => {
   const row = migrationDeal({ dealname: 'NEW SALE - Maria Cruz', phone: '+1 (347) 500-8081', meeting_type: 'cs', classification: 'hot', dealstage: 'paid', hubspot_owner_id: 'owner', amount: '100.50', paid_date_all_pipelines: '2026-11-11T00:00:00Z', closedate: '2026-11-12T02:00:00Z', evaluation_date_and_hour_2: '2026-11-10T12:00:00Z' }, metadata)
   assert.equal(dealColumns.length, 13)
