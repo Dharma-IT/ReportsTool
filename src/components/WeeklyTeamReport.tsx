@@ -65,7 +65,7 @@ export default function WeeklyTeamReport({ report, team, error, onReconcile, rec
   const calls = report?.calls?.[team]
   const names = [...new Set([...(roster?.map((agent) => agent.name) ?? []), ...Object.keys(last?.bySeller ?? {}), ...Object.keys(prior?.bySeller ?? {}), ...(calls?.lastWeek.agents.map((agent) => canonical(agent.name)) ?? [])])].filter(keep)
   const aircallRow = (name: string, period: 'lastWeek' | 'twoWeeksAgo') => calls?.[period].agents.find((agent) => canonical(agent.name) === name)
-  const csUnits = (period: WeeklyPeriod | null, name: string) => period?.csInjectionUnitsBySeller?.[name] ?? null
+  const csUnits = (period: WeeklyPeriod | null, name: string) => period ? period.csInjectionUnitsBySeller?.[name] ?? 0 : null
   const injectionUnits = (period: WeeklyPeriod | null, name: string) => period?.products['Weight Loss Injections']?.bySeller[name]?.units ?? 0
   const performance = names.map((name) => ({ name,
     last: calls ? ratioPercent(injectionUnits(last, name), aircallRow(name, 'lastWeek')?.aircallValidCalls ?? 0) : null,
