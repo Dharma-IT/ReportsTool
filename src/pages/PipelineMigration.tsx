@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { dealColumns, dealCsv } from '../lib/migration-deal-csv.js'
 
 type Pipeline = { id: string; label: string }
+const subPipelineName = (pipeline: Pipeline) => /^new leads(?: 2025)?$/i.test(pipeline.label.trim()) ? 'New Leads' : pipeline.label
 type Batch = { number: number; rows: string[][] }
 type Progress = { after: string | null; pending: string[][]; scanned: number; count: number; total: number; missingPhone: number; missingName: number; missingPaidDate: number; withPaidDate: number; recoveredPhone: number; done: boolean }
 const initial: Progress = { after: '', pending: [], scanned: 0, count: 0, total: 0, missingPhone: 0, missingName: 0, missingPaidDate: 0, withPaidDate: 0, recoveredPhone: 0, done: false }
@@ -55,7 +56,7 @@ async function resetExports(pipeline: string) {
   })
 }
 function download(pipeline: Pipeline, batch: Batch) {
-  const url = URL.createObjectURL(new Blob([dealCsv(batch.rows)], { type: 'text/csv;charset=utf-8' }))
+  const url = URL.createObjectURL(new Blob([dealCsv(batch.rows, subPipelineName(pipeline))], { type: 'text/csv;charset=utf-8' }))
   const link = document.createElement('a')
   link.href = url
   link.download = `hubspot-${pipeline.label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-export-${batch.number}.csv`
@@ -122,7 +123,8 @@ function PipelineExports({ pipeline }: { pipeline: Pipeline }) {
     <div className="migration-controls">
       <p>Up to 10,000 deals per CSV. Repeat customers and purchases are kept. Deal names exclude NEW SALE, CS, and Sellers prefixes, numbers, and dashes. Deals without a usable name or phone/email are excluded. Missing deal phones are retrieved from linked contacts when available. Email uses the deal phone digits followed by @dummy.com.</p>
       <p>All stages are included; no yesterday filter is applied. Paid date (all pipelines) is explicitly fetched from HubSpot; genuinely missing dates stay blank. Older exports must be prepared and downloaded again with these updated rules. Date/time values retain the HubSpot UTC timestamp. Progress is saved separately for each pipeline in this browser.</p>
-      <details><summary>Export columns (12)</summary><ol>{dealColumns.map(column => <li key={column}>{column}</li>)}</ol></details>
+      <p>Product is WLI for every exported deal. Sub-Pipeline is {subPipelineName(pipeline)}. Create this sub-pipeline in Bigin before importing.</p>
+      <details><summary>Export columns ({dealColumns.length})</summary><ol>{dealColumns.map(column => <li key={column}>{column}</li>)}</ol></details>
       <div className="migration-actions"><button disabled={!ready || busy || progress.done} onClick={() => void prepare()}>{progress.scanned ? 'Resume preparation' : 'Prepare pipeline exports'}</button><button disabled={!ready || busy} onClick={() => void prepare(true)}>Re-prepare from scratch</button>{busy && <button onClick={() => { stop.current = true }}>Pause after current page</button>}</div>
       <p>Re-prepare from scratch clears this pipeline's saved exports and progress in this browser, then fetches fresh HubSpot data.</p><p role="status">{progress.scanned.toLocaleString()} HubSpot deals scanned across all pipelines; {progress.total.toLocaleString()} eligible deals in {pipeline.label}. {progress.pending.length.toLocaleString()} in next export.</p>
       <div className="migration-totals"><strong>{progress.total.toLocaleString()} {progress.done ? 'total exported deals' : 'pipeline deals prepared'}</strong><span>No duplicates removed</span></div>

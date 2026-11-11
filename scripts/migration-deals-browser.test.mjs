@@ -30,7 +30,7 @@ try {
  const csv = await readFile(await download.path(), 'utf8')
  assert.equal(csv.split('\r\n').length, 10001)
  assert.equal((csv.match(/Repeat Buyer/g) ?? []).length, 10000)
- assert.equal(csv.split('\r\n')[0].split(',').length, 12)
+ assert.equal(csv.split('\r\n')[0].split(',').length, 14)
  assert.equal(await page.getByText('1 deals - CSV', { exact: true }).count(), 1)
  await page.getByLabel('HubSpot pipeline').selectOption('test2')
  await page.getByText('No pipeline exports prepared yet').waitFor()
