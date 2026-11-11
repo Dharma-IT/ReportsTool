@@ -5,7 +5,7 @@ import { timingSafeEqual } from 'node:crypto'
 import type { Plugin } from 'vite'
 
 type Options = { enabled: boolean; dataDir: string; adminKey: string }
-type Recovery = { phones: Record<string, string>; warning: string; pending?: number }
+type Recovery = { phones: Record<string, string>; warning: string; pending?: number; estimatedSeconds?: number }
 type PhoneProgress = Record<string, { phone: string; attempts: number; checkedAt: number }>
 const viewport = { width: 1100, height: 760 }
 
@@ -154,6 +154,8 @@ export function createOnlineStripe(options: Options) {
       browser = await launch()
       const tab = browser.pages()[0] || await browser.newPage()
       const deadline = Date.now() + 55_000
+      const batchStarted = Date.now()
+      let checked = 0
       for (const target of queue.slice(0, 3)) {
         if (Date.now() >= deadline) break
         const test = target.startsWith('test:')
@@ -179,8 +181,11 @@ export function createOnlineStripe(options: Options) {
         if (sessionExpired) break
         progress[target] = { phone: phones[id] || '', attempts: (progress[target]?.attempts ?? 0) + 1, checkedAt: Date.now() }
         await saveProgress()
+        checked++
       }
-      return { phones, warning, pending: warning ? 0 : pendingCount() }
+      const attemptsLeft = targets.reduce((sum, target) => sum + (progress[target]?.phone ? 0 : Math.max(0, 2 - (progress[target]?.attempts ?? 0))), 0)
+      const secondsPerAttempt = Math.max(1, (Date.now() - batchStarted) / 1000 / Math.max(1, checked))
+      return { phones, warning, pending: warning ? 0 : pendingCount(), estimatedSeconds: warning ? 0 : Math.ceil(attemptsLeft * secondsPerAttempt + Math.ceil(attemptsLeft / 3) * 10) }
     } catch { return { phones, warning: 'Unable to start online Stripe browser. Check the Render Chromium installation and disk configuration.' } }
     finally { await browser?.close().catch(() => {}); busy = false }
   }

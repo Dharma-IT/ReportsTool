@@ -73,7 +73,7 @@ try {
   assert.equal((await request('save')).status, 200)
   assert.ok(JSON.parse(await readFile(join(root, 'online-session-ready.json'), 'utf8')).connectedAt)
   assert.deepEqual(await service.crawl(['pi_abc', 'test:pi_def', '../invalid']), {
-    phones: { pi_abc: '12125550123', pi_def: '12125550123' }, warning: '', pending: 0,
+    phones: { pi_abc: '12125550123', pi_def: '12125550123' }, warning: '', pending: 0, estimatedSeconds: 0,
   })
   assert.ok(location.includes('/test/payments/pi_def'))
   const beforeCached = launches.length
@@ -82,6 +82,7 @@ try {
   const many = ['pi_a1', 'pi_a2', 'pi_a3', 'pi_a4', 'pi_a5', 'pi_a6', 'pi_a7']
   const firstBatch = await service.crawl(many)
   assert.equal(firstBatch.pending, 4)
+  assert.ok(firstBatch.estimatedSeconds > 0, 'queued attempts include a remaining-time estimate')
   assert.equal(Object.keys(firstBatch.phones).length, 3)
   assert.equal((await service.crawl(many)).pending, 1)
   const lastBatch = await service.crawl(many)

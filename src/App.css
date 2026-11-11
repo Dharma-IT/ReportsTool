@@ -262,6 +262,15 @@
 .stripe-online-dialog button:disabled { opacity:.5; cursor:wait; }
 .stripe-online-dialog small { display:block; margin-top:12px; }
 .stripe-online-frame { display:block; width:100%; height:auto; border:1px solid #aebdaa; cursor:crosshair; }
+.ac-fetch-loader { display:flex; align-items:center; gap:16px; padding:20px 24px; background:#f0f5e8; border-bottom:1px solid #d5e2c9; color:#214a37; }
+.ac-fetch-spinner { flex:0 0 auto; width:28px; height:28px; border:3px solid #d0dec5; border-top-color:#1b573f; border-radius:50%; animation:ac-fetch-spin 1s linear infinite; }
+.ac-fetch-description { display:grid; gap:6px; flex:1; }
+.ac-fetch-loader strong { font-size:13px; }
+.ac-fetch-loader span:not(.ac-fetch-spinner) { font-size:11px; line-height:1.5; }
+.ac-fetch-timing { display:grid; gap:6px; text-align:right; }
+@keyframes ac-fetch-spin { to { transform:rotate(360deg); } }
+@media(prefers-reduced-motion:reduce) { .ac-fetch-spinner { animation:none; } }
+@media(max-width:700px) { .ac-fetch-loader { flex-wrap:wrap; padding:16px; } .ac-fetch-timing { width:100%; text-align:left; padding-left:44px; } }
 /* Abandoned cart automation */
 .ac-shell { width:min(1320px,calc(100% - 36px)); margin:0 auto; padding:28px 0 64px; }
 .ac-header { position:relative; display:grid; grid-template-columns:1.35fr .65fr; gap:38px; align-items:center; min-height:330px; padding:48px 54px; overflow:hidden; border:1px solid var(--border); border-radius:18px; background:radial-gradient(circle at 82% 12%,rgba(243,205,101,.3),transparent 30%),linear-gradient(135deg,#fbfcf6,#eaf1dc); box-shadow:0 28px 80px rgba(38,64,42,.11); }

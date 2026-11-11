@@ -17,9 +17,11 @@ try {
     const url = new URL(request.url())
     if (url.pathname === '/api/ac-automation') {
       recoveryBatches++
+      if (recoveryBatches === 2) await new Promise(resolve => setTimeout(resolve, 1500))
       return route.fulfill({ json: {
         contacts: [{ email: 'recovery-test@example.com', firstName: 'Recovery', lastName: 'Test', phone: recoveryBatches > 1 ? '12125550123' : '' }],
         dashboardPending: recoveryBatches === 1 ? 2 : 0,
+        dashboardEstimatedSeconds: recoveryBatches === 1 ? 90 : 0,
         message: recoveryBatches === 1 ? 'Recovering next batch.' : 'All recovery batches completed.',
       } })
     }
@@ -49,7 +51,12 @@ try {
   await page.getByRole('button', { name: 'Close', exact: true }).click()
   assert.equal(await page.getByRole('dialog').count(), 0)
   await page.getByRole('button', { name: 'Apply', exact: true }).click()
+  await page.getByText('Fetching missing phone numbers from Stripe Dashboard…', { exact: true }).waitFor()
+  await page.getByText(/ETA: About .* remaining/).waitFor()
+  await page.getByRole('cell', { name: 'recovery-test@example.com', exact: true }).waitFor()
+  assert.equal(await page.locator('.ac-fetch-spinner').count(), 1, 'loader remains visible beside partial data')
   await page.getByText('All recovery batches completed.', { exact: true }).waitFor()
+  assert.equal(await page.locator('.ac-fetch-spinner').count(), 0, 'loader disappears when fetching finishes')
   assert.equal(recoveryBatches, 2, 'Apply automatically continues queued online recovery')
   await page.getByRole('cell', { name: '+12125550123', exact: true }).waitFor()
   console.log('Stripe UI: local button preserved; online login, polling, input, save and secret clearing passed.')

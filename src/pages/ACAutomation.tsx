@@ -3,7 +3,7 @@ import StripeOnlineConnection from './StripeOnlineConnection'
 
 type Column = { key: string; label: string; width: number; dropdown?: boolean }
 type StripeContact = { phone: string; email: string; firstName: string; lastName: string }
-type AcResponse = { contacts?: StripeContact[]; message?: string; unavailablePhones?: number; phoneRecovery?: Record<string, number>; dashboardPending?: number }
+type AcResponse = { contacts?: StripeContact[]; message?: string; unavailablePhones?: number; phoneRecovery?: Record<string, number>; dashboardPending?: number; dashboardEstimatedSeconds?: number }
 type ShopifyContact = { orderId: string; orderName: string; email: string; billingPhone: string; shippingName: string; firstName: string; lastName: string }
 type StripeStatus = 'failed' | 'expired' | 'incomplete'
 const stripeStatuses: StripeStatus[] = ['failed', 'expired', 'incomplete']
@@ -33,7 +33,7 @@ const escapeCsv = (value: string) => `"${value.replaceAll('"', '""')}"`
 const escapeXml = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
 function FilterIcon() { return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h12M4.5 8h7M7 12h2" /></svg> }
 
-function FetchDuration({ startedAt, finishedAt, label }: { startedAt: number | null; finishedAt: number | null; label: string }) {
+function FetchDuration({ startedAt, finishedAt, label, estimatedFinish, detail }: { startedAt: number | null; finishedAt: number | null; label: string; estimatedFinish?: number | null; detail?: string }) {
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     if (!startedAt || finishedAt) return
@@ -43,7 +43,14 @@ function FetchDuration({ startedAt, finishedAt, label }: { startedAt: number | n
   if (!startedAt) return null
   const seconds = Math.max(0, Math.floor(((finishedAt ?? now) - startedAt) / 1_000))
   const elapsed = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-  return <div className="ac-sheet-notice" role="status" aria-live="off">{finishedAt ? `Request finished in ${elapsed}.` : `${label}: elapsed ${elapsed}. Please keep this page open.`}</div>
+  if (finishedAt) return <div className="ac-sheet-notice" role="status">Request finished in {elapsed}.</div>
+  const remaining = estimatedFinish ? Math.max(0, Math.ceil((estimatedFinish - now) / 1000)) : null
+  const eta = remaining === null ? 'Estimating…' : remaining === 0 ? 'Updating estimate…' : `About ${remaining >= 60 ? `${Math.ceil(remaining / 60)} min` : `${remaining} sec`} remaining`
+  return <div className="ac-fetch-loader" role="status" aria-live="polite">
+    <span className="ac-fetch-spinner" aria-hidden="true" />
+    <div className="ac-fetch-description"><strong>{label}</strong><span>{detail || 'Please keep this page open. Available contacts stay visible as numbers arrive.'}</span></div>
+    <div className="ac-fetch-timing" aria-live="off"><strong>ETA: {eta}</strong><span>Elapsed {elapsed} · Estimate adjusts as payments are checked.</span></div>
+  </div>
 }
 
 function ACAutomation() {
@@ -55,6 +62,9 @@ function ACAutomation() {
   const [loading, setLoading] = useState(false), [error, setError] = useState('')
   const [fetchStartedAt, setFetchStartedAt] = useState<number | null>(null)
   const [fetchFinishedAt, setFetchFinishedAt] = useState<number | null>(null)
+  const [fetchStage, setFetchStage] = useState('Fetching Stripe contacts and recovering phone numbers…')
+  const [fetchDetail, setFetchDetail] = useState('')
+  const [estimatedFinish, setEstimatedFinish] = useState<number | null>(null)
   const [supplementStartedAt, setSupplementStartedAt] = useState<number | null>(null)
   const [supplementFinishedAt, setSupplementFinishedAt] = useState<number | null>(null)
   const [connectingStripe, setConnectingStripe] = useState(false)
@@ -73,6 +83,9 @@ function ACAutomation() {
     if (!date) { setError('Choose a valid EST date.'); return }
     if (!statuses.length) { setError('Select at least one Stripe status.'); return }
     setFetchStartedAt(Date.now()); setFetchFinishedAt(null)
+    setFetchStage('Fetching Stripe contacts and recovering phone numbers…')
+    setFetchDetail('Loading payment records, checking Stripe and HubSpot details, and recovering missing numbers. Estimating time after the first batch.')
+    setEstimatedFinish(null)
     setLoading(true); setError(''); setSummary('')
     setRows([])
     try {
@@ -87,6 +100,12 @@ function ACAutomation() {
       })))
       const recovered = Object.entries(payload.phoneRecovery ?? {}).filter(([source]) => source !== 'unavailable').map(([source, count]) => `${count} via ${source.replaceAll('_', ' ')}`).join(', ')
       const pending = payload.dashboardPending ?? 0
+      if (pending) {
+        setFetchStage('Fetching missing phone numbers from Stripe Dashboard…')
+        setFetchDetail(`${pending} payments queued · ${batch + 1} batches completed. Contacts below update as numbers arrive. Keep this page open.`)
+        const estimate = payload.dashboardEstimatedSeconds
+        setEstimatedFinish(estimate && Number.isFinite(estimate) ? Date.now() + estimate * 1000 : null)
+      }
       setSummary(`${payload.message || `${payload.contacts?.length ?? 0} unique contacts imported. ${payload.unavailablePhones ?? 0} phone numbers unavailable.`}${recovered ? ` Phone recovery: ${recovered}.` : ''}${pending ? ` Continuing phone recovery: ${pending} payments still queued. Keep this page open.${batch === 99 ? ' Click Apply to continue the remaining batch.' : ''}` : ''}`)
       if (isLocalDashboard || !pending) break
       await new Promise(resolve => window.setTimeout(resolve, 500))
@@ -168,7 +187,7 @@ function ACAutomation() {
         <button type="button" onClick={() => setFiltering(true)}><FilterIcon /> Filter</button>
         <div className="ac-export-menu" ref={exportMenu}><button type="button" disabled={!filteredRows.length} aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)}>Export <span>⌄</span></button>{exportOpen ? <div className="ac-export-options" role="menu"><button type="button" onClick={exportCsv}><b>CSV</b><span>.csv</span><small>Comma-separated values</small></button><button type="button" onClick={exportExcel}><b>Excel</b><span>.xls</span><small>Microsoft Excel workbook</small></button></div> : null}</div>
       </div></div>
-      <FetchDuration startedAt={fetchStartedAt} finishedAt={fetchFinishedAt} label="Fetching Stripe contacts" />
+      <FetchDuration startedAt={fetchStartedAt} finishedAt={fetchFinishedAt} label={fetchStage} detail={fetchDetail} estimatedFinish={estimatedFinish} />
       {summary ? <div className="ac-sheet-notice" role="status">{summary}</div> : null}
       {error ? <div className="ac-sheet-error" role="alert">{error}</div> : null}
       <div className="ac-spreadsheet-wrap"><table className="ac-spreadsheet" style={{ minWidth: columns.reduce((sum, column) => sum + column.width, 38) }}><colgroup><col style={{ width: 38 }} />{columns.map((column) => <col key={column.key} style={{ width: column.width }} />)}</colgroup><thead><tr className="ac-letter-row"><th />{columns.map((column, index) => <th key={column.key}>{letters[index]}</th>)}</tr><tr className="ac-heading-row"><th>1</th>{columns.map((column) => <th key={column.key}><span>{column.label}</span><button type="button" onClick={() => setFiltering(true)}><FilterIcon /></button></th>)}</tr></thead><tbody>{filteredRows.map((row, index) => <tr key={`${row.email}-${index}`}><th>{index + 2}</th>{columns.map((column) => <td key={column.key}>{row[column.key] ?? ''}</td>)}</tr>)}</tbody></table>

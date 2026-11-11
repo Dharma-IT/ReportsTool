@@ -3996,7 +3996,7 @@ async function listStripeCharges(secretKey: string, start: number, end: number) 
   return charges
 }
 
-function acAutomationApi(stripeSecretKey: string, hubSpotToken: string, onlineCrawl?: (ids: string[]) => Promise<{ phones: Record<string, string>; warning: string; pending?: number }>): Plugin {
+function acAutomationApi(stripeSecretKey: string, hubSpotToken: string, onlineCrawl?: (ids: string[]) => Promise<{ phones: Record<string, string>; warning: string; pending?: number; estimatedSeconds?: number }>): Plugin {
   return {
     name: 'ac-automation-api',
     configureServer(server) {
@@ -4192,7 +4192,7 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string, onlineCr
             contact.lookupId,
           )
           const dashboardIds = [...new Set(dashboardCandidates.map((contact) => `${contact.livemode ? '' : 'test:'}${contact.lookupId}`))]
-          const dashboardRecovery: { phones: Record<string, string>; warning: string; pending?: number } = await (onlineCrawl ? onlineCrawl(dashboardIds) : crawlStripeDashboardPhones(dashboardIds))
+          const dashboardRecovery: { phones: Record<string, string>; warning: string; pending?: number; estimatedSeconds?: number } = await (onlineCrawl ? onlineCrawl(dashboardIds) : crawlStripeDashboardPhones(dashboardIds))
           for (const contact of dashboardCandidates) {
             const phone = stripePhone(dashboardRecovery.phones[contact.lookupId])
             if (phone) {
@@ -4249,7 +4249,7 @@ function acAutomationApi(stripeSecretKey: string, hubSpotToken: string, onlineCr
           const unavailablePhones = output.filter((contact) => !contact.phone).length
           const phoneRecovery = Object.fromEntries([...new Set(contacts.map((contact) => contact.phoneSource))].map((source) => [source, contacts.filter((contact) => contact.phoneSource === source).length]))
           for (const failure of failures) console.warn(`[AC Automation] Stripe lookup failed: ${failure}`)
-          sendJson(response, 200, { date: selectedDate, timezone: 'America/New_York', statuses: selectedStatuses, contacts: output, unavailablePhones, unusableContacts, fuzzyDuplicates, phoneRecovery, lookupFailures: failures.length, dashboardWarning: dashboardRecovery.warning, dashboardPending: dashboardRecovery.pending ?? 0, message: `${output.length} unique contacts imported. ${unavailablePhones} phone numbers unavailable.${fuzzyDuplicates ? ` ${fuzzyDuplicates} probable duplicate${fuzzyDuplicates === 1 ? '' : 's'} merged.` : ''}${unusableContacts ? ` ${unusableContacts} Stripe records without an email or phone were skipped.` : ''}${dashboardRecovery.warning ? ` Dashboard recovery unavailable: ${dashboardRecovery.warning}` : ''}` })
+          sendJson(response, 200, { date: selectedDate, timezone: 'America/New_York', statuses: selectedStatuses, contacts: output, unavailablePhones, unusableContacts, fuzzyDuplicates, phoneRecovery, lookupFailures: failures.length, dashboardWarning: dashboardRecovery.warning, dashboardPending: dashboardRecovery.pending ?? 0, dashboardEstimatedSeconds: dashboardRecovery.estimatedSeconds, message: `${output.length} unique contacts imported. ${unavailablePhones} phone numbers unavailable.${fuzzyDuplicates ? ` ${fuzzyDuplicates} probable duplicate${fuzzyDuplicates === 1 ? '' : 's'} merged.` : ''}${unusableContacts ? ` ${unusableContacts} Stripe records without an email or phone were skipped.` : ''}${dashboardRecovery.warning ? ` Dashboard recovery unavailable: ${dashboardRecovery.warning}` : ''}` })
         } catch (error) {
           sendJson(response, 500, { message: error instanceof Error ? error.message : 'Unable to load Stripe abandoned carts.' })
         }
