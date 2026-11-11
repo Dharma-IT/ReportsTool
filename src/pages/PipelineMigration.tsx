@@ -1,10 +1,10 @@
-﻿import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { dealColumns, dealCsv } from '../lib/migration-deal-csv.js'
 
 type Pipeline = { id: string; label: string }
 type Batch = { number: number; rows: string[][] }
-type Progress = { after: string | null; pending: string[][]; scanned: number; count: number; total: number; missingPhone: number; missingName: number; done: boolean }
-const initial: Progress = { after: '', pending: [], scanned: 0, count: 0, total: 0, missingPhone: 0, missingName: 0, done: false }
+type Progress = { after: string | null; pending: string[][]; scanned: number; count: number; total: number; missingPhone: number; missingName: number; missingPaidDate: number; withPaidDate: number; recoveredPhone: number; done: boolean }
+const initial: Progress = { after: '', pending: [], scanned: 0, count: 0, total: 0, missingPhone: 0, missingName: 0, missingPaidDate: 0, withPaidDate: 0, recoveredPhone: 0, done: false }
 const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 async function api(query: string) {
   const response = await fetch(`${apiBase}/api/migration/deals?${query}`, { cache: 'no-store' })
@@ -15,7 +15,7 @@ async function api(query: string) {
 }
 function openDb(pipeline: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(`temporary-hubspot-deals-v1-${pipeline}`, 1)
+    const request = indexedDB.open(`temporary-hubspot-deals-v2-${pipeline}`, 1)
     request.onupgradeneeded = () => {
       request.result.createObjectStore('batches', { keyPath: 'number' })
       request.result.createObjectStore('progress')
@@ -44,6 +44,16 @@ async function save(pipeline: string, progress: Progress, batch?: Batch) {
     tx.onabort = () => { db.close(); reject(tx.error ?? new Error('Unable to save export progress')) }
   })
 }
+async function resetExports(pipeline: string) {
+  const db = await openDb(pipeline)
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(['batches', 'progress'], 'readwrite')
+    tx.objectStore('batches').clear()
+    tx.objectStore('progress').clear()
+    tx.oncomplete = () => { db.close(); resolve() }
+    tx.onabort = () => { db.close(); reject(tx.error ?? new Error('Unable to clear saved exports')) }
+  })
+}
 function download(pipeline: Pipeline, batch: Batch) {
   const url = URL.createObjectURL(new Blob([dealCsv(batch.rows)], { type: 'text/csv;charset=utf-8' }))
   const link = document.createElement('a')
@@ -65,7 +75,7 @@ function PipelineExports({ pipeline }: { pipeline: Pipeline }) {
     load(pipeline.id).then(saved => { if (active) { setProgress(saved.progress); setBatches(saved.batches); setReady(true) } }).catch(() => { if (active) setError('Browser storage unavailable. Enable storage to prepare exports.') })
     return () => { active = false; stop.current = true }
   }, [pipeline.id])
-  async function prepare() {
+  async function prepare(fromScratch = false) {
     if (running.current) return
     running.current = true
     stop.current = false
@@ -73,9 +83,15 @@ function PipelineExports({ pipeline }: { pipeline: Pipeline }) {
     setError('')
     let current = progress
     try {
+      if (fromScratch) {
+        await resetExports(pipeline.id)
+        current = { ...initial, pending: [] }
+        setProgress(current)
+        setBatches([])
+      }
       while (!current.done && !stop.current) {
         let rows: string[][] = []
-        let scanned = 0, missingPhone = 0, missingName = 0
+        let scanned = 0, missingPhone = 0, missingName = 0, missingPaidDate = 0, withPaidDate = 0, recoveredPhone = 0
         let after = current.after
         if (current.after !== null) {
           const page = await api(`pipeline=${encodeURIComponent(pipeline.id)}&after=${encodeURIComponent(current.after)}`)
@@ -83,13 +99,13 @@ function PipelineExports({ pipeline }: { pipeline: Pipeline }) {
           rows = page.rows
           scanned = page.scanned
           missingPhone = page.missingPhone
-          missingName = page.missingName
+          missingName = page.missingName; missingPaidDate = page.missingPaidDate ?? 0; withPaidDate = page.withPaidDate ?? 0; recoveredPhone = page.recoveredPhone ?? 0
           after = page.after
         }
         const pending = [...current.pending, ...rows]
         let batch: Batch | undefined
         if (pending.length >= 10000 || (after === null && pending.length)) batch = { number: current.count + 1, rows: pending.splice(0, 10000) }
-        const next: Progress = { after, pending, scanned: current.scanned + scanned, total: current.total + rows.length, count: current.count + (batch ? 1 : 0), missingPhone: current.missingPhone + missingPhone, missingName: current.missingName + missingName, done: after === null && pending.length === 0 }
+        const next: Progress = { after, pending, scanned: current.scanned + scanned, total: current.total + rows.length, count: current.count + (batch ? 1 : 0), missingPhone: current.missingPhone + missingPhone, missingName: current.missingName + missingName, missingPaidDate: current.missingPaidDate + missingPaidDate, withPaidDate: current.withPaidDate + withPaidDate, recoveredPhone: current.recoveredPhone + recoveredPhone, done: after === null && pending.length === 0 }
         await save(pipeline.id, next, batch)
         current = next
         if (stop.current) break
@@ -104,14 +120,14 @@ function PipelineExports({ pipeline }: { pipeline: Pipeline }) {
   return <section className="migration-panel" aria-labelledby="pipeline-export-title">
     <div className="migration-panel-heading"><div><span className="migration-eyebrow">HubSpot to Bigin</span><h2 id="pipeline-export-title">{pipeline.label} exports</h2></div><span className="migration-status">{progress.done ? 'All deals processed' : busy ? 'Preparing exports...' : 'Ready to prepare'}</span></div>
     <div className="migration-controls">
-      <p>Up to 10,000 deals per CSV. Repeat customers and purchases are kept. Deal names exclude NEW SALE, CS, and Sellers prefixes. Email uses the deal phone digits followed by @dummy.com.</p>
-      <p>All stages and paid dates are included; no yesterday filter is applied. Date/time values retain the HubSpot UTC timestamp. Progress is saved separately for each pipeline in this browser.</p>
+      <p>Up to 10,000 deals per CSV. Repeat customers and purchases are kept. Deal names exclude NEW SALE, CS, and Sellers prefixes, numbers, and dashes. Deals without a usable name or phone/email are excluded. Missing deal phones are retrieved from linked contacts when available. Email uses the deal phone digits followed by @dummy.com.</p>
+      <p>All stages are included; no yesterday filter is applied. Paid date (all pipelines) is explicitly fetched from HubSpot; genuinely missing dates stay blank. Older exports must be prepared and downloaded again with these updated rules. Date/time values retain the HubSpot UTC timestamp. Progress is saved separately for each pipeline in this browser.</p>
       <details><summary>Export columns (12)</summary><ol>{dealColumns.map(column => <li key={column}>{column}</li>)}</ol></details>
-      <div className="migration-actions"><button disabled={!ready || busy || progress.done} onClick={() => void prepare()}>{progress.scanned ? 'Resume preparation' : 'Prepare pipeline exports'}</button>{busy && <button onClick={() => { stop.current = true }}>Pause after current page</button>}</div>
-      <p role="status">{progress.scanned.toLocaleString()} HubSpot deals scanned across all pipelines; {progress.total.toLocaleString()} belong to {pipeline.label}. {progress.pending.length.toLocaleString()} in next export.</p>
+      <div className="migration-actions"><button disabled={!ready || busy || progress.done} onClick={() => void prepare()}>{progress.scanned ? 'Resume preparation' : 'Prepare pipeline exports'}</button><button disabled={!ready || busy} onClick={() => void prepare(true)}>Re-prepare from scratch</button>{busy && <button onClick={() => { stop.current = true }}>Pause after current page</button>}</div>
+      <p>Re-prepare from scratch clears this pipeline's saved exports and progress in this browser, then fetches fresh HubSpot data.</p><p role="status">{progress.scanned.toLocaleString()} HubSpot deals scanned across all pipelines; {progress.total.toLocaleString()} eligible deals in {pipeline.label}. {progress.pending.length.toLocaleString()} in next export.</p>
       <div className="migration-totals"><strong>{progress.total.toLocaleString()} {progress.done ? 'total exported deals' : 'pipeline deals prepared'}</strong><span>No duplicates removed</span></div>
-      {(progress.missingPhone > 0 || progress.missingName > 0) && <p role="status">Review before import: {progress.missingPhone.toLocaleString()} deals have no phone/email; {progress.missingName.toLocaleString()} have no name after prefix removal. These deals remain in the exports.</p>}
-      <p>Deal owners are exported as HubSpot names. Match them to Bigin users when importing. Select the destination Bigin pipeline and create matching stages first.</p>
+      {(progress.missingPhone > 0 || progress.missingName > 0) && <p role="status">Excluded: {progress.missingPhone.toLocaleString()} without phone/email; {progress.missingName.toLocaleString()} without a usable name. Exclusion reasons may overlap.</p>}
+      <p>{progress.withPaidDate.toLocaleString()} exported deals have a paid date; {progress.missingPaidDate.toLocaleString()} have no paid date in HubSpot. {progress.recoveredPhone.toLocaleString()} phone numbers recovered from linked contacts.</p><p>Deal owners are exported as HubSpot names. Match them to Bigin users when importing. Select the destination Bigin pipeline and create matching stages first.</p>
       {error && <p role="alert" className="migration-error">{error}</p>}
     </div>
     {batches.length ? <div className="migration-export-list">{batches.map(batch => <div className="migration-export" key={batch.number}><div><h3>Export {batch.number}</h3><p>{batch.rows.length.toLocaleString()} deals - CSV</p></div><button onClick={() => download(pipeline, batch)}>Download Export {batch.number}</button></div>)}</div> : <div className="migration-empty"><h3>No pipeline exports prepared yet</h3><p>Prepare exports to create the numbered CSV files for this pipeline.</p></div>}
