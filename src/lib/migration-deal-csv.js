@@ -8,8 +8,7 @@ export function dealCsv(rows) {
   return '\uFEFF' + [dealColumns, ...rows.map(row => {
     const values = row.slice(0, 12)
     const sourceStage = String(values[6] ?? '').trim()
-    if (sourceStage && !stages[sourceStage.toUpperCase()]) throw new Error('No confirmed Bigin mapping for HubSpot stage: ' + sourceStage + '. Export stopped to prevent an invalid import.')
-    values[6] = stages[sourceStage.toUpperCase()] ?? values[6]
+    values[6] = stages[sourceStage.toUpperCase()] ?? sourceStage
     for (const index of [7, 11]) {
       if (!String(values[index] ?? '').trim()) values[index] = '2020-01-01'
     }

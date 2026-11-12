@@ -11,6 +11,18 @@ test('CSV stage labels match the configured Bigin capitalization, including save
     assert.equal(row[6], source)
   }
 })
+test('Customer Service exports preserve unmapped stages without blocking or dropping saved rows', () => {
+  const rows = ['PROBLEM', 'NEW CLIENT', 'Another Stage'].map(stage => {
+    const row = Array(12).fill('')
+    row[0] = 'Repeat Customer'
+    row[6] = stage
+    return row
+  })
+  const lines = dealCsv(rows).split('\r\n')
+  assert.equal(lines.length, 4)
+  assert.deepEqual(lines.slice(1).map(line => line.split(',')[6]), ['"PROBLEM"', '"NEW CLIENT"', '"Another Stage"'])
+})
+
 test('CSV fills blank owners and dates while preserving existing values and saved data', () => {
   const blank = Array(12).fill('')
   blank[7] = '  '
