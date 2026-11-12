@@ -7,6 +7,8 @@ export function dealCsv(rows) {
   }
   return '\uFEFF' + [dealColumns, ...rows.map(row => {
     const values = row.slice(0, 12)
+    values[3] = String(values[3] ?? '').replace(/\D/g, '')
+    values[10] = values[3] ? `${values[3]}@dummy.com` : ''
     const sourceStage = String(values[6] ?? '').trim()
     values[6] = stages[sourceStage.toUpperCase()] ?? sourceStage
     for (const index of [7, 11]) {

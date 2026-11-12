@@ -23,6 +23,17 @@ test('Customer Service exports preserve unmapped stages without blocking or drop
   assert.deepEqual(lines.slice(1).map(line => line.split(',')[6]), ['"PROBLEM"', '"NEW CLIENT"', '"Another Stage"'])
 })
 
+test('CSV regenerates missing or incorrect emails from saved phone numbers', () => {
+  const row = Array(12).fill('')
+  row[3] = '+1 (347) 500-8081'
+  row[10] = 'incorrect@example.com'
+  const values = dealCsv([row]).split('\r\n')[1].split(',')
+  assert.equal(values[3], '"13475008081"')
+  assert.equal(values[10], '"13475008081@dummy.com"')
+  row[10] = ''
+  assert.ok(dealCsv([row]).includes('"13475008081@dummy.com"'))
+})
+
 test('CSV fills blank owners and dates while preserving existing values and saved data', () => {
   const blank = Array(12).fill('')
   blank[7] = '  '

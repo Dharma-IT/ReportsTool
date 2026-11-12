@@ -33,7 +33,7 @@ export function specialExportContacts(text) {
     const name = (row[nameIndex] ?? '').trim()
     const email = (row[emailIndex] ?? '').trim().toLowerCase()
     const match = email.match(/^(\d+)@dummy\.com$/)
-    const phone = match?.[1] ?? (row[phoneIndex] ?? '').replace(/\D/g, '')
+    const phone = (row[phoneIndex] ?? '').replace(/\D/g, '') || match?.[1] || ''
     if (!name || !phone) { excluded++; continue }
     if (seen.has(phone)) { duplicates++; continue }
     seen.add(phone)
@@ -43,5 +43,8 @@ export function specialExportContacts(text) {
 }
 export function specialExportCsv(contacts) {
   const cell = value => `"${(/^[=+\-@\t\r]/.test(value) ? "'" : '') + value.replace(/"/g, '""')}"`
-  return '\uFEFFName,Phone,Email\r\n' + contacts.map(contact => [contact.name, contact.phone, contact.email].map(cell).join(',')).join('\r\n')
+  return '\uFEFFName,Phone,Email\r\n' + contacts.map(contact => {
+    const phone = String(contact.phone ?? '').replace(/\D/g, '')
+    return [contact.name, phone, phone ? `${phone}@dummy.com` : ''].map(cell).join(',')
+  }).join('\r\n')
 }
