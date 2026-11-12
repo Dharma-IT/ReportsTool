@@ -1,3 +1,5 @@
+import { dealColumns } from './migration-deal-csv.js'
+
 function parseCsv(text) {
   const rows = []
   let row = [], value = '', quoted = false
@@ -40,6 +42,24 @@ export function specialExportContacts(text) {
     contacts.push({ name, phone, email: `${phone}@dummy.com` })
   }
   return { contacts, matched, duplicates, excluded }
+}
+export function skippedPipelineRows(text) {
+  const [headers = [], ...rows] = parseCsv(text)
+  const normalized = headers.map(header => header.trim().toLowerCase())
+  const errorIndex = normalized.indexOf('errors')
+  const indices = dealColumns.slice(0, 12).map(column => normalized.indexOf(column.toLowerCase()))
+  if (errorIndex < 0 || indices.some(index => index < 0)) {
+    throw new Error('Select the Bigin skipped-records CSV with the pipeline columns and Errors column.')
+  }
+  return rows.filter(row => (row[errorIndex] ?? '').trim()).map(row => {
+    const values = indices.map(index => row[index] ?? '')
+    values[0] = values[0].replace(/^\s*(?:new\s+sale|cs|sellers)\s*[-\u2013\u2014:]\s*/i, '').replace(/[\d\-\u2013\u2014]/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!values[3].replace(/\D/g, '')) {
+      const match = values[10].trim().match(/^(\d+)@dummy\.com$/i)
+      if (match) values[3] = match[1]
+    }
+    return values
+  })
 }
 export function specialExportCsv(contacts) {
   const cell = value => `"${(/^[=+\-@\t\r]/.test(value) ? "'" : '') + value.replace(/"/g, '""')}"`
