@@ -37,7 +37,6 @@ const RESPOND_IO_ORGANIZATION_ID = '236383'
 const RESPOND_IO_SPACE_ID = '238284'
 const AGENT_REPORT_AGENTS = [
   { name: 'Belizabett Gonzalez', aliases: ['Belizabett Gonzalez'] },
-  { name: 'Ivan Baez', aliases: ['Ivan Baez'] },
   { name: 'Laura Sanchez', aliases: ['Laura Sanchez', 'Laura Alejandra Sanchez Pinto'] },
   { name: 'William Carcamo', aliases: ['William Carcamo'] },
   { name: 'Kathering Silva', aliases: ['Kathering Silva'] },
@@ -61,7 +60,6 @@ const APPOINTMENT_NUTRITIONISTS = [
 const STAFF_PERFORMANCE_REPORT = [
   { name: 'Belizabett Gonzalez', respondAliases: ['Belizabett Gonzalez'], hubSpotAliases: ['Belizabett Gonzalez'], hasCalls: true },
   { name: 'Carol Fernandes', respondAliases: ['Carolina Lopez'], hubSpotAliases: ['Carol Fernandes'], hasCalls: false },
-  { name: 'Ivan Baez', respondAliases: ['Ivan Baez'], hubSpotAliases: ['Ivan Baez'], hasCalls: true },
   { name: 'Laura Sanchez', respondAliases: ['Laura Sanchez'], hubSpotAliases: ['Laura Sanchez'], hasCalls: true },
   { name: 'Natasha Lorente', respondAliases: ['Jose Lorente'], hubSpotAliases: ['Natasha Lorente'], hasCalls: false },
   { name: 'William Carcamo', respondAliases: ['William Carcamo'], hubSpotAliases: ['William Carcamo'], hasCalls: true },
