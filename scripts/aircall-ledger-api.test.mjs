@@ -8,7 +8,7 @@ test('Daily and Weekly share the ledger; uploads and API repairs preserve other 
   const keys = ['VITE_SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'AIRCALL_API_ID', 'AIRCALL_API_TOKEN']
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
   Object.assign(process.env, { VITE_SUPABASE_URL: 'https://weekly-test.invalid', SUPABASE_SERVICE_ROLE_KEY: 'test', AIRCALL_API_ID: 'test', AIRCALL_API_TOKEN: 'test' })
-  let saved = { version: 11, hubSpot: { revenue: 777, products: {}, bySeller: {} }, leadManagement: {}, customerCare: {}, noShows: {}, csSourceMetrics: {} }
+  let saved = { version: 14, hubSpot: { revenue: 777, products: {}, bySeller: {} }, leadManagement: {}, customerCare: {}, noShows: {}, csSourceMetrics: {} }
   const start = 1792382400
   const rows = new Map([
     [1, { call_id: 1, started_at: start + 36000, answered_at: start + 36000, ended_at: start + 36060, talk_seconds: 60, agent_name: 'Carlos Vargas', finalized: true, source: 'webhook', api_seen_at: null, webhook_seen_at: '2026-10-19', review_reason: null, raw_digits: '15551234567' }],
@@ -27,7 +27,9 @@ test('Daily and Weekly share the ledger; uploads and API repairs preserve other 
       if (init.method === 'POST' || init.method === 'PATCH') { saved = JSON.parse(init.body).report_data; return new Response(null, { status: 204 }) }
       return Response.json([{ report_data: structuredClone(saved) }])
     }
+    if (url.pathname.endsWith('/daily_report_agents') && url.searchParams.get('team') === 'eq.cs') return Response.json([{ display_name: 'Aline Strelow', aliases: ['Aline Strelow'] }])
     if (url.pathname.endsWith('/daily_report_agents')) return Response.json([{ display_name: 'Carlos Vargas', aliases: ['Carlos Vargas'] }, { display_name: 'Helen Gutierrez', aliases: ['Helen Gutierrez'] }])
+    if (url.pathname.endsWith('/daily_reports') && url.searchParams.get('team') === 'eq.cs') return Response.json([{ report_data: { agents: [{ name: 'Aline Strelow', sales: 453.98, doxyTotalSeconds: 4369 }] } }])
     if (url.pathname.endsWith('/daily_reports')) return Response.json([{ report_data: { agents: [{ name: 'Carlos Vargas', totalTalkSeconds: 1, sales: 777, doxyTotalSeconds: 60 }] } }])
     if (url.pathname.endsWith('/aircall_reporting_calls')) {
       const filters = url.searchParams.getAll('started_at')
@@ -72,6 +74,12 @@ test('Daily and Weekly share the ledger; uploads and API repairs preserve other 
     assert.equal(daily.agents[0].doxyTotalSeconds, 60)
     assert.equal(daily.agents.find((a) => a.name === 'Helen Gutierrez').hubSpotMissing, true)
     assert.equal(apiRequests, 0)
+    rows.set(5, { call_id: 5, started_at: start + 40000, answered_at: start + 40000, ended_at: start + 40120, talk_seconds: 120, agent_name: 'Alice Strelow', finalized: true, source: 'webhook', raw_digits: '15558888888' })
+    const csDaily = await request('mode=saved&team=cs&from=2026-10-19&to=2026-10-24', undefined, '/api/daily-cs-report')
+    assert.equal(csDaily.agents.length, 1)
+    assert.equal(csDaily.agents[0].totalTalkSeconds, 120)
+    assert.equal(csDaily.agents[0].sales, 453.98)
+    assert.equal(csDaily.agents[0].doxyTotalSeconds, 4369)
     await request('team=sales&mode=doxy', { agents: [{ name: 'Carlos Vargas', doxySeconds: 58557, doxyCalls: 80, unknownDurationCalls: 1 }] })
     const csvText = 'call start time,user,duration (in call),call id (internal),datetime (utc)\n2026-10-19 10:00:00,Carlos Vargas,24518,1,2026-10-19 14:00:00'
     await request('team=sales&mode=aircall', { fileName: 'correct.csv', csvText, agents: [{ name: 'Carlos Vargas', aircallSeconds: 24518, aircallCalls: 1 }] })
@@ -94,3 +102,4 @@ test('Daily and Weekly share the ledger; uploads and API repairs preserve other 
     for (const key of keys) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key] }
   }
 })
+

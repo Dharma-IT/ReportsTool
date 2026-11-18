@@ -3317,11 +3317,12 @@ async function fetchDailyAgentRoster(
     if (!rows.length) return []
     return rows.filter((row) => !['natasha lopez', 'erika vargas', 'maria claudia', 'laura camila'].includes(row.display_name.trim().toLowerCase())).map((row) => ({
       name: row.display_name,
-      aliases: row.display_name.trim().toLowerCase() === 'alejandra oyala'
-        ? [...new Set([...(Array.isArray(row.aliases) && row.aliases.every((alias) => typeof alias === 'string') ? row.aliases : [row.display_name]), 'Alejandra Olaya'])]
-        : Array.isArray(row.aliases) && row.aliases.every((alias) => typeof alias === 'string')
-        ? row.aliases
-        : [row.display_name],
+      aliases: [...new Set([
+        row.display_name,
+        ...(Array.isArray(row.aliases) && row.aliases.every((alias) => typeof alias === 'string') ? row.aliases : []),
+        ...fallback.filter((agent) => agent.aliases.some((alias) => namesMatch(alias, row.display_name)))
+          .flatMap((agent) => agent.aliases),
+      ])],
       ...(row.hubspot_owner_id ? { hubspotOwnerId: row.hubspot_owner_id } : {}),
     }))
   } catch (error) {
