@@ -8,9 +8,6 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
-import { getMigrationPage } from './api/_lib/migration.js'
-import { todoRequest } from './api/_lib/todo.js'
-import { getMigrationDealMetadata, getMigrationDealPage } from './api/_lib/migration-deals.js'
 import react from '@vitejs/plugin-react'
 import { createOnlineStripe } from './api/_lib/stripe-online.ts'
 import { fetchShopifySupplementContacts, getSavedShopifyOrderDates, getSavedShopifyOrders, syncShopifyOrders } from './api/_lib/shopify-orders.js'
@@ -4507,51 +4504,6 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       react(),
-      {
-        name: 'shared-todo-api',
-        configureServer(server) {
-          server.middlewares.use('/api/todo', async (request, response) => {
-            response.setHeader('Cache-Control', 'no-store')
-            response.setHeader('Content-Type', 'application/json')
-            response.setHeader('Access-Control-Allow-Origin', '*')
-            response.setHeader('Access-Control-Allow-Headers', 'Content-Type')
-            response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS')
-            if (request.method === 'OPTIONS') { response.statusCode = 204; response.end(); return }
-            try {
-              const body = ['POST', 'PATCH'].includes(request.method ?? '') ? await readJsonRequest(request) : undefined
-              response.end(JSON.stringify(await todoRequest(request.method ?? 'GET', body, env)))
-            } catch (error) {
-              response.statusCode = Number((error as { status?: number }).status) || 502
-              response.end(JSON.stringify({ message: error instanceof Error ? error.message : 'Unable to manage shared checklist' }))
-            }
-          })
-        },
-      },
-      {
-        name: 'temporary-migration-api',
-        configureServer(server) {
-          server.middlewares.use('/api/migration/deals', async (request, response) => {
-            response.setHeader('Cache-Control', 'no-store')
-            if (request.method !== 'GET') return sendJson(response, 405, { message: 'Method not allowed' })
-            try {
-              const query = new URL(request.url ?? '/', 'http://localhost').searchParams
-              const token = env.HUBSPOT_ACCESS_TOKEN ?? ''
-              const result = query.get('metadata') === '1' ? { pipelines: (await getMigrationDealMetadata(token)).pipelines } : await getMigrationDealPage(token, query.get('pipeline') ?? '', query.get('after') ?? '')
-              sendJson(response, 200, result)
-            } catch (error) { sendJson(response, 502, { message: error instanceof Error ? error.message : 'Unable to load pipeline deals' }) }
-          })
-          server.middlewares.use('/api/migration/contacts', async (request, response) => {
-            response.setHeader('Cache-Control', 'no-store')
-            if (request.method !== 'GET') return sendJson(response, 405, { message: 'Method not allowed' })
-            try {
-              const url = new URL(request.url ?? '/', 'http://localhost')
-              sendJson(response, 200, await getMigrationPage(env.HUBSPOT_ACCESS_TOKEN ?? '', url.searchParams.get('after') ?? ''))
-            } catch (error) {
-              sendJson(response, 502, { message: error instanceof Error ? error.message : 'Unable to load contacts' })
-            }
-          })
-        },
-      },
       metaAdsCostApi(env),
       supplementsAdsApi(env),
       supplementProductsApi(env),

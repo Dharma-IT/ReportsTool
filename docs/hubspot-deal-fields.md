@@ -1,6 +1,6 @@
 # HubSpot deal fields
 
-Verified through the connected HubSpot API on November 11, 2026. These are available deal properties, not the columns currently included in the contact migration CSVs.
+Verified through the connected HubSpot API on November 11, 2026. These are the available deal properties.
 
 ## Pipelines
 
