@@ -8,6 +8,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
+import { todoRequest } from './api/_lib/todo.js'
 import react from '@vitejs/plugin-react'
 import { createOnlineStripe } from './api/_lib/stripe-online.ts'
 import { fetchShopifySupplementContacts, getSavedShopifyOrderDates, getSavedShopifyOrders, syncShopifyOrders } from './api/_lib/shopify-orders.js'
@@ -4504,6 +4505,26 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       react(),
+      {
+        name: 'shared-todo-api',
+        configureServer(server) {
+          server.middlewares.use('/api/todo', async (request, response) => {
+            response.setHeader('Cache-Control', 'no-store')
+            response.setHeader('Content-Type', 'application/json')
+            response.setHeader('Access-Control-Allow-Origin', '*')
+            response.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+            response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS')
+            if (request.method === 'OPTIONS') { response.statusCode = 204; response.end(); return }
+            try {
+              const body = ['POST', 'PATCH'].includes(request.method ?? '') ? await readJsonRequest(request) : undefined
+              response.end(JSON.stringify(await todoRequest(request.method ?? 'GET', body, env)))
+            } catch (error) {
+              response.statusCode = Number((error as { status?: number }).status) || 502
+              response.end(JSON.stringify({ message: error instanceof Error ? error.message : 'Unable to manage shared checklist' }))
+            }
+          })
+        },
+      },
       metaAdsCostApi(env),
       supplementsAdsApi(env),
       supplementProductsApi(env),
