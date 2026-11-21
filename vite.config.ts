@@ -1,3 +1,5 @@
+import { getBiginFinance } from './api/_lib/bigin-finance.js'
+import { getBiginTransactions, getBiginItems } from './api/_lib/bigin-transactions.js'
 import { aggregateCsDeals, type CsSourceMetrics } from './api/_lib/weekly-cs.ts'
 import { AircallLedger, agentCallMetrics, summarizeAircall, type LedgerRecord, talkSeconds } from './api/_lib/aircall-ledger.ts'
 import { weeklyRevenueAdjustments, csInjectionUnits, weeklyProductCategory, canonicalWeeklySeller, addAppointment, type AppointmentBucket } from './api/_lib/weekly-summary.ts'
@@ -4505,6 +4507,32 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       react(),
+      {
+        name: 'bigin-transactions-api',
+        configureServer(server) {
+          server.middlewares.use('/api/bigin-finance', async (request, response) => {
+            response.setHeader('Cache-Control', 'no-store')
+            if (request.method !== 'GET') return sendJson(response, 405, { message: 'Method not allowed' })
+            try { return sendJson(response, 200, await getBiginFinance(new URL(request.url || '/', 'http://localhost').searchParams, env)) }
+            catch (error) { return sendJson(response, Number((error as { status?: number }).status) || 502, { message: error instanceof Error ? error.message : 'Unable to load Bigin finance.' }) }
+          })
+          server.middlewares.use('/api/bigin-items', async (request, response) => {
+            response.setHeader('Cache-Control', 'no-store')
+            if (request.method !== 'GET') return sendJson(response, 405, { message: 'Method not allowed' })
+            try { return sendJson(response, 200, await getBiginItems(new URL(request.url || '/', 'http://localhost').searchParams, env)) }
+            catch (error) { return sendJson(response, Number((error as { status?: number }).status) || 502, { message: error instanceof Error ? error.message : 'Unable to load Bigin items.' }) }
+          })
+          server.middlewares.use('/api/bigin-transactions', async (request, response) => {
+            response.setHeader('Cache-Control', 'no-store')
+            if (request.method !== 'GET') return sendJson(response, 405, { message: 'Method not allowed' })
+            try {
+              return sendJson(response, 200, await getBiginTransactions(new URL(request.url || '/', 'http://localhost').searchParams, env))
+            } catch (error) {
+              return sendJson(response, Number((error as { status?: number }).status) || 502, { message: error instanceof Error ? error.message : 'Unable to load Bigin transactions.' })
+            }
+          })
+        },
+      },
       {
         name: 'shared-todo-api',
         configureServer(server) {

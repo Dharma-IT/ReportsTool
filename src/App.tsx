@@ -4,6 +4,7 @@ import CampaignDashboard from './pages/CampaignDashboard'
 import MissedCalls from './pages/MissedCalls'
 import HomeDashboard from './pages/HomeDashboard'
 import FinanceReport from './pages/FinanceReport'
+import UnderConstruction from './pages/UnderConstruction'
 import BotReports from './pages/BotReports'
 import Daily from './pages/Daily'
 import Weekly from './pages/Weekly'
@@ -23,6 +24,7 @@ const routes: AppRoute[] = [
   { path: '/', label: 'Home' },
   { path: '/campaign', label: 'Campaign' },
   { path: '/finance-report', label: 'Finance Report' },
+  { path: '/under-construction', label: 'Under Construction' },
   { path: '/missed-calls', label: 'Missed Calls' },
   { path: '/agent-report', label: 'Customer Care' },
   { path: '/daily', label: 'Daily' },
@@ -91,6 +93,10 @@ function App() {
       ) : activeRoute === '/finance-report' ? (
         <CampaignPinLock>
           <FinanceReport />
+        </CampaignPinLock>
+      ) : activeRoute === '/under-construction' ? (
+        <CampaignPinLock>
+          <UnderConstruction />
         </CampaignPinLock>
       ) : activeRoute === '/supplements' ? (
         <Supplements />

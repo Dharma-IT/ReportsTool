@@ -1,0 +1,2 @@
+export type BiginFinanceResponse = {reportDate:string; timezone:string; dealCount:number; refundCount:number; rows:{category:string;product:string;quantity:number;revenue:number;cogs:number}[];totalRevenue:number;paidRevenue:number;allocatedRevenue:number;reconciliationDifference:number;cogs:number;cogsEstimated:boolean;adsCostMeta:number;adsCostTiktok:number;revenueLoss:{cancelled:number;dispute:number;refund:number}}
+export function getBiginFinance(query:URLSearchParams,env?:Record<string,string|undefined>):Promise<BiginFinanceResponse>

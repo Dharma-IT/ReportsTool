@@ -13,6 +13,8 @@ type FinanceResponse = {
   adsCostMeta: number
   adsCostTiktok: number
   revenueLoss: { cancelled: number; dispute: number; refund: number }
+  refundCount?: number
+  cogsEstimated?: boolean
   message?: string
 }
 type ReportRange = 'daily' | 'range'
@@ -26,8 +28,8 @@ function getApiUrl(path: string) {
 
 const retryableStatuses = new Set([429, 502, 503, 504])
 
-async function fetchFinanceReport(date: string) {
-  const url = getApiUrl(`/api/finance-report?date=${encodeURIComponent(date)}`)
+async function fetchFinanceReport(date: string, source: 'hubspot' | 'bigin' = 'hubspot') {
+  const url = getApiUrl(`/api/${source === 'bigin' ? 'bigin-finance' : 'finance-report'}?date=${encodeURIComponent(date)}`)
   let lastError: unknown
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -97,6 +99,8 @@ function mergeReports(reports: FinanceResponse[], reportDate: string): FinanceRe
     reportDate,
     dealCount: reports.reduce((sum, report) => sum + report.dealCount, 0),
     rows: [...rows.values()],
+    refundCount: reports.reduce((sum, report) => sum + (report.refundCount ?? 0), 0),
+    cogsEstimated: reports.some(report => report.cogsEstimated),
     totalRevenue: reports.reduce((sum, report) => sum + report.totalRevenue, 0),
     cogs: reports.reduce((sum, report) => sum + report.cogs, 0),
     adsCostMeta: reports.reduce((sum, report) => sum + report.adsCostMeta, 0),
@@ -121,7 +125,9 @@ function displayMoney(value: number, dashWhenZero = false) {
   return <><span className="currency-symbol">$</span><span>{value < 0 ? `(${formatted})` : formatted}</span></>
 }
 
-function FinanceReport() {
+function FinanceReport({ source = 'hubspot', embedded = false }: { source?: 'hubspot' | 'bigin'; embedded?: boolean }) {
+  const sourceName = source === 'bigin' ? 'Bigin' : 'HubSpot'
+  const Container = embedded ? 'section' : 'main'
   const yesterday = shiftDate(getNewYorkDate(), -1)
   const [reportDate, setReportDate] = useState(yesterday)
   const [rangeStartDate, setRangeStartDate] = useState(`${yesterday.slice(0, 7)}-01`)
@@ -131,6 +137,7 @@ function FinanceReport() {
   const [rangeStart, setRangeStart] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [loadProgress, setLoadProgress] = useState('')
 
   const adsCostMeta = report?.adsCostMeta ?? 0
   const adsCostTiktok = report?.adsCostTiktok ?? 0
@@ -152,9 +159,11 @@ function FinanceReport() {
       const monthDates = datesBetween(`${endDate.slice(0, 7)}-01`, endDate)
       const allDates = [...new Set([...selectedDates, ...monthDates])]
       const entries: Array<readonly [string, FinanceResponse]> = []
-      for (let index = 0; index < allDates.length; index += 3) {
-        const batch = await Promise.all(allDates.slice(index, index + 3).map(async (date) => {
-          return [date, await fetchFinanceReport(date)] as const
+      const batchSize = source === 'bigin' ? 1 : 3
+      for (let index = 0; index < allDates.length; index += batchSize) {
+        setLoadProgress(`Loading ${sourceName} finance: ${Math.min(index + batchSize, allDates.length)} of ${allDates.length} days`)
+        const batch = await Promise.all(allDates.slice(index, index + batchSize).map(async (date) => {
+          return [date, await fetchFinanceReport(date, source)] as const
         }))
         entries.push(...batch)
       }
@@ -168,6 +177,7 @@ function FinanceReport() {
       setError(caught instanceof Error ? caught.message : 'Unable to load the finance report.')
     } finally {
       setIsLoading(false)
+      setLoadProgress('')
     }
   }
 
@@ -198,14 +208,14 @@ function FinanceReport() {
   }, [report])
 
   return (
-    <main className="dashboard-shell finance-report-page">
+    <Container className={`dashboard-shell finance-report-page${embedded ? ' bigin-finance-embedded' : ''}`} aria-label={source === 'bigin' ? 'Bigin finance report' : undefined}>
       <section className="finance-sheet finance-report-panel" aria-labelledby="finance-report-title">
         <div className="finance-report-heading">
           <div className="finance-heading-copy">
             <p className="eyebrow"><span /> Financial intelligence</p>
-            <h1 id="finance-report-title">Finance<br /><em>report.</em></h1>
-            <p>Paid revenue, product performance, costs, and profitability—brought together from HubSpot and your campaign reports.</p>
-            <div className="finance-source-row"><span><i /> HubSpot revenue</span><span><i /> Meta spend</span><span><i /> TikTok spend</span></div>
+            <h1 id="finance-report-title">{source === 'bigin' ? 'Bigin finance' : 'Finance'}<br /><em>report.</em></h1>
+            <p>Paid revenue, product performance, costs, and profitability from {sourceName} and your campaign reports.</p>
+            <div className="finance-source-row"><span><i /> {sourceName} revenue</span><span><i /> Meta spend</span><span><i /> TikTok spend</span></div>
           </div>
           <ReportHeroVisual variant="finance" />
         </div>
@@ -213,7 +223,7 @@ function FinanceReport() {
           <aside className="finance-range-sidebar" aria-label="Finance report range">
             <span>Report range</span>
             {(['daily', 'range'] as ReportRange[]).map((option) => (
-              <button key={option} type="button" className={range === option ? 'active' : ''} onClick={() => setRange(option)}>
+              <button key={option} type="button" disabled={isLoading} className={range === option ? 'active' : ''} onClick={() => setRange(option)}>
                 <strong>{option === 'daily' ? 'Daily' : 'Date Range'}</strong>
                 <small>{option === 'daily' ? 'Always yesterday' : 'Choose start and end'}</small>
               </button>
@@ -228,21 +238,22 @@ function FinanceReport() {
               <input id="finance-report-date" type="date" value={yesterday} readOnly aria-readonly="true" />
             </> : <>
               <label htmlFor="finance-range-start">Start date</label>
-              <input id="finance-range-start" type="date" value={rangeStartDate} max={reportDate} onChange={(event) => setRangeStartDate(event.target.value)} />
+              <input id="finance-range-start" disabled={isLoading} type="date" value={rangeStartDate} max={reportDate} onChange={(event) => setRangeStartDate(event.target.value)} />
               <label htmlFor="finance-report-date">End date</label>
-              <input id="finance-report-date" type="date" value={reportDate} min={rangeStartDate} max={yesterday} onChange={(event) => setReportDate(event.target.value)} />
+              <input id="finance-report-date" disabled={isLoading} type="date" value={reportDate} min={rangeStartDate} max={yesterday} onChange={(event) => setReportDate(event.target.value)} />
             </>}
             <button type="button" onClick={fetchReport} disabled={isLoading || !activeEndDate || (range === 'range' && (!rangeStartDate || rangeStartDate > reportDate))}>
               {isLoading ? 'Applying…' : 'Apply'}
             </button>
-            <span>{isLoading ? 'Loading HubSpot and ad spend…' : report
+            <span>{isLoading ? loadProgress || `Loading ${sourceName} and ad spend...` : report
               ? `${rangeStart}${rangeStart !== activeEndDate ? ` – ${activeEndDate}` : ''} · ${report.dealCount} paid deals`
               : ''}</span>
           </div>
         </div>
         {error && <p className="finance-error" role="alert">{error}</p>}
+        {source === 'bigin' && <p className="bigin-finance-method">Both pipelines, filtered by Paid Date in Eastern Time. Revenue is PAID deal amounts less recorded Refund-stage amounts. COGS is estimated at 32% of paid revenue; operating cost is 55% of gross profit. Meta and TikTok costs use the same saved campaign reports as Finance Report. Product amounts without linked items appear under unallocated revenue.</p>}
         <div className="finance-summary-grid" aria-label="Finance summary">
-          <article><span className="finance-metric-icon revenue">↗</span><div><small>Total revenue</small><strong>{displayMoney(totals.revenue)}</strong><p>Paid product revenue</p></div></article>
+          <article><span className="finance-metric-icon revenue">↗</span><div><small>Total revenue</small><strong>{displayMoney(totals.revenue)}</strong><p>{source === 'bigin' ? 'Paid revenue less recorded refunds' : 'Paid product revenue'}</p></div></article>
           <article><span className="finance-metric-icon gross">◆</span><div><small>Gross profit</small><strong>{displayMoney(totals.grossProfit)}</strong><p>{percent(totals.grossProfit, totals.revenue)} of revenue</p></div></article>
           <article><span className="finance-metric-icon spend">$</span><div><small>Advertising spend</small><strong>{displayMoney(adsCostMeta + adsCostTiktok)}</strong><p>Meta + TikTok</p></div></article>
           <article className="net"><span className="finance-metric-icon net">●</span><div><small>{rangeLabel} net profit</small><strong>{displayMoney(totals.netProfit)}</strong><p>{percent(totals.netProfit, totals.revenue)} net margin</p></div></article>
@@ -256,9 +267,9 @@ function FinanceReport() {
               {displayRows.map((row, index) => <tr key={`${row.category}-${row.product}-${index}`}><td>{row.category}</td><td>{row.product}</td><td>{row.quantity}</td><td className="money-cell">{displayMoney(row.revenue, true)}</td><td>{percent(row.revenue, totals.revenue)}</td></tr>)}
               <tr><td>Revenue Loss</td><td>Cancelled</td><td>0</td><td className="money-cell">{displayMoney(report?.revenueLoss.cancelled ?? 0, true)}</td><td /></tr>
               <tr><td>Revenue Loss</td><td>Dispute</td><td>0</td><td className="money-cell">{displayMoney(report?.revenueLoss.dispute ?? 0, true)}</td><td /></tr>
-              <tr><td>Revenue Loss</td><td>Total Refund</td><td>0</td><td className="money-cell">{displayMoney(report?.revenueLoss.refund ?? 0, true)}</td><td /></tr>
+              <tr><td>Revenue Loss</td><td>Total Refund</td><td>{report?.refundCount ?? 0}</td><td className="money-cell">{displayMoney(report?.revenueLoss.refund ?? 0, true)}</td><td /></tr>
               <tr className="finance-total"><td /><th>Total Revenue</th><td>-</td><th className="money-cell">{displayMoney(totals.revenue)}</th><td /></tr>
-              <tr><td /><td>COGS</td><td /><td className="money-cell">{displayMoney(-totals.cogs)}</td><td>{percent(totals.cogs, totals.revenue)}</td></tr>
+              <tr><td /><td>{source === 'bigin' ? 'COGS (estimated 32%)' : 'COGS'}</td><td /><td className="money-cell">{displayMoney(-totals.cogs)}</td><td>{percent(totals.cogs, totals.revenue)}</td></tr>
               <tr className="finance-total"><td /><th>Gross Profit</th><td>-</td><th className="money-cell">{displayMoney(totals.grossProfit)}</th><th>{percent(totals.grossProfit, totals.revenue)}</th></tr>
               <tr><td>Expenses</td><td>Operation Cost</td><td /><td className="money-cell">{displayMoney(totals.grossProfit * 0.55)}</td><td>{percent(totals.grossProfit * 0.55, totals.grossProfit)}</td></tr>
               <tr><td>Expenses</td><td>Ads Cost Meta</td><td /><td className="money-cell">{displayMoney(adsCostMeta)}</td><td>{percent(adsCostMeta, totals.grossProfit)}</td></tr>
@@ -268,7 +279,7 @@ function FinanceReport() {
             </tbody>
           </table>
         </div>
-        <section className="finance-performance" aria-labelledby="finance-performance-title">
+        {source === 'hubspot' && <section className="finance-performance" aria-labelledby="finance-performance-title">
           <div className="finance-performance-heading">
             <div>
               <span>Customer performance</span>
@@ -314,11 +325,11 @@ function FinanceReport() {
               </tbody>
             </table>
           </div>
-        </section>
+        </section>}
           </div>
         </div>
       </section>
-    </main>
+    </Container>
   )
 }
 
