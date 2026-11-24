@@ -251,7 +251,7 @@ function FinanceReport({ source = 'hubspot', embedded = false }: { source?: 'hub
           </div>
         </div>
         {error && <p className="finance-error" role="alert">{error}</p>}
-        {source === 'bigin' && <p className="bigin-finance-method">Both pipelines, filtered by Paid Date in Eastern Time. Revenue is PAID deal amounts less recorded Refund-stage amounts. COGS is estimated at 32% of paid revenue; operating cost is 55% of gross profit. Meta and TikTok costs use the same saved campaign reports as Finance Report. Product amounts without linked items appear under unallocated revenue.</p>}
+        {source === 'bigin' && <p className="bigin-finance-method">Both pipelines, filtered by Paid Date in Eastern Time. Revenue is PAID deal amounts plus installment fees, less recorded Refund-stage amounts. COGS is estimated at 32% of paid revenue; operating cost is 55% of gross profit. Meta and TikTok costs use the same saved campaign reports as Finance Report. Installment fees and revenue not allocated to linked products appear under Others.</p>}
         <div className="finance-summary-grid" aria-label="Finance summary">
           <article><span className="finance-metric-icon revenue">↗</span><div><small>Total revenue</small><strong>{displayMoney(totals.revenue)}</strong><p>{source === 'bigin' ? 'Paid revenue less recorded refunds' : 'Paid product revenue'}</p></div></article>
           <article><span className="finance-metric-icon gross">◆</span><div><small>Gross profit</small><strong>{displayMoney(totals.grossProfit)}</strong><p>{percent(totals.grossProfit, totals.revenue)} of revenue</p></div></article>

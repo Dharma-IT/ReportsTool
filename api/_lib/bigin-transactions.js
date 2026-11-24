@@ -44,7 +44,7 @@ export async function getBiginTransactions(query, env = process.env) {
   const { from, to, pipeline, page } = validateTransactionQuery(query)
   const stage = query.get('report') === 'refunds' ? 'Refund' : 'PAID'
   const criteria = `(((Pipeline:equals:${pipeline})and(Stage:equals:${stage}))and(Paid_Date:between:${from},${to}))`
-  const result = await get('/Pipelines/search?' + new URLSearchParams({ criteria, page: String(page), per_page: '200', fields: 'Deal_Name,Owner,Amount,Contact_Name,Stage,Paid_Date,Phone_Number,Payment_Notes' }), env)
+  const result = await get('/Pipelines/search?' + new URLSearchParams({ criteria, page: String(page), per_page: '200', fields: 'Deal_Name,Owner,Amount,Installments,Contact_Name,Stage,Paid_Date,Phone_Number,Payment_Notes' }), env)
   if (page === 10 && result.info?.more_records) throw new Error('This date range exceeds Bigin?s 2,000-record search limit per pipeline. Choose a shorter date range to get a complete total.')
   const deals = result.data || []
   const ids = [...new Set(deals.map(d => d.Contact_Name?.id).filter(Boolean))]
@@ -55,7 +55,7 @@ export async function getBiginTransactions(query, env = process.env) {
   }
   const rows = deals.filter(d => d.Stage === stage && d.Paid_Date >= from && d.Paid_Date <= to).map(d => {
     const contact = contacts.get(d.Contact_Name?.id)
-    return { id: d.id, paidDate: d.Paid_Date, owner: d.Owner?.name || '', amount: Number(d.Amount || 0), contact: contact?.Full_Name || d.Contact_Name?.name || '', email: contact?.Email || '', phone: d.Phone_Number || contact?.Phone || contact?.Mobile || '', pipeline, dealName: d.Deal_Name || '', stage: d.Stage, firstName: contact?.First_Name || '', lastName: contact?.Last_Name || '', paymentNotes: d.Payment_Notes || '' }
+    return { id: d.id, paidDate: d.Paid_Date, owner: d.Owner?.name || '', amount: Number(d.Amount || 0), installmentFee: optionalNumber(d.Installments), contact: contact?.Full_Name || d.Contact_Name?.name || '', email: contact?.Email || '', phone: d.Phone_Number || contact?.Phone || contact?.Mobile || '', pipeline, dealName: d.Deal_Name || '', stage: d.Stage, firstName: contact?.First_Name || '', lastName: contact?.Last_Name || '', paymentNotes: d.Payment_Notes || '' }
   })
   return { rows, more: Boolean(result.info?.more_records) }
 }

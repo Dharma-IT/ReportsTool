@@ -24,3 +24,24 @@ test('product categories match finance rules and zero refund amounts remain zero
   assert.equal(r.totalRevenue,0)
   assert.equal(r.refundCount,1)
 })
+
+test('installment fees reconcile November 6 revenue and count once per eligible deal', () => {
+  const date = '2026-11-06'
+  const paid = [
+    { id: '1', stage: 'PAID', paidDate: date, amount: 799, installmentFee: 47.94 },
+    { id: '2', stage: 'PAID', paidDate: date, amount: 449.01, installmentFee: 26.94 },
+    { id: '3', stage: 'PAID', paidDate: date, amount: 799, installmentFee: 47.94 },
+    { id: '4', stage: 'PAID', paidDate: date, amount: 999, installmentFee: 59.94 },
+    { id: '5', stage: 'PAID', paidDate: date, amount: 3879.96, installmentFee: null },
+  ]
+  const items = paid.map(deal => ({ dealId: deal.id, source: 'Linked product', name: 'Subscription', itemAmount: deal.amount, quantity: 1, installmentFee: deal.installmentFee }))
+  const r = aggregateBiginFinance([...paid, paid[0], { id: 'lost', stage: 'LOST', paidDate: date, amount: 100, installmentFee: 6 }], [], items, date, { meta: 1054.36, tiktok: 403.29 })
+  assert.equal(r.totalRevenue, 7108.73)
+  assert.equal(r.reconciliationDifference, 182.76)
+  assert.equal(r.cogs, 2274.79)
+  const gross = r.totalRevenue - r.cogs
+  assert.equal(Math.round((gross * 0.45 - r.adsCostMeta - r.adsCostTiktok) * 100) / 100, 717.62)
+  const noProducts = aggregateBiginFinance([paid[0]], [], [], date)
+  assert.equal(noProducts.totalRevenue, 846.94)
+  assert.equal(noProducts.reconciliationDifference, 846.94)
+})

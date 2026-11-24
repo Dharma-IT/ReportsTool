@@ -1,4 +1,4 @@
-export type BiginTransaction = { id: string; paidDate: string; owner: string; amount: number; contact: string; email: string; phone: string; pipeline: string; dealName: string; stage: string; firstName?: string; lastName?: string; paymentNotes?: string }
+export type BiginTransaction = { id: string; paidDate: string; owner: string; amount: number; installmentFee?: number | null; contact: string; email: string; phone: string; pipeline: string; dealName: string; stage: string; firstName?: string; lastName?: string; paymentNotes?: string }
 export function getBiginTransactions(query: URLSearchParams, env?: Record<string, string | undefined>): Promise<{rows: BiginTransaction[]; more: boolean}>
 export function validateTransactionQuery(query: URLSearchParams): {from: string; to: string; pipeline: string; page: number}
 

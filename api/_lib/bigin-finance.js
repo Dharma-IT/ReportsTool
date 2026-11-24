@@ -23,7 +23,9 @@ export function aggregateBiginFinance(paid, refunds, items, reportDate, spend = 
     row.revenue = round(row.revenue + item.itemAmount)
     productRows.set(key, row)
   }
-  const paidRevenue = round([...eligible.values()].reduce((sum, deal) => sum + deal.amount, 0))
+  // Bigin stores installment charges separately from Amount. Count them once
+  // per paid deal, including deals with no linked products.
+  const paidRevenue = round([...eligible.values()].reduce((sum, deal) => sum + deal.amount + (Number.isFinite(deal.installmentFee) ? deal.installmentFee : 0), 0))
   const refundDeals = [...new Map(refunds.filter(deal => deal.stage === 'Refund' && deal.paidDate === reportDate).map(deal => [deal.id, deal])).values()]
   const refundLoss = -round(refundDeals.reduce((sum, deal) => sum + Math.abs(deal.amount), 0))
   const allocatedRevenue = round([...productRows.values()].reduce((sum, row) => sum + row.revenue, 0))
